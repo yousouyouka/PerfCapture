@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 /* 更新公告数据（照 TextAxis 的模式组织）
    - 版本线只保留「主.次」：1.1 / 1.2 / 1.3 / 1.4。
    - 每条记录：date（年月日，展示为 年.月.日）+ version（完整号，如 1.1.0）+ title + items。
@@ -18,6 +18,15 @@ window.PerfUpdateCategories = [
 window.PerfUpdateAreas = ['capture', 'realtime', 'other'];
 
 window.PerfUpdates = [
+  {
+    date: '2026-11-17', version: '1.5.2',
+    title: '修复：应用内更新时安装失败',
+    items: [
+      ['ux', '发现新版本改为弹窗二选一：「以后再说」只关弹窗（本次会话不再问同一版本），「立即更新」则下载校验后打开安装程序，并自动关闭当前窗口。', 'other'],
+      ['ux', '检查更新失败会自动等 15 秒重试（最多 3 次），不再一次失败就放弃；已是最新则停止检查。', 'other'],
+      ['fix', '应用内「运行安装包」原本必然失败：程序自己启动安装包却没退出，PerfCapture.exe 被占用，安装程序覆盖写时报错、一个文件都没换。现在安装程序会先关闭本程序再安装，被占用时还会「挪开旧文件再写新的」。', 'other']
+    ]
+  },
   {
     date: '2026-11-17', version: '1.5.1',
     title: '修复：卸载程序不再「安装」',

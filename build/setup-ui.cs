@@ -1,4 +1,4 @@
-// PerfCapture 安装向导（Inno Setup 风格五页向导：欢迎 / 目标位置 / 附加任务 / 安装进度 / 完成）
+﻿// PerfCapture 安装向导（Inno Setup 风格五页向导：欢迎 / 目标位置 / 附加任务 / 安装进度 / 完成）
 // 与 setup-core.cs 一起用 csc 编译成单个 exe。
 //
 // 排版规则（照 Inno Setup 的传统向导，不自定义花活）：
@@ -499,7 +499,7 @@ namespace PerfCaptureSetup
             }
 
             MessageBox.Show(this,
-                "安装失败：" + r.Error + "\r\n\r\n如果安装到 C:\\Program Files，请以管理员身份运行安装程序。",
+                "安装失败：" + r.Error + "\r\n\r\n常见原因：① PerfCapture 还在运行（先退出程序再装）；② 安装到 C:\\Program Files 需要以管理员身份运行安装程序。",
                 Program.AppName, MessageBoxButtons.OK, MessageBoxIcon.Error);
             ShowPage(1);
         }

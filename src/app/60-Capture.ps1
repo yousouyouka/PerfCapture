@@ -3,7 +3,7 @@
 # ---------- UI 消息处理 ----------
 # 白名单：只接受约定的命令；未知命令记日志并回传错误，绝不抛异常打断消息泵
 $script:KnownCommands = @('ready', 'refreshProcs', 'saveSettings', 'openReports', 'export', 'exportHtml', 'exportPng', 'exportDiag', 'start', 'stop',
-    'checkUpdate', 'downloadUpdate', 'cancelUpdate', 'openUpdatePage', 'runUpdateInstaller', 'openUpdateFolder', 'skipUpdateVersion', 'setUpdateAuto',
+    'checkUpdate', 'downloadUpdate', 'cancelUpdate', 'openUpdatePage', 'runUpdateInstaller', 'applyUpdate', 'openUpdateFolder', 'skipUpdateVersion', 'setUpdateAuto',
     'metricsStart', 'metricsStop', 'overlayToggle', 'overlayShow', 'overlayHide')
 
 function Handle-UiMessage($msg) {
@@ -15,7 +15,7 @@ function Handle-UiMessage($msg) {
     }
     # 检查更新的命令单独分发（宿主侧在 70-Updates.ps1，异步执行，不阻塞消息泵）
     if ($msg.cmd -in @('checkUpdate', 'downloadUpdate', 'cancelUpdate', 'openUpdatePage',
-            'runUpdateInstaller', 'openUpdateFolder', 'skipUpdateVersion', 'setUpdateAuto')) {
+            'runUpdateInstaller', 'applyUpdate', 'openUpdateFolder', 'skipUpdateVersion', 'setUpdateAuto')) {
         try { Invoke-UpdateCommand $msg }
         catch { Write-AppLog ('更新命令执行失败: ' + $_.Exception.Message) 'WARN' }
         return

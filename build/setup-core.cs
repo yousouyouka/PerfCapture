@@ -1,4 +1,4 @@
-// PerfCapture 安装程序（csc 就地编译，零第三方依赖）
+﻿// PerfCapture 安装程序（csc 就地编译，零第三方依赖）
 // 产物：PerfCapture-Setup-<版本>.exe，内嵌 payload.zip（= dist 目录内容）
 // 命令行：
 //   /S                       静默安装
@@ -25,6 +25,7 @@ namespace PerfCaptureSetup
         public bool NoDesktop;
         public bool NoMenu;
         public bool NoRun;
+        public bool RunAfterInstall;   // /RUN：静默装完后自动运行新版本（应用内更新走这条）
         public string Dir = "";
     }
 
@@ -119,6 +120,7 @@ namespace PerfCaptureSetup
                 else if (a.Equals("/NODESKTOP", StringComparison.OrdinalIgnoreCase)) o.NoDesktop = true;
                 else if (a.Equals("/NOMENU", StringComparison.OrdinalIgnoreCase)) o.NoMenu = true;
                 else if (a.Equals("/NORUN", StringComparison.OrdinalIgnoreCase)) o.NoRun = true;
+                else if (a.Equals("/RUN", StringComparison.OrdinalIgnoreCase)) o.RunAfterInstall = true;
                 else if (a.StartsWith("/D=", StringComparison.OrdinalIgnoreCase)) o.Dir = a.Substring(3).Trim('\"');
                 else if (a.StartsWith("-D=", StringComparison.OrdinalIgnoreCase)) o.Dir = a.Substring(3).Trim('"');
             }
@@ -141,6 +143,21 @@ namespace PerfCaptureSetup
                 if (opts.Silent)
                 {
                     Installer.Result r = Installer.Run(opts, info, null, null);
+                    // /RUN：静默更新装完直接运行新版本（不建快捷方式，见 /NODESKTOP /NOMENU）
+                    if (r.Ok && opts.RunAfterInstall)
+                    {
+                        try
+                        {
+                            string exe = Path.Combine(r.Dir, Program.AppName + ".exe");
+                            if (File.Exists(exe))
+                            {
+                                ProcessStartInfo psi = new ProcessStartInfo(exe);
+                                psi.WorkingDirectory = r.Dir;
+                                Process.Start(psi);
+                            }
+                        }
+                        catch (Exception ex) { Program.Log("静默安装后启动失败：" + ex.Message); }
+                    }
                     return r.Ok ? 0 : 1;
                 }
                 Application.EnableVisualStyles();
@@ -187,6 +204,18 @@ namespace PerfCaptureSetup
                     createdRoot = true;
                 }
 
+                // 覆盖安装：先把还开着的旧实例关掉 —— 否则文件虽然能换掉，用户眼前还是旧进程在跑
+                // （内存里是旧代码），看起来像「更新没生效」。关不掉也不会卡住安装：
+                // 下面释放文件时，遇到占用会「挪开旧的再写新的」（Windows 允许重命名正在使用的文件）。
+                bool upgrading = File.Exists(Path.Combine(res.Dir, Program.AppName + ".exe"));
+                if (upgrading)
+                {
+                    if (report != null) report(1, "正在关闭正在运行的程序…");
+                    CloseRunningApp(res.Dir, opts.Silent);
+                    // 进程被杀之后，它加载的 dll 句柄还会残留一小会儿，等它们真的可写再释放文件
+                    WaitForWritable(res.Dir, 12000);
+                }
+
                 using (Stream s = Program.OpenPayload())
                 using (ZipArchive zip = new ZipArchive(s, ZipArchiveMode.Read))
                 {
@@ -208,9 +237,8 @@ namespace PerfCaptureSetup
                         string dir = Path.GetDirectoryName(dest);
                         if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir)) Directory.CreateDirectory(dir);
                         using (Stream src = entry.Open())
-                        using (FileStream dst = File.Create(dest))
                         {
-                            src.CopyTo(dst);
+                            WriteFileReplacing(dest, src);
                         }
                         done++;
                         if (report != null) report((int)(90.0 * done / Math.Max(1, total)), "正在释放文件：" + Path.GetFileName(dest));
@@ -267,6 +295,168 @@ namespace PerfCaptureSetup
                 if (createdRoot && Directory.Exists(dir)) Directory.Delete(dir, true);
             }
             catch { }
+        }
+
+        // 覆盖安装前：把还开着的旧实例关掉。
+        //   ① 主窗口（宿主 powershell，标题就是程序名）→ 先礼貌关窗口
+        //   ② 关不掉再问用户（图形界面）或直接结束（静默安装）
+        //   ③ 兜底按「映像路径在安装目录下」结束（启动器无窗口，名字也叫 PerfCapture）
+        private static void CloseRunningApp(string dir, bool silent)
+        {
+            string target = "";
+            try { target = Path.GetFullPath(dir).TrimEnd('\\'); } catch { }
+
+            var hosts = new System.Collections.Generic.List<Process>();
+            foreach (Process p in Process.GetProcesses())
+            {
+                try
+                {
+                    if (p.Id == Process.GetCurrentProcess().Id) continue;
+                    string title = p.MainWindowTitle;
+                    if (!string.IsNullOrEmpty(title) && title.IndexOf(Program.AppName, StringComparison.OrdinalIgnoreCase) >= 0)
+                        hosts.Add(p);
+                }
+                catch { }
+            }
+
+            foreach (Process p in hosts)
+            {
+                try
+                {
+                    Program.Log("安装：请求关闭窗口「" + p.MainWindowTitle + "」(pid " + p.Id + ")");
+                    p.CloseMainWindow();
+                }
+                catch { }
+            }
+
+            // 等活动窗口收尾（WebView2 拆除要几秒）。
+            // 注意：跨提权读 HasExited 可能抛异常，读不到时必须当作「还活着」，否则会误判成已退出。
+            for (int i = 0; i < 40; i++)
+            {
+                bool anyAlive = false;
+                foreach (Process p in hosts)
+                {
+                    bool alive = true;
+                    try { p.Refresh(); alive = !p.HasExited; } catch { alive = true; }
+                    if (alive) { anyAlive = true; }
+                }
+                if (!anyAlive) break;
+                System.Threading.Thread.Sleep(250);
+            }
+
+            bool kill = silent;
+            if (!silent)
+            {
+                bool stillAlive = false;
+                foreach (Process p in hosts)
+                {
+                    bool alive = true;
+                    try { p.Refresh(); alive = !p.HasExited; } catch { alive = true; }
+                    if (alive) { stillAlive = true; }
+                }
+                if (stillAlive)
+                {
+                    DialogResult r = MessageBox.Show(
+                        Program.AppName + " 还在运行，安装需要先关闭它。\r\n\r\n是否结束这些进程并继续安装？",
+                        Program.AppName + " 安装程序", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+                    kill = (r == DialogResult.Yes);
+                }
+                else { kill = true; }
+            }
+
+            if (kill)
+            {
+                foreach (Process p in hosts)
+                {
+                    try
+                    {
+                        Program.Log("安装：结束进程 pid " + p.Id);
+                        p.Kill();
+                    }
+                    catch { }
+                }
+            }
+
+            if (kill || silent) KillProcessesFromDir(target);
+            System.Threading.Thread.Sleep(400);
+        }
+
+        // 结束所有「映像文件位于 dir 下」的进程（安装程序自己是例外）。
+        private static void KillProcessesFromDir(string dir)
+        {
+            if (string.IsNullOrEmpty(dir)) return;
+            string target = dir.TrimEnd('\\');
+            foreach (Process p in Process.GetProcesses())
+            {
+                try
+                {
+                    if (p.Id == Process.GetCurrentProcess().Id) continue;
+                    string path = "";
+                    try { path = p.MainModule.FileName; } catch { continue; }
+                    if (string.IsNullOrEmpty(path)) continue;
+                    string pdir = Path.GetDirectoryName(Path.GetFullPath(path));
+                    if (pdir == null) continue;
+                    if (!string.Equals(pdir.TrimEnd('\\'), target, StringComparison.OrdinalIgnoreCase)) continue;
+                    Program.Log("安装：结束该目录下的进程 " + p.ProcessName + " (pid " + p.Id + ")");
+                    p.Kill();
+                }
+                catch { }
+            }
+        }
+
+        // 写文件；目标被占用时先把它挪开（Windows 允许重命名正在使用的文件），再写新的。
+        // 旧文件留成 <name>.old，下次安装会覆盖或清掉。
+        private static void WriteFileReplacing(string dest, Stream src)
+        {
+            try
+            {
+                using (FileStream dst = File.Create(dest)) { src.CopyTo(dst); }
+                return;
+            }
+            catch (IOException)
+            {
+                string aside = dest + ".old";
+                Exception last = null;
+                for (int attempt = 0; attempt < 3; attempt++)
+                {
+                    try
+                    {
+                        if (File.Exists(aside)) { try { File.Delete(aside); } catch { } }
+                        File.Move(dest, aside);
+                        Program.Log("安装：文件被占用，已挪开旧的再写新的：" + dest);
+                        src.Position = 0;
+                        using (FileStream dst2 = File.Create(dest)) { src.CopyTo(dst2); }
+                        return;
+                    }
+                    catch (Exception ex)
+                    {
+                        last = ex;
+                        System.Threading.Thread.Sleep(800);
+                    }
+                }
+                throw new IOException("安装文件被占用且无法替换：" + dest, last);
+            }
+        }
+
+        // 等目录里的文件变成「可独占写入」（进程刚被杀时句柄释放有延迟）
+        private static void WaitForWritable(string dir, int timeoutMs)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            while (sw.ElapsedMilliseconds < timeoutMs)
+            {
+                string first = "";
+                try
+                {
+                    foreach (string f in Directory.GetFiles(dir, "*", SearchOption.AllDirectories))
+                    {
+                        try { using (FileStream fs = new FileStream(f, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) { } }
+                        catch { first = f; break; }
+                    }
+                }
+                catch { return; }
+                if (first.Length == 0) return;
+                System.Threading.Thread.Sleep(400);
+            }
         }
     }
 

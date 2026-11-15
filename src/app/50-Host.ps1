@@ -22,6 +22,7 @@ try {
 
 # ---------- 窗体 ----------
 $form = New-Object System.Windows.Forms.Form
+$script:MainForm = $form
 $form.Text = 'PerfCapture'
 $form.AutoScaleMode = 'None'
 $form.StartPosition = 'CenterScreen'

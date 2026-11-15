@@ -11,10 +11,16 @@
   const statusEl = byId('updateStatus');
   const btnCheck = byId('btnCheckUpdate');
   const chkAuto = byId('chkUpdateAuto');
+  const modal = byId('updModal');
+  const modalText = byId('updModalText');
+  const btnYes = byId('updModalYes');
+  const btnNo = byId('updModalNo');
   if (!banner || !btnCheck) return;
 
   let phase = 'idle';
   let info = {};
+  let pendingApply = false;     // 用户点过「立即更新」：下载完成后直接进安装并退出当前进程
+  let askedVersion = '';        // 本次会话已经问过哪个版本，避免重复弹窗
 
   const tx = (k, fb) => (typeof t === 'function' ? t(k, fb) : fb);
   const fill = (tpl, p) => Object.keys(p).reduce((s, k) => s.split('{' + k + '}').join(p[k]), tpl);
@@ -35,6 +41,28 @@
   }
   function hideBanner() { banner.hidden = true; }
 
+  /* ── 新版本二选一弹窗 ──
+     用户选择「以后再说」→ 只关弹窗（本次会话不再问同一版本，横幅仍可手动更新）；
+     选择「立即更新」→ 下载 → 校验 → 启动安装程序 → 宿主退出当前进程。 */
+  function openPrompt() {
+    if (!modal) return;
+    const v = info.version || '';
+    if (askedVersion === v) return;      // 同一版本只问一次
+    askedVersion = v;
+    if (modalText) {
+      modalText.textContent = fill(tx('update.dialogText', '新版本 v{v} 已发布。现在更新吗？'), { v: v });
+    }
+    modal.hidden = false;
+    try { if (btnYes) btnYes.focus(); } catch (e) { }
+  }
+  function closePrompt() { if (modal) modal.hidden = true; }
+
+  /** 交给宿主：先启动安装窗口，随后宿主关闭当前进程（避免覆盖正在使用的 dll） */
+  function applyNow() {
+    if (!info.path) { pendingApply = false; return; }
+    send({ cmd: 'applyUpdate', path: info.path, sha256: info.sha256 });
+  }
+
   function render() {
     switch (phase) {
       case 'checking':
@@ -52,6 +80,7 @@
         const extra = note();
         showBanner(bannerHead() + (extra ? ' · ' + extra : ''), tx('update.download', '下载'), true);
         btnCheck.disabled = false;
+        openPrompt();
         break;
       }
       case 'downloading':
@@ -68,9 +97,13 @@
         setStatus(tx('update.ready', '已下载并通过校验，可以安装'));
         showBanner(bannerHead(), tx('update.runInstaller', '运行安装包'), false);
         btnCheck.disabled = false;
+        closePrompt();
+        if (pendingApply) { pendingApply = false; applyNow(); }
         break;
       case 'error':
         hideBanner();
+        closePrompt();
+        pendingApply = false;
         setStatus(tx('update.error', '检查更新失败') + (info.hint ? ' · ' + tx(info.hint, '') : ''));
         btnCheck.disabled = false;
         break;
@@ -102,9 +135,23 @@
     if (phase === 'available') {
       send({ cmd: 'downloadUpdate', name: info.name, sha256: info.sha256, size: info.size, urls: info.urls || [] });
     } else if (phase === 'ready') {
+      // 横幅上的「运行安装包」：只起安装程序（宿主不退出）；弹窗里的「立即更新」才会装完退出
       send({ cmd: 'runUpdateInstaller', path: info.path, sha256: info.sha256 });
     }
   });
+
+  // 弹窗：否 → 只关；是 → 下载（若已就绪直接安装）
+  if (btnNo) {
+    btnNo.addEventListener('click', () => { closePrompt(); });
+  }
+  if (btnYes) {
+    btnYes.addEventListener('click', () => {
+      closePrompt();
+      if (phase === 'ready') { applyNow(); return; }
+      pendingApply = true;
+      send({ cmd: 'downloadUpdate', name: info.name, sha256: info.sha256, size: info.size, urls: info.urls || [] });
+    });
+  }
 
   btnSkip.addEventListener('click', () => {
     if (info.version) send({ cmd: 'skipUpdateVersion', version: info.version });

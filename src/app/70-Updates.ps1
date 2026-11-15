@@ -34,6 +34,11 @@ $script:UpdateMaxAssetBytes = 62914560
 $script:UpdateAutoCheckDelayMs = 12000
 
 $script:UpdateState = 'idle'        # idle|checking|latest|available|downloading|verifying|ready|error
+# 检查失败自动重试：等待 15 秒再查，最多 3 次（失败多半是断网/镜像抖动，重启程序太粗暴）
+$script:UpdateRetryCount = 0
+$script:UpdateRetryTimer = $null
+$script:UpdateExitTimer = $null
+$script:UpdateExitRequested = $false
 $script:UpdateAutoCheckDone = $false
 $script:UpdateCtx = $null
 $script:UpdateTimer = $null
@@ -267,11 +272,13 @@ function Complete-UpdateCheck {
             Write-AppLog ('所有可取到的清单都验签失败，已拒绝: ' + $detail) 'WARN'
             $script:UpdateState = 'error'
             Send-UpdateState @{ state = 'error'; reason = $Ctx.Reason; detail = 'signature'; hint = 'update.hint.tampered'; sources = $detail }
+            Schedule-UpdateRetry $Ctx.Reason
             return
         }
         Write-AppLog ('检查更新失败（所有源都不通）: ' + $detail) 'WARN'
         $script:UpdateState = 'error'
         Send-UpdateState @{ state = 'error'; reason = $Ctx.Reason; detail = $detail; hint = 'update.hint.offline' }
+            Schedule-UpdateRetry $Ctx.Reason
         return
     }
 
@@ -281,6 +288,7 @@ function Complete-UpdateCheck {
         Write-AppLog ('清单验签失败，已拒绝: ' + $obj.url) 'WARN'
         $script:UpdateState = 'error'
         Send-UpdateState @{ state = 'error'; reason = $Ctx.Reason; detail = 'signature'; hint = 'update.hint.tampered' }
+            Schedule-UpdateRetry $Ctx.Reason
         return
     }
     # 有源被跳过（签名错配 / 体积超限 / 重定向等）：正常也要记一笔，方便排查镜像问题
@@ -294,6 +302,7 @@ function Complete-UpdateCheck {
         Write-AppLog '清单内容不合法（缺 version）' 'WARN'
         $script:UpdateState = 'error'
         Send-UpdateState @{ state = 'error'; reason = $Ctx.Reason; detail = 'schema'; hint = 'update.hint.tampered' }
+            Schedule-UpdateRetry $Ctx.Reason
         return
     }
 
@@ -327,6 +336,7 @@ function Complete-UpdateCheck {
         Write-AppLog '清单里的资产信息不合法（名称/大小/哈希/地址），已拒绝' 'WARN'
         $script:UpdateState = 'error'
         Send-UpdateState @{ state = 'error'; reason = $Ctx.Reason; detail = 'asset'; hint = 'update.hint.tampered' }
+        Schedule-UpdateRetry $Ctx.Reason
         return
     }
 
@@ -529,6 +539,92 @@ function Start-UpdateAutoCheck {
     $script:UpdateDelayTimer = $delay
 }
 
+# ---------- 检查失败：等 15 秒再来一次（启动自动检查最多 10 次；手动检查不重试） ----------
+function Schedule-UpdateRetry([string]$Reason) {
+    # 手动点的检查：失败就失败，不自动重试（用户就在屏幕前，让他自己决定）
+    if ($Reason -eq 'manual') { return }
+    if ($script:Cfg.updateCheck -and $script:Cfg.updateCheck.auto -eq $false) { return }
+    if ($script:UpdateRetryCount -ge 10) {
+        Write-AppLog '检查更新连续失败 10 次，本次会话不再重试'
+        return
+    }
+    $script:UpdateRetryCount++
+    if ($script:UpdateRetryTimer) { try { $script:UpdateRetryTimer.Stop(); $script:UpdateRetryTimer.Dispose() } catch { }; $script:UpdateRetryTimer = $null }
+    $n = $script:UpdateRetryCount
+    $rt = New-Object System.Windows.Forms.Timer
+    $rt.Interval = 15000
+    $rt.add_Tick({
+        try { $rt.Stop(); $rt.Dispose() } catch { }
+        $script:UpdateRetryTimer = $null
+        Write-AppLog ("检查更新失败，15 秒后自动重试（第 {0} / 10 次）" -f $n)
+        Start-UpdateCheck -Reason 'retry'
+    })
+    $rt.Start()
+    $script:UpdateRetryTimer = $rt
+    Write-AppLog ("检查更新失败（$Reason），15 秒后重试（第 $n 次）")
+}
+
+# ---------- 校验并定位下载好的安装包（只认更新目录内的文件 + 二次校验哈希） ----------
+function Resolve-UpdateInstaller([string]$path, [string]$sha256) {
+    $root = [IO.Path]::GetFullPath((Join-Path $env:TEMP 'PerfCapture\updates'))
+    $full = ''
+    try { $full = [IO.Path]::GetFullPath($path) } catch { }
+    # 只允许运行我们自己下载到临时目录里的文件（UI 消息被伪造也执行不到别处）
+    if (-not $full -or -not $full.StartsWith($root, [StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path -LiteralPath $full)) {
+        Write-AppLog ('拒绝运行不在更新目录内的文件: ' + $path) 'ERROR'
+        Send-UpdateState @{ state = 'error'; detail = 'path'; hint = 'update.hint.tampered' }
+        return $null
+    }
+    if ($sha256 -match '^[0-9a-fA-F]{64}$') {
+        $h = (Get-FileHash -LiteralPath $full -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($h -ne $sha256.ToLowerInvariant()) {
+            Write-AppLog '安装包哈希已变化，拒绝运行' 'ERROR'
+            Send-UpdateState @{ state = 'error'; detail = 'integrity'; hint = 'update.hint.tampered' }
+            return $null
+        }
+    } else {
+        Write-AppLog '缺少可用哈希，拒绝运行安装包' 'ERROR'
+        Send-UpdateState @{ state = 'error'; detail = 'integrity'; hint = 'update.hint.tampered' }
+        return $null
+    }
+    return $full
+}
+
+# ---------- 当前安装目录（更新要直接覆盖这里，不再让用户选路径） ----------
+function Get-UpdateInstallDir {
+    try {
+        $reg = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\PerfCapture'
+        if (Test-Path $reg) {
+            $v = (Get-ItemProperty -Path $reg -Name 'InstallLocation' -ErrorAction SilentlyContinue).InstallLocation
+            if ($v -and (Test-Path -LiteralPath $v)) { return [IO.Path]::GetFullPath([string]$v) }
+        }
+    } catch { }
+    # 没有注册表信息（绿色版）就覆盖当前正在运行的这份
+    if ($script:Root) { return [IO.Path]::GetFullPath($script:Root) }
+    return ''
+}
+
+# ---------- 更新安装窗口起来后，退出当前进程 ----------
+# 不退出的话安装程序写 lib\*.dll 会被占用（实测 IOException），用户眼前也会留个旧实例。
+function Request-AppExitForUpdate {
+    $script:UpdateExitRequested = $true
+    if ($script:UpdateExitTimer) { try { $script:UpdateExitTimer.Stop(); $script:UpdateExitTimer.Dispose() } catch { }; $script:UpdateExitTimer = $null }
+    $t = New-Object System.Windows.Forms.Timer
+    $t.Interval = 1500
+    $t.add_Tick({
+        try { $t.Stop(); $t.Dispose() } catch { }
+        $script:UpdateExitTimer = $null
+        try {
+            if ($script:MainForm) { $script:MainForm.Close() }
+            elseif ($form) { $form.Close() }
+        } catch {
+            Write-AppLog ('退出进程失败: ' + $_.Exception.Message) 'WARN'
+        }
+    })
+    $t.Start()
+    $script:UpdateExitTimer = $t
+}
+
 # ---------- 公开操作（供桥接调用） ----------
 function Invoke-UpdateCommand {
     param($Msg)
@@ -559,31 +655,25 @@ function Invoke-UpdateCommand {
             try { Start-Process 'https://github.com/yousouyouka/PerfCapture/releases' } catch { }
         }
         'runUpdateInstaller' {
-            $path = [string]$Msg.path
-            $root = [IO.Path]::GetFullPath((Join-Path $env:TEMP 'PerfCapture\updates'))
-            $full = ''
-            try { $full = [IO.Path]::GetFullPath($path) } catch { }
-            # 只允许运行我们自己下载到临时目录里的文件（UI 消息被伪造也执行不到别处）
-            if (-not $full -or -not $full.StartsWith($root, [StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path -LiteralPath $full)) {
-                Write-AppLog ('拒绝运行不在更新目录内的文件: ' + $path) 'ERROR'
-                Send-UpdateState @{ state = 'error'; detail = 'path'; hint = 'update.hint.tampered' }
-                return
-            }
-            # 二次校验：跑安装包前再算一次哈希，防止下载后被替换
-            $sha = [string]$Msg.sha256
-            if ($sha -match '^[0-9a-fA-F]{64}$') {
-                $h = (Get-FileHash -LiteralPath $full -Algorithm SHA256).Hash.ToLowerInvariant()
-                if ($h -ne $sha.ToLowerInvariant()) {
-                    Write-AppLog '安装包哈希已变化，拒绝运行' 'ERROR'
-                    Send-UpdateState @{ state = 'error'; detail = 'integrity'; hint = 'update.hint.tampered' }
-                    return
-                }
-            } else {
-                Write-AppLog '缺少可用哈希，拒绝运行安装包' 'ERROR'
-                Send-UpdateState @{ state = 'error'; detail = 'integrity'; hint = 'update.hint.tampered' }
-                return
-            }
+            $full = Resolve-UpdateInstaller ([string]$Msg.path) ([string]$Msg.sha256)
+            if (-not $full) { return }
             try { Start-Process -FilePath $full } catch { Write-AppLog ('启动安装包失败: ' + $_.Exception.Message) 'ERROR' }
+        }
+        'applyUpdate' {
+            # 用户点了「立即更新」：静默覆盖安装到**当前安装目录**（不弹路径选择、不建快捷方式），
+            # 安装完成后自动运行新版本，并把当前进程退出（否则 lib\*.dll 被占用）。
+            $full = Resolve-UpdateInstaller ([string]$Msg.path) ([string]$Msg.sha256)
+            if (-not $full) { return }
+            $dir = Get-UpdateInstallDir
+            try {
+                $args = @('/S', ('/D="' + $dir + '"'), '/NODESKTOP', '/NOMENU', '/RUN')
+                Write-AppLog ('启动安装程序（静默覆盖）: ' + $full + ' → ' + $dir)
+                Start-Process -FilePath $full -ArgumentList $args
+                Request-AppExitForUpdate
+            } catch {
+                Write-AppLog ('启动安装包失败: ' + $_.Exception.Message) 'ERROR'
+                Send-UpdateState @{ state = 'error'; detail = 'launch'; hint = 'update.hint.download' }
+            }
         }
         'openUpdateFolder' {
             $path = [string]$Msg.path

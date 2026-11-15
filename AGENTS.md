@@ -65,6 +65,19 @@ build\          pack.ps1 · launcher.cs · setup-core.cs · setup-ui.cs · setup
 - 新页面/新板块的样式写进自己的 css 并在 `index.html` 按顺序加载；并列的工具行可以共用一组选择器
   （见 `updates.css` 的 `.updates-areas, .updates-filters`）。
 
+## 发布决策（硬规则）
+
+- **是否发布由用户决定**。新版本一旦对外（tag、GitHub Release、`updates` 分支、`latest.json`、镜像同步），
+  就再也收不回来 —— 所以这些动作**必须先得到用户明确同意**。
+- **内容已改好 ≠ 要发布**。仓库里攒了新版本、`updates\*.json` 与签名都生成好了、冒烟也全过，
+  **都不构成发布理由**；每一版都要**用户单独点头**，一次同意只对那一版有效，不能沿用上一次。
+- 准备就绪后智能体应当**停下来问**：「是否发布 vX.Y.Z？」，并列出待执行动作
+  （打 tag / 发 Release / push `updates` 分支 / 推送清单），等用户答复再动。
+- 智能体只负责：跑冒烟与打包、生成 `updates\*.json` 与签名、准备好待执行的命令；
+  **不自行 push tag、不自行发 Release、不自行推 `updates` 分支**。
+- 检查更新的自动行为：**每次启动最多检查一次**；没发现新版本就**停止本次会话的自动检查**
+  （下次启动恢复）；发现新版本提示后同样不再重复检查，直到用户操作或重启。
+
 ## 版本号规则（务必照做）
 
 `主.次.修补` 三段分别是什么、谁能动：
@@ -91,6 +104,11 @@ build\          pack.ps1 · launcher.cs · setup-core.cs · setup-ui.cs · setup
   替换时留意许可，并同步 `deps\deps.json` 的说明。
 - 提交前跑 `tests\smoke.ps1` 与 `build\pack.ps1`（打包脚本的绝对路径审计会拦住个人路径泄漏）。
 - 版本标签用 `v<完整版本号>`（如 `v1.3.10`），与 `VERSION` 文件一致。
+- 检查更新的发布链路：`build\pack.ps1` 生成 `updates\*.json` 与签名 → `build\push-updates.ps1`
+  把安装包与清单推到 **`updates` 分支**（jsDelivr / raw 都从这条分支取）→ 需要 Release 时再 `gh release create`。
+  `push-updates.ps1` **不带 `-Yes` 只打印计划**，分支上只留最近 2 个版本的资产。
+- `updates` 分支里的清单要 `.gitattributes: * -text`（关闭换行转换）：签名按**字节**算，
+  LF→CRLF 会让验签失败；脚本提交前会自证分支 blob 字节与本地一致。
 
 ## 边界
 

@@ -19,6 +19,16 @@ window.PerfUpdateAreas = ['capture', 'realtime', 'other'];
 
 window.PerfUpdates = [
   {
+    date: '2026-11-16', version: '1.4.0',
+    title: '检查更新：多源清单 + 签名 + 本地校验',
+    items: [
+      ['feature', '设置 → 关于新增「检查更新」按钮与「启动时自动检查」开关；更新公告页顶部在有新版本时出现提示条，可直接下载或跳过此版本。', 'other'],
+      ['install', '清单走多源回退（jsDelivr → GitHub raw → GitHub API），下载也按多源来；全部不通时只提示手动下载，不影响正常使用。', 'other'],
+      ['install', '安全：清单用 RSA-2048/SHA-256 验签，安装包按清单里的 SHA-256 与大小在本地校验，不符立即删除；绝不自动安装。', 'other'],
+      ['install', '自动检查每次启动只做一次：没发现新版本就停止本次会话的自动检查，下次启动恢复。', 'other']
+    ]
+  },
+  {
     date: '2026-11-15', version: '1.3.10',
     title: '版本号规则与样式规范写入 AGENTS.md',
     items: [
@@ -138,6 +148,7 @@ window.PerfUpdates = [
 
 /* 版本记录（只到「主.次」）：date 是该版本线第一条改动的日期 */
 window.PerfUpdateVersions = [
+  { version: '1.4', date: '2026-11-16' },
   { version: '1.3', date: '2026-11-15' },
   { version: '1.2', date: '2026-11-14' },
   { version: '1.1', date: '2026-11-13' }

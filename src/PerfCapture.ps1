@@ -16,6 +16,7 @@ foreach ($f in @(
     '40-Bridge.ps1',
     '50-Host.ps1',
     '60-Capture.ps1',
+    '70-Updates.ps1',
     '90-Main.ps1'
 )) {
     $full = Join-Path $appDir $f

@@ -9,6 +9,13 @@ $script:TempHtml = Join-Path $TempDir 'preview.html'
 $script:LibDir   = Join-Path $Root 'lib'
 $script:ToolsDir = Join-Path $Root 'tools'
 
+# 当前版本（VERSION 文件）：检查更新要用它做比较，界面也用它显示
+$script:AppVersion = '0.0.0'
+try {
+    $verPath = Join-Path $Root 'VERSION'
+    if (Test-Path $verPath) { $script:AppVersion = (Get-Content $verPath -Raw -Encoding UTF8).Trim() }
+} catch { }
+
 # ---------- 数据目录（配置 + 报告） ----------
 # 安装包会把程序装到 %LOCALAPPDATA%\Programs\PerfCapture（或用户自选目录），
 # 安装目录不该承载用户数据：配置与报告统一放 %LOCALAPPDATA%\PerfCapture。

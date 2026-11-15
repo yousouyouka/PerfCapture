@@ -40,6 +40,7 @@ function handleMessage(msg) {
       }
       applyTheme(s.theme || 'system');
       if (s.language) { state.language = s.language; setLanguage(s.language); }
+      if (window.PerfUpdate) window.PerfUpdate.init(s.updateCheck);
       if (msg.procs) setProcs(msg.procs);
       applyTranslations();
       break;
@@ -62,6 +63,7 @@ function handleMessage(msg) {
     case 'report': renderReport(msg.data); break;
     case 'busy': setBusy(!!msg.value); break;
     case 'theme': applyTheme(msg.mode); break;
+    case 'update': if (window.PerfUpdate) window.PerfUpdate.handle(msg); break;
     case 'error': addLog('[错误] ' + msg.text, 'ln-warn'); setStatus(msg.text || '出错'); break;
     default: break;
   }

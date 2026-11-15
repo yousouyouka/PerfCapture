@@ -102,6 +102,24 @@ const I18N = {
     'settings.language': '页面语言',
     'settings.languageHint': '界面与报告正文同时切换',
     'settings.about': '关于',
+    'settings.update': '检查更新',
+    'settings.updateAuto': '启动时自动检查',
+    'settings.updateIdle': '启动后会自动检查一次，也可以手动点按钮',
+    'settings.updateLast': '上次检查：{t}',
+    'update.checking': '正在检查更新…',
+    'update.latest': '已是最新版本（v{v}）',
+    'update.available': '发现新版本 v{v}',
+    'update.banner': '有新版本 v{v}',
+    'update.download': '下载',
+    'update.downloading': '正在下载… {pct}%',
+    'update.verifying': '正在校验完整性…',
+    'update.ready': '已下载并通过校验，可以安装',
+    'update.runInstaller': '运行安装包',
+    'update.skip': '跳过此版本',
+    'update.error': '检查更新失败',
+    'update.hint.offline': '网络不通，可稍后重试或手动下载',
+    'update.hint.tampered': '校验未通过，已拒绝（可能被篡改）',
+    'update.hint.download': '下载失败，稍后再试',
 
     'status.ready': '选择进程后点「开始采集」',
     'status.capturing': '采集中…',
@@ -304,6 +322,24 @@ const I18N = {
     'settings.language': 'Language',
     'settings.languageHint': 'Switches both the interface and the report text',
     'settings.about': 'About',
+    'settings.update': 'Updates',
+    'settings.updateAuto': 'Check on startup',
+    'settings.updateIdle': 'Checks once after launch; you can also check manually',
+    'settings.updateLast': 'Last check: {t}',
+    'update.checking': 'Checking for updates…',
+    'update.latest': "You're on the latest version (v{v})",
+    'update.available': 'New version v{v} available',
+    'update.banner': 'New version v{v} available',
+    'update.download': 'Download',
+    'update.downloading': 'Downloading… {pct}%',
+    'update.verifying': 'Verifying integrity…',
+    'update.ready': 'Downloaded and verified — ready to install',
+    'update.runInstaller': 'Run installer',
+    'update.skip': 'Skip this version',
+    'update.error': 'Update check failed',
+    'update.hint.offline': 'Network unreachable — retry later or download manually',
+    'update.hint.tampered': 'Verification failed, rejected (possible tampering)',
+    'update.hint.download': 'Download failed, please try again later',
 
     'status.ready': 'Pick a process, then start capturing',
     'status.capturing': 'Capturing…',
@@ -505,6 +541,24 @@ const I18N = {
     'settings.language': '表示言語',
     'settings.languageHint': 'インターフェースとレポート本文を同時に切り替えます',
     'settings.about': 'このアプリについて',
+    'settings.update': '更新の確認',
+    'settings.updateAuto': '起動時に自動確認',
+    'settings.updateIdle': '起動後に一度だけ自動確認します（手動でも確認できます）',
+    'settings.updateLast': '最終確認：{t}',
+    'update.checking': '更新を確認しています…',
+    'update.latest': '最新バージョンです（v{v}）',
+    'update.available': '新しいバージョン v{v} があります',
+    'update.banner': '新しいバージョン v{v} があります',
+    'update.download': 'ダウンロード',
+    'update.downloading': 'ダウンロード中… {pct}%',
+    'update.verifying': '整合性を確認しています…',
+    'update.ready': 'ダウンロード完了・検証済み。インストールできます',
+    'update.runInstaller': 'インストーラーを実行',
+    'update.skip': 'このバージョンをスキップ',
+    'update.error': '更新の確認に失敗しました',
+    'update.hint.offline': 'ネットワークに接続できません。後でもう一度試すか手動でダウンロードしてください',
+    'update.hint.tampered': '検証に失敗したため拒否しました（改ざんの可能性）',
+    'update.hint.download': 'ダウンロードに失敗しました。後でもう一度お試しください',
 
     'status.ready': 'プロセスを選んでから計測を開始してください',
     'status.capturing': '計測中…',
@@ -634,9 +688,10 @@ function applyTranslations(root) {
     const val = t(el.dataset.i18nTitle, null);
     if (val != null) el.title = val;
   });
-  // 更新公告的卡片/分类/日期是 JS 生成的，语言切换后要按新词典重画
+  // 更新公告 / 问卷 / 检查更新都有 JS 生成的文案，语言切换后要按新词典重画
   if (typeof window.__refreshUpdates === 'function') window.__refreshUpdates();
   if (typeof window.__refreshSurvey === 'function') window.__refreshSurvey();
+  if (window.PerfUpdate && typeof window.PerfUpdate.refresh === 'function') window.PerfUpdate.refresh();
 }
 
 function setLanguage(lang) {

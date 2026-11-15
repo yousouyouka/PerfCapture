@@ -332,3 +332,22 @@
   padding: 0.1rem 0.55rem;
 }
 .realtime-desc { margin: 0; font-size: 0.74rem; line-height: 1.7; color: var(--muted); }
+
+/* ── 检查更新横幅（更新公告页顶部）与设置页控件 ── */
+.update-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+  background: var(--accent-soft);
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  padding: 0.6rem 0.85rem;
+  font-size: 0.76rem;
+  color: var(--text-strong);
+}
+.update-banner[hidden] { display: none; }
+.update-banner-actions { display: flex; align-items: center; gap: 0.5rem; }
+.update-actions { display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap; margin-top: 0.5rem; }
+#updateStatus { line-height: 1.6; }

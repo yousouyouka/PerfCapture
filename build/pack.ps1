@@ -4,7 +4,9 @@
 [CmdletBinding()]
 param(
     [string]$Version = '',
-    [switch]$NoZip
+    [switch]$NoZip,
+    [string]$ReleaseDate = '',   # 更新清单里的发布日期（默认今天；发版时显式传）
+    [switch]$NoManifest          # 只打包、不生成更新清单（调试用）
 )
 
 $ErrorActionPreference = 'Stop'
@@ -147,6 +149,80 @@ $manifest = Join-Path $buildDir 'setup-dpi.manifest'
 if (-not (Test-Path $setupOut)) { throw '安装包编译失败' }
 Remove-Item $payload -Force -ErrorAction SilentlyContinue
 Write-Host ("  ✅ 安装包: $setupOut  ({0} MB)" -f [math]::Round((Get-Item $setupOut).Length / 1MB, 1))
+# ---------- 9. 更新清单 + 签名（updates\latest.json 与 manifest-<版本>.json） ----------
+# 清单是客户端"检查更新"的唯一依据：多源读取 → RSA 验签 → 版本比较 → 按 sha256 校验安装包。
+# 私钥在 %LOCALAPPDATA%\PerfCapture\keys\，绝不进仓库；公钥硬编码在 src\app\70-Updates.ps1。
+if (-not $NoManifest) {
+    $updatesDir = Join-Path $root 'updates'
+    if (-not (Test-Path $updatesDir)) { New-Item -ItemType Directory -Path $updatesDir -Force | Out-Null }
+    $repoSlug = 'yousouyouka/PerfCapture'
+    $zipOut = Join-Path $distRoot "PerfCapture-$Version.zip"
+    $relDate = if ($ReleaseDate) { $ReleaseDate } else { Get-Date -Format 'yyyy-MM-dd' }
+
+    function Get-AssetEntry([string]$file, [string]$kind) {
+        $name = Split-Path $file -Leaf
+        return [ordered]@{
+            kind = $kind
+            name = $name
+            size = (Get-Item -LiteralPath $file).Length
+            sha256 = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+            urls = @(
+                "https://cdn.jsdelivr.net/gh/$repoSlug@updates/bin/$name"
+                "https://raw.githubusercontent.com/$repoSlug/updates/bin/$name"
+                "https://ghproxy.net/https://github.com/$repoSlug/releases/download/v$Version/$name"
+                "https://github.com/$repoSlug/releases/download/v$Version/$name"
+            )
+        }
+    }
+
+    # 更新说明：取 CHANGELOG 里该版本标题
+    $notesZh = ''
+    try {
+        $cl = Get-Content (Join-Path $stage 'CHANGELOG.md') -Raw -Encoding UTF8
+        $m = [regex]::Match($cl, ("(?m)^##\s+" + [regex]::Escape($Version) + "\s+—\s+\S+（([^）]+)）"))
+        if ($m.Success) { $notesZh = $m.Groups[1].Value }
+    } catch { }
+    if (-not $notesZh) { $notesZh = "发布 $Version" }
+
+    # serial 单调递增（防重放：拿旧清单冒充新版）
+    $serial = 1
+    $latestPath = Join-Path $updatesDir 'latest.json'
+    if (Test-Path $latestPath) {
+        try {
+            $prev = Get-Content $latestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($prev.serial) { $serial = [int]$prev.serial + 1 }
+        } catch { }
+    }
+
+    $assets = @()
+    if (Test-Path $setupOut) { $assets += Get-AssetEntry $setupOut 'setup' }
+    if (Test-Path $zipOut) { $assets += Get-AssetEntry $zipOut 'zip' }
+
+    $manifestObj = [ordered]@{
+        schema = 1
+        app = 'PerfCapture'
+        channel = 'stable'
+        version = $Version
+        date = $relDate
+        serial = $serial
+        notes = [ordered]@{ zh = $notesZh; en = 'See the release notes in the app (What''s new).'; ja = 'アプリ内の更新情報をご覧ください。' }
+        assets = $assets
+    }
+    $json = ($manifestObj | ConvertTo-Json -Depth 6)
+    $enc = New-Object Text.UTF8Encoding($false)
+    $versionPath = Join-Path $updatesDir "manifest-$Version.json"
+    [IO.File]::WriteAllText($versionPath, $json, $enc)
+    [IO.File]::WriteAllText($latestPath, $json, $enc)
+
+    $privKey = Join-Path $env:LOCALAPPDATA 'PerfCapture\keys\update-signing-private.xml'
+    if (Test-Path $privKey) {
+        & (Join-Path $buildDir 'sign-manifest.ps1') -Path @($versionPath, $latestPath) | ForEach-Object { "     $_" }
+        Write-Host ("  ✅ 更新清单已生成并签名（版本 $Version · serial $serial · 日期 $relDate）")
+    } else {
+        Write-Host "  ⚠ 未找到签名私钥，清单未签名：$privKey" -ForegroundColor Yellow
+        Write-Host '     未签名的清单会被客户端拒绝（验签失败）。发布前务必先签名。' -ForegroundColor Yellow
+    }
+}
 Write-Host '== 打包完成 ==' -ForegroundColor Green
 Write-Host "  绿色目录: $stage"
 Write-Host '  直接双击 PerfCapture.exe 即可运行（首次会弹一次 UAC）'

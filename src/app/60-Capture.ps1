@@ -2,13 +2,21 @@
 
 # ---------- UI 消息处理 ----------
 # 白名单：只接受约定的命令；未知命令记日志并回传错误，绝不抛异常打断消息泵
-$script:KnownCommands = @('ready', 'refreshProcs', 'saveSettings', 'openReports', 'export', 'exportHtml', 'exportPng', 'start', 'stop')
+$script:KnownCommands = @('ready', 'refreshProcs', 'saveSettings', 'openReports', 'export', 'exportHtml', 'exportPng', 'start', 'stop',
+    'checkUpdate', 'downloadUpdate', 'cancelUpdate', 'openUpdatePage', 'runUpdateInstaller', 'openUpdateFolder', 'skipUpdateVersion', 'setUpdateAuto')
 
 function Handle-UiMessage($msg) {
     if ($null -eq $msg -or -not $msg.cmd) { return }
     if ($msg.cmd -notin $script:KnownCommands) {
         Write-AppLog ('未知命令已被拒绝: ' + $msg.cmd) 'WARN'
         Send-ToUi @{ type = 'error'; text = ('不支持的命令: ' + $msg.cmd) }
+        return
+    }
+    # 检查更新的命令单独分发（宿主侧在 70-Updates.ps1，异步执行，不阻塞消息泵）
+    if ($msg.cmd -in @('checkUpdate', 'downloadUpdate', 'cancelUpdate', 'openUpdatePage',
+            'runUpdateInstaller', 'openUpdateFolder', 'skipUpdateVersion', 'setUpdateAuto')) {
+        try { Invoke-UpdateCommand $msg }
+        catch { Write-AppLog ('更新命令执行失败: ' + $_.Exception.Message) 'WARN' }
         return
     }
     try {
@@ -34,6 +42,8 @@ function Handle-UiMessage($msg) {
                 }
                 Send-Log '  就绪：选择目标进程后点「开始采集」'
                 Write-AppLog ('UI 就绪，可用进程 ' + @($procs).Count + ' 个')
+                # 启动后 12 秒自动检查一次更新（本次会话只查一次；无更新就停，下次启动恢复）
+                Start-UpdateAutoCheck
             }
             'refreshProcs' {
                 Send-ToUi @{ type = 'procs'; procs = (Get-ProcessChoices) }

@@ -356,14 +356,14 @@ if ($dataJs -notmatch 'window\.PerfUpdateVersions') { Bad 'updates-data.js 缺 w
 if ($dataJs -match "time:\s*'") { Bad '更新公告数据里还有 time 字段（应只写日期）' }
 if ($dataJs -match 'approx') { Bad '更新公告数据里还有 approx（约等于时间已取消）' }
 $verList = [regex]::Matches($dataJs, "version:\s*'([0-9.]+)',\s*date:") | ForEach-Object { $_.Groups[1].Value }
-if ($verList.Count -ne 3) { Bad "版本记录应有三条（1.3 / 1.2 / 1.1），实际 $($verList.Count) 条" }
-elseif (($verList -join ',') -ne '1.3,1.2,1.1') { Bad "版本记录顺序不对：$($verList -join ' , ')" }
-if ($dataJs -match "version: '1\.4'") { Bad '版本线里还有 1.4（应合并回 1.3）' }
+if ($verList.Count -ne 4) { Bad "版本记录应有四条（1.4 / 1.3 / 1.2 / 1.1），实际 $($verList.Count) 条" }
+elseif (($verList -join ',') -ne '1.4,1.3,1.2,1.1') { Bad "版本记录顺序不对：$($verList -join ' , ')" }
+if ($dataJs -notmatch "version: '1\.4', date: '2026-11-16'") { Bad '1.4 版本线的发布日期不是 2026-11-16' }
 if ($dataJs -notmatch "version: '1\.3', date: '2026-11-15'") { Bad '1.3 版本线的发布日期不是 2026-11-15' }
 if ($dataJs -notmatch [regex]::Escape("version: '$verFile'")) { Bad "updates-data.js 里没有当前版本 $verFile 的条目" }
 $entryVers = [regex]::Matches($dataJs, "version: '(\d+\.\d+)\.\d+'") | ForEach-Object { $_.Groups[1].Value }
 if ($entryVers.Count -lt 4) { Bad "条目版本号不够（应为 1.1.x / 1.2.x 多条），实际 $($entryVers.Count)" }
-if (($entryVers | Where-Object { $_ -notin @('1.1', '1.2', '1.3') }).Count) { Bad "条目版本号不属于 1.1 / 1.2 / 1.3：$($entryVers -join ' , ')" }
+if (($entryVers | Where-Object { $_ -notin @('1.1', '1.2', '1.3', '1.4') }).Count) { Bad "条目版本号不属于 1.1 / 1.2 / 1.3 / 1.4：$($entryVers -join ' , ')" }
 # 条目分类 = 改动方向（PerfUpdateCategories 声明的九个键），不再是侧边栏功能区
 if ($dataJs -notmatch 'window\.PerfUpdateCategories') { Bad 'updates-data.js 缺 PerfUpdateCategories（分类表）' }
 $catList = [regex]::Match($dataJs, '(?s)window\.PerfUpdateCategories = \[(.*?)\]').Groups[1].Value
@@ -513,14 +513,12 @@ if ($hasBuild) {
     }
 }
 
-# 版本 1.3.10（主.次.修补：修补位每轮 +1，前两位只由用户通知才动）
-if ($verFile -ne '1.3.10') { Bad "VERSION 不是 1.3.10（实际 $verFile）" }
-if ($dataJs -notmatch "date: '2026-11-15', version: '1\.3\.10'") { Bad '更新公告里没有 1.3.10（2026-11-15）的条目' }
+# 版本 1.4.0（主.次.修补：修补位每轮 +1，前两位由用户通知才动——本轮用户通知进 1.4）
+if ($verFile -ne '1.4.0') { Bad "VERSION 不是 1.4.0（实际 $verFile）" }
+if ($dataJs -notmatch "date: '2026-11-16', version: '1\.4\.0'") { Bad '更新公告里没有 1.4.0（2026-11-16）的条目' }
+if ($dataJs -notmatch "version: '1\.3\.10'") { Bad '更新公告里 1.3.10 的条目被删了' }
 if ($dataJs -notmatch "version: '1\.3\.9'") { Bad '更新公告里 1.3.9 的条目被删了' }
 if ($dataJs -notmatch "version: '1\.3\.8'") { Bad '更新公告里 1.3.8 的条目被删了' }
-if ($dataJs -match "version: '1\.4\.\d+'") { Bad '更新公告里还有 1.4.x 条目（应按规则合并回 1.3 线）' }
-if ($dataJs -notmatch "version: '1\.3\.2'") { Bad '更新公告里 1.3.2 的条目被删了' }
-if ($dataJs -notmatch "version: '1\.3\.1'") { Bad '更新公告里 1.3.1 的条目被删了' }
 if ($dataJs -notmatch "version: '1\.3\.0'") { Bad '更新公告里 1.3.0 的条目被删了' }
 
 # ---------- 5k. 问卷调查页（本轮纯前端） ----------
@@ -550,6 +548,60 @@ if ($i18nText -notmatch '__refreshSurvey') { Bad 'i18n.js 语言切换后没有�
 foreach ($sk in 'nav.survey', 'survey.title', 'survey.lead', 'survey.count', 'survey.emptyTitle', 'survey.emptyHint', 'survey.status.open', 'survey.status.closed', 'survey.metaQuestions', 'survey.metaMinutes', 'survey.open', 'survey.notReady') {
     $n = ([regex]::Matches($i18nText, [regex]::Escape("'" + $sk + "':"))).Count
     if ($n -lt 3) { Bad "i18n 中 $sk 只有 $n 种语言（需 3）" }
+}
+
+# ---------- 5m. 检查更新（多源 + 验签 + 本地校验） ----------
+$updPs = Get-Content (Join-Path $root 'src\app\70-Updates.ps1') -Raw -Encoding UTF8
+foreach ($need in 'Start-UpdateCheck', 'Start-UpdateAutoCheck', 'Complete-UpdateCheck',
+    'Start-UpdateDownload', 'Complete-UpdateDownload', 'Test-UpdateSignature', 'Compare-AppVersion',
+    'Test-UpdateHost', 'UpdateManifestSources', 'UpdatePublicKeyXml', 'UpdateAutoCheckDone') {
+    if ($updPs -notmatch [regex]::Escape($need)) { Bad "70-Updates.ps1 缺 $need" }
+}
+if ($updPs -notmatch 'cdn\.jsdelivr\.net') { Bad '清单主源不是 jsDelivr' }
+if ($updPs -notmatch 'raw\.githubusercontent\.com') { Bad '清单缺 raw.githubusercontent 备用源' }
+if ($updPs -notmatch 'api\.github\.com') { Bad '清单缺 api.github.com 第三源' }
+if ($updPs -notmatch 'RSAKeyValue') { Bad '没有内置验签公钥' }
+if ($updPs -match 'PRIVATE KEY|private-key|PRIVATEKEY') { Bad '70-Updates.ps1 里疑似写了私钥' }
+if ($updPs -notmatch "UpdateAutoCheckDelayMs = 12000") { Bad '自动检查不是启动后 12 秒' }
+if ($capPs -notmatch "'checkUpdate'") { Bad '60-Capture.ps1 没登记 checkUpdate 命令' }
+if ($capPs -notmatch 'Start-UpdateAutoCheck') { Bad '60-Capture.ps1 就绪后没有触发自动检查' }
+if ($idx -notmatch 'id="btnCheckUpdate"') { Bad 'index.html 缺「检查更新」按钮' }
+if ($idx -notmatch 'id="updateBanner"') { Bad 'index.html 缺更新提示条' }
+if ($idx -notmatch 'js/update\.js') { Bad 'index.html 未加载 update.js' }
+$updJs = Get-Content (Join-Path $root 'ui\js\update.js') -Raw -Encoding UTF8
+foreach ($need in 'window.PerfUpdate', 'downloadUpdate', 'runUpdateInstaller', 'skipUpdateVersion', 'setUpdateAuto') {
+    if ($updJs -notmatch [regex]::Escape($need)) { Bad "update.js 缺 $need" }
+}
+if (-not (Test-Path (Join-Path $root 'build\sign-manifest.ps1'))) { Bad '缺 build\sign-manifest.ps1（签名/验签）' }
+# 清单（由 pack.ps1 step 9 生成）：存在就校验 schema / 哈希 / 白名单 / 签名
+$manPath = Join-Path $root 'updates\latest.json'
+if (Test-Path $manPath) {
+    $man = $null
+    try { $man = (Get-Content $manPath -Raw -Encoding UTF8) | ConvertFrom-Json } catch { }
+    if (-not $man) { Bad 'updates\latest.json 不是合法 JSON' }
+    else {
+        if ($man.version -ne $verFile) { Bad "清单版本 $($man.version) 与 VERSION $verFile 不一致" }
+        if (-not $man.serial) { Bad '清单缺 serial（防重放）' }
+        if (-not $man.assets -or @($man.assets).Count -lt 1) { Bad '清单没有 assets' }
+        else {
+            foreach ($a in @($man.assets)) {
+                if (-not $a.sha256 -or ([string]$a.sha256).Length -ne 64) { Bad "资产 $($a.name) 的 sha256 不合法" }
+                if (-not $a.size) { Bad "资产 $($a.name) 缺 size" }
+                foreach ($u in @($a.urls)) {
+                    if ($u -notmatch '^https://') { Bad "资产 URL 不是 https：$u" }
+                    if ($u -notmatch 'jsdelivr|raw\.githubusercontent|ghproxy|github\.com') { Bad "资产 URL 主机不在白名单：$u" }
+                }
+            }
+        }
+        $sigPath = $manPath + '.sig'
+        if (-not (Test-Path $sigPath)) { Bad 'updates\latest.json 缺 .sig（未签名会被客户端拒绝）' }
+        elseif (Test-Path (Join-Path $root 'build\sign-manifest.ps1')) {
+            $vr = & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $root 'build\sign-manifest.ps1') -Path $manPath -Verify 2>&1
+            if ($LASTEXITCODE -ne 0) { Bad "清单验签失败：$($vr -join ' ')" } else { Ok '更新清单验签通过' }
+        }
+    }
+} else {
+    Warn '尚未生成 updates\latest.json（先跑 build\pack.ps1）'
 }
 
 # ---------- 6. 运行时依赖 ----------

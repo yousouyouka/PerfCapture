@@ -17,3 +17,7 @@
 *.html text
 *.json text
 *.md text
+
+# 检查更新清单与其签名：签名按字节算，任何换行转换都会让用户端验签失败
+updates/*.json -text
+updates/*.sig  -text

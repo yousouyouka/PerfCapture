@@ -5,6 +5,8 @@ function New-DefaultConfig {
         theme = 'system'; seconds = 120; minimize = $true; sound = $true; skip = ''
         language = 'zh-CN'
         lastPid = 0; windowW = 1180; windowH = 780
+        # 检查更新：auto 关掉后不再自动查；skippedVersion 是用户点过「跳过此版本」的版本号
+        updateCheck = @{ auto = $true; lastCheckAt = ''; skippedVersion = '' }
     }
 }
 

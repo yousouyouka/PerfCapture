@@ -65,7 +65,7 @@
           </svg>
           <span class="nav-label" data-i18n="nav.settings">设置</span>
         </button>
-        <div class="sidebar-version" id="sidebarVersion">v1.3.10</div>
+        <div class="sidebar-version" id="sidebarVersion">v1.4.0</div>
       </div>
     </nav>
   </aside>
@@ -214,7 +214,18 @@
           <div class="setting-block">
             <div class="setting-label">
               <strong>PerfCapture</strong>
-              <small>v1.3.10 · PresentMon ETW · 零注入</small>
+              <small>v1.4.0 · PresentMon ETW · 零注入</small>
+            </div>
+          </div>
+
+          <div class="setting-block update-block">
+            <div class="setting-label">
+              <strong data-i18n="settings.update">检查更新</strong>
+              <small id="updateStatus" data-i18n="settings.updateIdle">启动后会自动检查一次，也可以手动点按钮</small>
+            </div>
+            <div class="update-actions">
+              <button type="button" class="btn btn-ghost" id="btnCheckUpdate" data-i18n="settings.update">检查更新</button>
+              <label class="check"><input id="chkUpdateAuto" type="checkbox" checked><span data-i18n="settings.updateAuto">启动时自动检查</span></label>
             </div>
           </div>
         </section>
@@ -236,6 +247,14 @@
     <!-- ── 页面四：更新公告（排版与板块照搬 TextAxis 的 updates 页） ── -->
     <section class="page" data-page="updates" hidden>
       <div class="updates-wrap">
+
+        <div class="update-banner" id="updateBanner" hidden>
+          <span class="update-banner-text" id="updateBannerText"></span>
+          <span class="update-banner-actions">
+            <button type="button" class="btn btn-primary" id="btnUpdateMain"></button>
+            <button type="button" class="btn btn-ghost" id="btnUpdateSkip"></button>
+          </span>
+        </div>
         <header class="updates-header">
           <div>
             <span class="updates-eyebrow" data-i18n="updates.eyebrow">What's new</span>
@@ -311,6 +330,7 @@
 <script src="js/updates.js"></script>
 <script src="js/survey-data.js"></script>
 <script src="js/survey.js"></script>
+<script src="js/update.js"></script>
 <script src="js/collapse.js"></script>
 <script src="js/split.js"></script>
 <script src="js/sidebar.js"></script>

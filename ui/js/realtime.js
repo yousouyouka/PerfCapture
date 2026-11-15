@@ -27,7 +27,8 @@
     { col: 'cpu', key: 'cpu.util', label: 'realtime.row.util', unit: '%', digits: 0,
       maxOf: () => 100, valueOf: (s) => s.cpu, warn: 80, bad: 95, caps: 'cpu' },
     { col: 'cpu', key: 'cpu.clock', label: 'realtime.row.clock', unit: 'GHz', digits: 2,
-      scale: 1000, maxOf: (c) => (c && c.cpuBaseMhz ? c.cpuBaseMhz : 5000), valueOf: (s) => s.cpuMhz, caps: 'cpuMhz' },
+      scale: 1000, maxOf: (c) => (c && c.cpuBarMax ? c.cpuBarMax : (c && c.cpuBaseMhz ? c.cpuBaseMhz * 1.5 : 5000)),
+      valueOf: (s) => s.cpuMhz, caps: 'cpuMhz', tip: 'realtime.tip.cpuClock' },
     { col: 'cpu', key: 'cpu.temp', label: 'realtime.row.temp', unit: '°C', digits: 0,
       maxOf: () => 100, valueOf: () => null, placeholder: 'realtime.naSensor' },
     { col: 'cpu', key: 'cpu.fan', label: 'realtime.row.cpuFan', unit: 'rpm', digits: 0,
@@ -36,9 +37,9 @@
     { col: 'gpu', key: 'gpu.util', label: 'realtime.row.util', unit: '%', digits: 0,
       maxOf: () => 100, valueOf: (s) => s.gpu, warn: 80, bad: 95, caps: 'gpu' },
     { col: 'gpu', key: 'gpu.clock', label: 'realtime.row.clock', unit: 'MHz', digits: 0,
-      maxOf: (c) => (c && c.gpuClockMax ? c.gpuClockMax : 3000), valueOf: (s) => s.gpuClock, caps: 'gpuClock' },
+      maxOf: (c) => (c && c.gpuClockMax ? c.gpuClockMax : 3000), valueOf: (s) => s.gpuClock, caps: 'gpuClock', tip: 'realtime.tip.gpuClock' },
     { col: 'gpu', key: 'gpu.memclock', label: 'realtime.row.memclock', unit: 'MHz', digits: 0,
-      maxOf: (c) => (c && c.gpuMemClockMax ? c.gpuMemClockMax : 10000), valueOf: (s) => s.gpuMemClock, caps: 'gpuMemClock' },
+      maxOf: (c) => (c && c.gpuMemClockMax ? c.gpuMemClockMax : 10000), valueOf: (s) => s.gpuMemClock, caps: 'gpuMemClock', tip: 'realtime.tip.memClock' },
     { col: 'gpu', key: 'gpu.temp', label: 'realtime.row.temp', unit: '°C', digits: 0,
       maxOf: () => 100, valueOf: (s) => s.gpuTemp, warn: 75, bad: 87, caps: 'gpuTemp' },
     { col: 'gpu', key: 'gpu.fan', label: 'realtime.row.fan', unit: '%', digits: 0,
@@ -109,7 +110,7 @@
         row.title = tx(f.placeholder || 'realtime.naHint', '');
         return;
       }
-      row.title = '';
+      row.title = f.tip ? tx(f.tip, '') : '';
       const max = Math.max(1, Number(f.maxOf(caps, s)) || 1);
       const pct = clamp((v / max) * 100);
       fill.style.width = pct.toFixed(1) + '%';

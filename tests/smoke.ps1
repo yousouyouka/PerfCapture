@@ -630,7 +630,9 @@ foreach ($need in 'Get-MetricsCapabilities', 'Start-MetricsSampler', 'Stop-Metri
 if ($metPs -notmatch 'MetricsIntervalMs = 1000') { Bad '实时监控采样间隔不是 1 秒' }
 if ($metPs -notmatch 'MetricsRingSize = 120') { Bad '实时监控环形缓冲不是 120 点' }
 if ($metPs -notmatch 'cpuTemp = \$false') { Bad 'CPU 温度占位没有关掉（本版不该提供）' }
-if ($metPs -notmatch 'GetSystemTimes|GlobalMemoryStatusEx|CallNtPowerInformation') { Bad '缺少 Win32 只读采集（P/Invoke）' }
+if ($metPs -notmatch 'GetSystemTimes|GlobalMemoryStatusEx') { Bad '缺少 Win32 只读采集（P/Invoke）' }
+if ($metPs -notmatch 'PdhAddEnglishCounterW') { Bad 'CPU 频率没有走 PDH 英文计数器（本地化系统会读不到）' }
+if ($metPs -match 'CpuMhz\(\)') { Bad '旧的 CallNtPowerInformation 频率口径又回来了（本机只给 2007/2501 粗值）' }
 # 零注入 / 无驱动：不许出现任何注入或传感器驱动依赖
 foreach ($forbidden in 'RTSS', 'RivaTuner', 'OpenHardwareMonitor', 'LibreHardwareMonitor', 'inpainted', 'SetWindowsHookEx', 'WriteProcessMemory') {
     if ($metPs -match [regex]::Escape($forbidden)) { Bad "35-Metrics.ps1 里出现了不该有的依赖：$forbidden" }

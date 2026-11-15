@@ -59,8 +59,14 @@ if (-not ('PcMetrics' -as [type])) {
         '        public ulong ullTotalPageFile; public ulong ullAvailPageFile; public ulong ullTotalVirtual;'
         '        public ulong ullAvailVirtual; public ulong ullAvailExtendedVirtual; }'
         '    [DllImport("kernel32.dll", SetLastError = true)] private static extern bool GlobalMemoryStatusEx(ref MEMORYSTATUSEX lpBuffer);'
-        '    [StructLayout(LayoutKind.Sequential)] private struct PPI { public uint Number; public uint MaxMhz; public uint CurrentMhz; public uint MhzLimit; public uint MaxIdleState; public uint CurrentIdleState; }'
         '    [DllImport("powrprof.dll")] private static extern uint CallNtPowerInformation(int level, IntPtr inBuf, uint inSize, IntPtr outBuf, uint outSize);'
+        '    [StructLayout(LayoutKind.Explicit)] private struct PdhVal { [FieldOffset(0)] public uint status; [FieldOffset(8)] public double dbl; }'
+        '    [DllImport("pdh.dll", CharSet = CharSet.Unicode)] private static extern uint PdhOpenQueryW(string src, IntPtr user, out IntPtr q);'
+        '    [DllImport("pdh.dll", CharSet = CharSet.Unicode)] private static extern uint PdhAddEnglishCounterW(IntPtr q, string path, IntPtr user, out IntPtr c);'
+        '    [DllImport("pdh.dll")] private static extern uint PdhCollectQueryData(IntPtr q);'
+        '    [DllImport("pdh.dll")] private static extern uint PdhGetFormattedCounterValue(IntPtr c, uint fmt, out uint t, out PdhVal v);'
+        '    private static IntPtr pdhQuery = IntPtr.Zero, pdhPerf = IntPtr.Zero, pdhFreq = IntPtr.Zero;'
+        '    private static bool pdhOk;'
         '    private static ulong lastIdle, lastKernel, lastUser;'
         '    private static bool hasLast;'
         '    private static ulong U64(FILETIME t) { return ((ulong)t.High << 32) | t.Low; }'
@@ -83,20 +89,25 @@ if (-not ('PcMetrics' -as [type])) {
         '        if (!GlobalMemoryStatusEx(ref m)) return new double[] { -1, -1 };'
         '        return new double[] { Math.Round((m.ullTotalPhys - m.ullAvailPhys) / 1048576.0), Math.Round(m.ullTotalPhys / 1048576.0) };'
         '    }'
-        '    public static double CpuMhz() {'
-        '        int n = Environment.ProcessorCount;'
-        '        int sz = Marshal.SizeOf(typeof(PPI));'
-        '        IntPtr buf = Marshal.AllocHGlobal(sz * n);'
-        '        try {'
-        '            uint rc = CallNtPowerInformation(11, IntPtr.Zero, 0, buf, (uint)(sz * n));'
-        '            if (rc != 0) return -1;'
-        '            double sum = 0; int got = 0;'
-        '            for (int idx = 0; idx < n; idx++) {'
-        '                PPI p = (PPI)Marshal.PtrToStructure(new IntPtr(buf.ToInt64() + idx * sz), typeof(PPI));'
-        '                if (p.CurrentMhz > 0) { sum += p.CurrentMhz; got++; }'
-        '            }'
-        '            return got > 0 ? sum / got : -1;'
-        '        } finally { Marshal.FreeHGlobal(buf); }'
+        '    public static bool PdhInit() {'
+        '        if (pdhOk) return true;'
+        '        IntPtr q;'
+        '        if (PdhOpenQueryW(null, IntPtr.Zero, out q) != 0) return false;'
+        '        IntPtr cp, cf;'
+        '        if (PdhAddEnglishCounterW(q, "\\Processor Information(_Total)\\% Processor Performance", IntPtr.Zero, out cp) != 0) return false;'
+        '        if (PdhAddEnglishCounterW(q, "\\Processor Information(_Total)\\Processor Frequency", IntPtr.Zero, out cf) != 0) return false;'
+        '        pdhQuery = q; pdhPerf = cp; pdhFreq = cf; pdhOk = true;'
+        '        PdhCollectQueryData(pdhQuery);'
+        '        return true;'
+        '    }'
+        '    public static double PdhClockMhz() {'
+        '        if (!pdhOk && !PdhInit()) return -1;'
+        '        PdhCollectQueryData(pdhQuery);'
+        '        uint t; PdhVal v1, v2;'
+        '        if (PdhGetFormattedCounterValue(pdhPerf, 0x200, out t, out v1) != 0 || v1.status != 0) return -1;'
+        '        if (PdhGetFormattedCounterValue(pdhFreq, 0x200, out t, out v2) != 0 || v2.status != 0) return -1;'
+        '        if (v2.dbl <= 0) return -1;'
+        '        return v2.dbl * v1.dbl / 100.0;'
         '    }'
         '}'
     ) -join "`n"
@@ -134,11 +145,13 @@ if ($null -eq $out.cpu -and -not ('PcMetrics' -as [type])) {
     } catch { }
 }
 
-# ---- CPU 有效频率：CallNtPowerInformation，失败再退回 CIM ----
+# ---- CPU 有效频率：PDH 计数器（ProcessorFrequency × %ProcessorPerformance）----
+# 说明：CallNtPowerInformation 的 CurrentMhz 在本机只给 2007/2501 两档粗值，
+# 明显低于任务管理器/厂商工具看到的 ~3.5 GHz，所以改用计数器口径（同 Task Manager）。
 if ('PcMetrics' -as [type]) {
-    try { $v = [PcMetrics]::CpuMhz(); if ($v -gt 0) { $out.cpuMhz = [math]::Round($v, 0) } } catch { }
+    try { $v = [PcMetrics]::PdhClockMhz(); if ($v -gt 0) { $out.cpuMhz = [math]::Round($v, 0) } } catch { }
 }
-if ($null -eq $out.cpuMhz -and -not ('PcMetrics' -as [type])) {
+if ($null -eq $out.cpuMhz) {
     try {
         $pi = Get-CimInstance -ClassName Win32_PerfFormattedData_Counters_ProcessorInformation -Filter "Name='_Total'" -ErrorAction Stop
         $perf = ToNum $pi.PercentProcessorPerformance
@@ -201,6 +214,7 @@ function Get-MetricsCapabilities {
         intervalMs = $script:MetricsIntervalMs
         ringSize = $script:MetricsRingSize
         cpuBaseMhz = $base
+        cpuBarMax = [int]([math]::Round($base * 1.5))
         gpuName = ''
     }
     if ($script:MetricsSmiPath) {

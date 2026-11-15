@@ -366,7 +366,7 @@
 .upd-modal[hidden] { display: none; }
 .upd-modal-box {
   width: min(420px, calc(100vw - 2rem));
-  background: var(--panel);
+  background: var(--card-solid);   /* 实色：弹窗本体不透明（主窗口虚化在弹窗背后保留） */
   color: var(--text);
   border: 1px solid var(--line);
   border-radius: 14px;
@@ -394,4 +394,35 @@
   display: flex;
   justify-content: flex-end;
   gap: 0.5rem;
+}
+
+/* ---- 下载进度条：位于设置页「检查更新」下方，仅下载时显示 ---- */
+.upd-progress {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.55rem;
+}
+.upd-progress[hidden] { display: none; }
+.upd-progress-track {
+  flex: 1 1 auto;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line);
+  overflow: hidden;
+}
+.upd-progress-bar {
+  width: 0;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent);
+  transition: width 0.25s ease;
+}
+.upd-progress-pct {
+  flex: 0 0 auto;
+  min-width: 2.8em;
+  text-align: right;
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }

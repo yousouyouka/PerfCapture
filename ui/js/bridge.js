@@ -64,6 +64,8 @@ function handleMessage(msg) {
     case 'busy': setBusy(!!msg.value); break;
     case 'theme': applyTheme(msg.mode); break;
     case 'update': if (window.PerfUpdate) window.PerfUpdate.handle(msg); break;
+    case 'metricSample': if (window.PerfRealtime) window.PerfRealtime.handle(msg); break;
+    case 'metricsCaps': if (window.PerfRealtime) window.PerfRealtime.handle(msg); break;
     case 'error': addLog('[错误] ' + msg.text, 'ln-warn'); setStatus(msg.text || '出错'); break;
     default: break;
   }

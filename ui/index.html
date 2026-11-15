@@ -12,6 +12,7 @@
 <link rel="stylesheet" href="css/popup.css">
 <link rel="stylesheet" href="css/updates.css">
 <link rel="stylesheet" href="css/survey.css">
+<link rel="stylesheet" href="css/realtime.css">
 </head>
 <body>
 <div class="app" id="app">
@@ -65,7 +66,7 @@
           </svg>
           <span class="nav-label" data-i18n="nav.settings">设置</span>
         </button>
-        <div class="sidebar-version" id="sidebarVersion">v1.4.1</div>
+        <div class="sidebar-version" id="sidebarVersion">v1.5.0</div>
       </div>
     </nav>
   </aside>
@@ -214,7 +215,7 @@
           <div class="setting-block">
             <div class="setting-label">
               <strong>PerfCapture</strong>
-              <small>v1.4.1 · PresentMon ETW · 零注入</small>
+              <small>v1.5.0 · PresentMon ETW · 零注入</small>
             </div>
           </div>
 
@@ -235,12 +236,35 @@
 
     <!-- ── 页面三：实时监控（待开发） ── -->
     <section class="page" data-page="realtime" hidden>
-      <div class="settings-wrap">
-        <section class="card realtime-card">
-          <h2 class="card-title" data-i18n="realtime.title">实时监控</h2>
-          <span class="realtime-badge" data-i18n="realtime.badge">待开发</span>
-          <p class="realtime-desc" data-i18n="realtime.desc">这里将显示采集过程中的实时帧率、帧时间与 GPU 状态。目前采集仍是一次性完整测量，实时曲线尚未实现。</p>
-        </section>
+      <div class="realtime-wrap">
+        <header class="realtime-header">
+          <div>
+            <span class="realtime-eyebrow" data-i18n="realtime.eyebrow">Live</span>
+            <div class="realtime-title-line">
+              <h1 data-i18n="realtime.title">实时监控</h1>
+              <span class="realtime-state" id="rtState" data-state="off">
+                <span class="dot"></span><span id="rtStateText" data-i18n="realtime.stateOff">未采样</span>
+              </span>
+            </div>
+            <p data-i18n="realtime.desc">只读系统遥测：CPU 使用率与频率、GPU 占用／频率／温度／功耗／显存。进页面开始采样，离开自动停止。</p>
+          </div>
+          <div class="realtime-actions">
+            <button type="button" class="btn btn-ghost" id="rtToggle" data-i18n="realtime.pause">暂停</button>
+          </div>
+        </header>
+
+        <div class="rt-grid">
+          <section class="rt-col">
+            <h2 class="rt-col-title">CPU <small id="rtCpuName"></small></h2>
+            <div class="rt-rows" id="rtCpuRows"></div>
+          </section>
+          <section class="rt-col">
+            <h2 class="rt-col-title">GPU <small id="rtGpuName"></small></h2>
+            <div class="rt-rows" id="rtGpuRows"></div>
+          </section>
+        </div>
+
+        <footer class="rt-note" data-i18n="realtime.note">数据来源：nvidia-smi 与 Windows 系统接口，采样间隔 1 秒；不注入游戏、不安装驱动。CPU 温度／风扇等传感器需要额外组件，本版未提供。</footer>
       </div>
     </section>
 
@@ -330,6 +354,7 @@
 <script src="js/updates.js"></script>
 <script src="js/survey-data.js"></script>
 <script src="js/survey.js"></script>
+<script src="js/realtime.js"></script>
 <script src="js/update.js"></script>
 <script src="js/collapse.js"></script>
 <script src="js/split.js"></script>

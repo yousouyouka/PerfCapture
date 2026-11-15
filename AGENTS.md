@@ -1,4 +1,4 @@
-# AGENTS.md
+﻿# AGENTS.md
 
 本仓库工作指南。改代码前读「硬约束」与「边界」，改完按「验证」自证，别交"看起来能用"的东西。
 
@@ -59,7 +59,7 @@ build\          pack.ps1 · launcher.cs · setup-core.cs · setup-ui.cs · setup
 - **卡片**：`background: var(--card)` + `1px solid var(--line)` + `box-shadow: var(--shadow)`；
   hover 换成 `--line-strong` + `--shadow-hover`；强调只用 `--accent` / `--accent-soft`。
 - **空状态**：`var(--tile)` 底 + `1px dashed var(--line-strong)` + 居中，主文用 muted、副文用 faint
-  （问卷页与实时监控页是样板）。
+  （问卷页是样板；实时监控页的「—」占位用虚线轨道 + faint 文字，同一个思路）。
 - **板块节奏**照 TextAxis（页头 / 工具栏 / 主区 / 列表），**字体与配色不搬**；图标用内联 SVG stroke，
   不引图标字体、不引第三方 UI 库。
 - 新页面/新板块的样式写进自己的 css 并在 `index.html` 按顺序加载；并列的工具行可以共用一组选择器
@@ -117,7 +117,8 @@ build\          pack.ps1 · launcher.cs · setup-core.cs · setup-ui.cs · setup
 
 ## 边界
 
-- 不做注入方案、读写游戏内存、自动装驱动级组件；实时监控目前只是入口占位。
+- 不做注入方案、读写游戏内存、自动装驱动级组件。实时监控（1.5.0 批次 A）已上线进度条视图，
+  只读系统遥测；折线图与浮窗见批次 B，CPU 温度／风扇等传感器组件由用户自行选择，不默认捆绑。
 - 不在没要求时动无关区域，不"顺手重构"。
 - 不做自动点击 / 键鼠模拟的测试；安装向导点击流程由人走查。
 

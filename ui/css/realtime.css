@@ -1,0 +1,185 @@
+/* 实时监控 · 进度条视图（1.5.0 批次 A）
+   版式参照 Legion Toolkit 的 CPU/GPU 双栏：标签 / 进度条 / 数值。
+   颜色只用 tokens：accent 正常、warn/bad 阈值，— 用 faint。 */
+
+.realtime-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  height: 100%;
+  min-height: 0;
+}
+
+.realtime-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex: 0 0 auto;
+}
+
+.realtime-eyebrow {
+  display: inline-block;
+  font-size: 0.6rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.realtime-title-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  margin: 0.1rem 0 0.15rem;
+}
+
+.realtime-title-line h1 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 400;
+  color: var(--text-strong);
+}
+
+.realtime-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+
+.realtime-state .dot {
+  width: 0.44rem;
+  height: 0.44rem;
+  border-radius: 50%;
+  background: var(--faint);
+  flex: 0 0 auto;
+}
+
+.realtime-state[data-state="on"] .dot { background: var(--good); }
+.realtime-state[data-state="wait"] .dot { background: var(--accent); }
+.realtime-state[data-state="paused"] .dot { background: var(--warn); }
+
+.realtime-header p {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--muted);
+  max-width: 46rem;
+}
+
+.realtime-actions { flex: 0 0 auto; }
+
+.rt-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.rt-col {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-height: 0;
+  padding: 0.7rem 0.85rem 0.8rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+}
+
+.rt-col-title {
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  font-size: 0.8rem;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  color: var(--text-strong);
+}
+
+.rt-col-title small {
+  font-size: 0.64rem;
+  letter-spacing: 0;
+  color: var(--faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rt-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.36rem;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 0.15rem;
+}
+
+/* 一行 = 标签 / 条 / 数值 */
+.rt-row {
+  display: grid;
+  grid-template-columns: 5.4rem minmax(2rem, 1fr) 6.4rem;
+  align-items: center;
+  gap: 0.55rem;
+  min-height: 1.35rem;
+}
+
+.rt-label {
+  font-size: 0.73rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rt-track {
+  position: relative;
+  display: block;
+  height: 0.4rem;
+  border-radius: 999px;
+  background: var(--tile);
+  overflow: hidden;
+}
+
+.rt-fill {
+  display: block;
+  height: 100%;
+  width: 0%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 0.35s ease, background-color 0.25s ease;
+}
+
+.rt-fill[data-level="warn"] { background: var(--warn); }
+.rt-fill[data-level="bad"] { background: var(--bad); }
+
+.rt-value {
+  font-size: 0.73rem;
+  color: var(--text-strong);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 采不到（无传感器 / 无 nvidia-smi）：弱化，但位置保留 */
+.rt-row.is-na .rt-label,
+.rt-row.is-na .rt-value { color: var(--faint); }
+
+.rt-row.is-na .rt-track {
+  background: transparent;
+  border: 1px dashed var(--line-strong);
+  height: 0.4rem;
+}
+
+.rt-note {
+  flex: 0 0 auto;
+  font-size: 0.66rem;
+  color: var(--faint);
+}
+
+@media (max-width: 1080px) {
+  .rt-grid { grid-template-columns: minmax(0, 1fr); }
+}

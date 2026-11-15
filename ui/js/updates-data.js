@@ -19,6 +19,16 @@ window.PerfUpdateAreas = ['capture', 'realtime', 'other'];
 
 window.PerfUpdates = [
   {
+    date: '2026-11-17', version: '1.5.0',
+    title: '实时监控上线：CPU / GPU 进度条视图',
+    items: [
+      ['feature', '侧边栏「实时监控」不再是占位页：CPU 与 GPU 双栏，每行「标签 + 进度条 + 数值」，进页面开始采样、离开自动停止。', 'realtime'],
+      ['feature', '采样只读系统接口：CPU 使用率与有效频率走 Win32（GetSystemTimes / 电源信息），GPU 占用／频率／温度／功耗／显存走 nvidia-smi，内存走 GlobalMemoryStatusEx；1 秒一次，轮询在后台线程，界面不卡。', 'realtime'],
+      ['install', '采不到的项显示「—」而不是 0：没有 nvidia-smi 或传感器读不到时如实留空，鼠标悬停说明原因。', 'realtime'],
+      ['install', '零注入、无驱动：实时监控不注入游戏、不安装任何驱动；CPU 温度／风扇等需要传感器组件的项本版只留位置，后续由用户自行选择是否安装。', 'realtime']
+    ]
+  },
+  {
     date: '2026-11-16', version: '1.4.1',
     title: '检查更新加固：单个镜像出问题不再拖垮整次检查',
     items: [
@@ -158,6 +168,7 @@ window.PerfUpdates = [
 
 /* 版本记录（只到「主.次」）：date 是该版本线第一条改动的日期 */
 window.PerfUpdateVersions = [
+  { version: '1.5', date: '2026-11-17' },
   { version: '1.4', date: '2026-11-16' },
   { version: '1.3', date: '2026-11-15' },
   { version: '1.2', date: '2026-11-14' },

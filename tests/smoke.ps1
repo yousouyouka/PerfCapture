@@ -17,17 +17,17 @@ Write-Host "`n[1/6] 目录结构"
 $structure = @(
     'src\PerfCapture.ps1',
     'src\app\00-Prelude.ps1', 'src\app\05-Paths.ps1', 'src\app\10-Bootstrap.ps1',
-    'src\app\15-Logging.ps1', 'src\app\20-Settings.ps1', 'src\app\30-Tools.ps1',
+    'src\app\15-Logging.ps1', 'src\app\20-Settings.ps1', 'src\app\30-Tools.ps1', 'src\app\35-Metrics.ps1',
     'src\app\40-Bridge.ps1', 'src\app\50-Host.ps1', 'src\app\60-Capture.ps1', 'src\app\90-Main.ps1',
     'src\engine\Measure-GamePerf.ps1',
     'ui\index.html',
     'ui\css\tokens.css', 'ui\css\layout.css', 'ui\css\components.css',
-    'ui\css\terminal.css', 'ui\css\report.css', 'ui\css\popup.css', 'ui\css\updates.css', 'ui\css\survey.css',
+    'ui\css\terminal.css', 'ui\css\report.css', 'ui\css\popup.css', 'ui\css\updates.css', 'ui\css\survey.css', 'ui\css\realtime.css',
     'ui\js\util.js', 'ui\js\i18n.js', 'ui\js\capture-options.js', 'ui\js\bridge.js',
     'ui\js\theme.js', 'ui\js\popup.js', 'ui\js\terminal.js', 'ui\js\ui-state.js',
     'ui\js\report.js', 'ui\js\collapse.js', 'ui\js\split.js',
     'ui\js\sidebar.js', 'ui\js\settings.js', 'ui\js\main.js',
-    'ui\js\updates-data.js', 'ui\js\updates.js', 'ui\js\survey-data.js', 'ui\js\survey.js',
+    'ui\js\updates-data.js', 'ui\js\updates.js', 'ui\js\survey-data.js', 'ui\js\survey.js', 'ui\js\realtime.js',
     'assets\app-icon.ico', 'assets\app-icon.png',
     'lib\Microsoft.Web.WebView2.Core.dll', 'lib\Microsoft.Web.WebView2.WinForms.dll', 'lib\WebView2Loader.dll',
     'tools\presentmon.exe',
@@ -356,14 +356,20 @@ if ($dataJs -notmatch 'window\.PerfUpdateVersions') { Bad 'updates-data.js 缺 w
 if ($dataJs -match "time:\s*'") { Bad '更新公告数据里还有 time 字段（应只写日期）' }
 if ($dataJs -match 'approx') { Bad '更新公告数据里还有 approx（约等于时间已取消）' }
 $verList = [regex]::Matches($dataJs, "version:\s*'([0-9.]+)',\s*date:") | ForEach-Object { $_.Groups[1].Value }
-if ($verList.Count -ne 4) { Bad "版本记录应有四条（1.4 / 1.3 / 1.2 / 1.1），实际 $($verList.Count) 条" }
-elseif (($verList -join ',') -ne '1.4,1.3,1.2,1.1') { Bad "版本记录顺序不对：$($verList -join ' , ')" }
+if ($verList.Count -lt 4) { Bad "版本记录至少应有四条（1.1 起），实际 $($verList.Count) 条" }
+elseif (($verList -join ',') -ne (($verList | Sort-Object -Descending { [version]($_ + '.0') }) -join ',')) {
+    Bad "版本记录顺序不对（应新→旧）：$($verList -join ' , ')"
+}
+if ($verList -notcontains '1.5' -and $verFile -match '^1\.5\.') { Bad '1.5 版本线缺失（当前版本是 1.5.x）' }
 if ($dataJs -notmatch "version: '1\.4', date: '2026-11-16'") { Bad '1.4 版本线的发布日期不是 2026-11-16' }
 if ($dataJs -notmatch "version: '1\.3', date: '2026-11-15'") { Bad '1.3 版本线的发布日期不是 2026-11-15' }
 if ($dataJs -notmatch [regex]::Escape("version: '$verFile'")) { Bad "updates-data.js 里没有当前版本 $verFile 的条目" }
 $entryVers = [regex]::Matches($dataJs, "version: '(\d+\.\d+)\.\d+'") | ForEach-Object { $_.Groups[1].Value }
 if ($entryVers.Count -lt 4) { Bad "条目版本号不够（应为 1.1.x / 1.2.x 多条），实际 $($entryVers.Count)" }
-if (($entryVers | Where-Object { $_ -notin @('1.1', '1.2', '1.3', '1.4') }).Count) { Bad "条目版本号不属于 1.1 / 1.2 / 1.3 / 1.4：$($entryVers -join ' , ')" }
+# 版本线列表必须覆盖所有条目（新增版本线时忘记登记会在这里被抓住）
+if (($entryVers | Where-Object { $verList -notcontains $_ }).Count) {
+    Bad ("这些条目的版本线没登记进 PerfUpdateVersions：" + (($entryVers | Where-Object { $verList -notcontains $_ } | Sort-Object -Unique) -join ' , '))
+}
 # 条目分类 = 改动方向（PerfUpdateCategories 声明的九个键），不再是侧边栏功能区
 if ($dataJs -notmatch 'window\.PerfUpdateCategories') { Bad 'updates-data.js 缺 PerfUpdateCategories（分类表）' }
 $catList = [regex]::Match($dataJs, '(?s)window\.PerfUpdateCategories = \[(.*?)\]').Groups[1].Value
@@ -408,7 +414,7 @@ if ($iAreaRow -ge 0 -and $iCatRow -ge 0) {
 }
 if ($updJs -notmatch '__refreshUpdates') { Bad 'updates.js 未暴露 __refreshUpdates（语言切换后不会重画）' }
 if ($i18nText -notmatch '__refreshUpdates') { Bad 'i18n.js 的语言切换没有触发更新公告重画' }
-foreach ($uk in 'nav.realtime', 'nav.updates', 'realtime.badge', 'updates.title', 'updates.noteLabel', 'updates.dayLabel', 'updates.latest', 'updates.cat.feature', 'updates.cat.ui', 'updates.cat.ux', 'updates.cat.fix', 'updates.cat.metrics', 'updates.cat.chart', 'updates.cat.install', 'updates.cat.compat', 'updates.cat.survey', 'updates.allAreas', 'updates.filterArea', 'updates.filterKind', 'updates.area.capture', 'updates.area.realtime', 'updates.area.other') {
+foreach ($uk in 'nav.realtime', 'nav.updates', 'updates.title', 'updates.noteLabel', 'updates.dayLabel', 'updates.latest', 'updates.cat.feature', 'updates.cat.ui', 'updates.cat.ux', 'updates.cat.fix', 'updates.cat.metrics', 'updates.cat.chart', 'updates.cat.install', 'updates.cat.compat', 'updates.cat.survey', 'updates.allAreas', 'updates.filterArea', 'updates.filterKind', 'updates.area.capture', 'updates.area.realtime', 'updates.area.other') {
     $n = ([regex]::Matches($i18nText, [regex]::Escape("'" + $uk + "':"))).Count
     if ($n -lt 3) { Bad "i18n 中 $uk 只有 $n 种语言（需 3）" }
 }
@@ -616,6 +622,49 @@ if (Test-Path $manPath) {
 } else {
     Warn '尚未生成 updates\latest.json（先跑 build\pack.ps1）'
 }
+# ---------- 5n. 实时监控（批次 A） ----------
+$metPs = Get-Content (Join-Path $root 'src\app\35-Metrics.ps1') -Raw -Encoding UTF8
+foreach ($need in 'Get-MetricsCapabilities', 'Start-MetricsSampler', 'Stop-MetricsSampler', 'Invoke-MetricsTick', 'MetricsSampleScript', 'Update-MetricsCapsFromSample') {
+    if ($metPs -notmatch [regex]::Escape($need)) { Bad "35-Metrics.ps1 缺 $need" }
+}
+if ($metPs -notmatch 'MetricsIntervalMs = 1000') { Bad '实时监控采样间隔不是 1 秒' }
+if ($metPs -notmatch 'MetricsRingSize = 120') { Bad '实时监控环形缓冲不是 120 点' }
+if ($metPs -notmatch 'cpuTemp = \$false') { Bad 'CPU 温度占位没有关掉（本版不该提供）' }
+if ($metPs -notmatch 'GetSystemTimes|GlobalMemoryStatusEx|CallNtPowerInformation') { Bad '缺少 Win32 只读采集（P/Invoke）' }
+# 零注入 / 无驱动：不许出现任何注入或传感器驱动依赖
+foreach ($forbidden in 'RTSS', 'RivaTuner', 'OpenHardwareMonitor', 'LibreHardwareMonitor', 'inpainted', 'SetWindowsHookEx', 'WriteProcessMemory') {
+    if ($metPs -match [regex]::Escape($forbidden)) { Bad "35-Metrics.ps1 里出现了不该有的依赖：$forbidden" }
+}
+# 内嵌采样脚本要能单独解析
+$ms = [regex]::Match($metPs, "(?s)\`$script:MetricsSampleScript = @'\r?\n(.*?)\r?\n'@")
+if (-not $ms.Success) { Bad '取不到内嵌采样脚本' }
+else {
+    $pe = $null
+    [void][System.Management.Automation.Language.Parser]::ParseInput($ms.Groups[1].Value, [ref]$null, [ref]$pe)
+    if ($pe.Count) { Bad ("内嵌采样脚本语法错误：" + $pe[0].Message) }
+}
+if ($metPs -notmatch 'type = ''metricSample''') { Bad '没有向界面推送 metricSample' }
+if ($metPs -notmatch 'type = ''metricsCaps''') { Bad '没有向界面推送 metricsCaps' }
+
+$rtJs = Get-Content (Join-Path $root 'ui\js\realtime.js') -Raw -Encoding UTF8
+foreach ($need in 'window.PerfRealtime', '__refreshRealtime', 'metricsStart', 'metricsStop', 'is-na', 'FIELDS') {
+    if ($rtJs -notmatch [regex]::Escape($need)) { Bad "realtime.js 缺 $need" }
+}
+if ($idx -notmatch 'id="rtCpuRows"') { Bad 'index.html 缺 CPU 行容器 rtCpuRows' }
+if ($idx -notmatch 'id="rtGpuRows"') { Bad 'index.html 缺 GPU 行容器 rtGpuRows' }
+if ($idx -notmatch 'id="rtToggle"') { Bad 'index.html 缺暂停按钮' }
+if ($idx -notmatch 'css/realtime\.css') { Bad 'index.html 没有引入 realtime.css' }
+if ($idx -notmatch 'js/realtime\.js') { Bad 'index.html 没有引入 realtime.js' }
+if ($brJs -notmatch "case 'metricSample'") { Bad 'bridge.js 没有分发 metricSample' }
+foreach ($key in 'realtime.row.util', 'realtime.row.clock', 'realtime.naSensor', 'realtime.stateOn') {
+    if ($i18nText -notmatch [regex]::Escape("'" + $key + "'")) { Bad "i18n 缺 $key" }
+}
+if ($capPs -notmatch "'metricsStart'") { Bad '60-Capture.ps1 没登记 metricsStart 命令' }
+$iDispatch = $capPs.IndexOf('Invoke-MetricsCommand $msg')
+$iSwitch = $capPs.IndexOf('switch ($msg.cmd) {')
+if ($iDispatch -lt 0 -or $iSwitch -lt 0 -or $iDispatch -gt $iSwitch) { Bad '监控命令必须在 switch 之前分发（否则走不到）' }
+if ((Get-Content (Join-Path $root 'src\PerfCapture.ps1') -Raw -Encoding UTF8) -notmatch "'35-Metrics.ps1'") { Bad '入口没有加载 35-Metrics.ps1' }
+
 
 # ---------- 6. 运行时依赖 ----------
 Write-Host "`n[6/6] 运行时依赖"

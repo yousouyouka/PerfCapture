@@ -13,6 +13,7 @@ foreach ($f in @(
     '15-Logging.ps1',
     '20-Settings.ps1',
     '30-Tools.ps1',
+    '35-Metrics.ps1',
     '40-Bridge.ps1',
     '50-Host.ps1',
     '60-Capture.ps1',

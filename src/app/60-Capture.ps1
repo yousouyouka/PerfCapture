@@ -3,7 +3,8 @@
 # ---------- UI 消息处理 ----------
 # 白名单：只接受约定的命令；未知命令记日志并回传错误，绝不抛异常打断消息泵
 $script:KnownCommands = @('ready', 'refreshProcs', 'saveSettings', 'openReports', 'export', 'exportHtml', 'exportPng', 'start', 'stop',
-    'checkUpdate', 'downloadUpdate', 'cancelUpdate', 'openUpdatePage', 'runUpdateInstaller', 'openUpdateFolder', 'skipUpdateVersion', 'setUpdateAuto')
+    'checkUpdate', 'downloadUpdate', 'cancelUpdate', 'openUpdatePage', 'runUpdateInstaller', 'openUpdateFolder', 'skipUpdateVersion', 'setUpdateAuto',
+    'metricsStart', 'metricsStop')
 
 function Handle-UiMessage($msg) {
     if ($null -eq $msg -or -not $msg.cmd) { return }
@@ -17,6 +18,12 @@ function Handle-UiMessage($msg) {
             'runUpdateInstaller', 'openUpdateFolder', 'skipUpdateVersion', 'setUpdateAuto')) {
         try { Invoke-UpdateCommand $msg }
         catch { Write-AppLog ('更新命令执行失败: ' + $_.Exception.Message) 'WARN' }
+        return
+    }
+    # 实时监控命令单独分发（宿主侧在 35-Metrics.ps1）
+    if ($msg.cmd -in @('metricsStart', 'metricsStop')) {
+        try { Invoke-MetricsCommand $msg }
+        catch { Write-AppLog ('监控命令执行失败: ' + $_.Exception.Message) 'WARN' }
         return
     }
     try {

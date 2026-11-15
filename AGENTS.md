@@ -109,6 +109,11 @@ build\          pack.ps1 · launcher.cs · setup-core.cs · setup-ui.cs · setup
   `push-updates.ps1` **不带 `-Yes` 只打印计划**，分支上只留最近 2 个版本的资产。
 - `updates` 分支里的清单要 `.gitattributes: * -text`（关闭换行转换）：签名按**字节**算，
   LF→CRLF 会让验签失败；脚本提交前会自证分支 blob 字节与本地一致。
+- **jsDelivr 不发 `.exe`**（实测 403 Forbidden，`.zip` 与 `.json` 正常 200）：清单里 `.exe` 的
+  下载源必须从 `raw.githubusercontent.com` 起排，`pack.ps1` 已按类型生成，冒烟也钉住了。
+- **推完必须整分支 purge jsDelivr**（`https://purge.jsdelivr.net/gh/<owner>/<repo>@main` 与 `@updates`）：
+  只清单个文件会留下「清单已换新、`.sig` 还是旧」的错配，客户端验签必失败；
+  `raw.githubusercontent.com` 另有约 3~5 分钟缓存，发布后立刻验证要等它过期。
 
 ## 边界
 

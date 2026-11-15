@@ -203,8 +203,23 @@ try {
     if ($LASTEXITCODE -ne 0) { Fail 'git push 失败（github.com:443 被挡时改用 ssh 远端）' }
     Ok "已推送 $Remote/$branch"
 
+    # ---------- 9. 刷新 jsDelivr 缓存 ----------
+    # 只清单个文件不够：清过场中出现过「清单已换新、.sig 还是旧」的错配，客户端验签必然失败。
+    # 实测清整个分支（不带文件路径）才可靠。
     $owner = (& git -C $root config --get "remote.$Remote.url") -replace '.*[:/]([^/]+)/([^/]+?)(?:\.git)?$', '$1/$2'
-    Write-Host "`njsDelivr（可能要等几分钟刷新缓存）：" -ForegroundColor Cyan
+    try {
+        $purge = New-Object System.Net.Http.HttpClient
+        $purge.Timeout = [TimeSpan]::FromSeconds(20)
+        foreach ($p in @("https://purge.jsdelivr.net/gh/$owner@main", "https://purge.jsdelivr.net/gh/$owner@$branch")) {
+            try {
+                $r = $purge.GetAsync($p).GetAwaiter().GetResult()
+                if ($r.IsSuccessStatusCode) { Ok "已清缓存 $($p -replace '^https://purge\.jsdelivr\.net/','')" }
+                else { Write-Host "  ⚠ 清缓存返回 $([int]$r.StatusCode)：$p" -ForegroundColor Yellow }
+            } catch { Write-Host "  ⚠ 清缓存失败（不影响发布，几分钟后自然过期）：$p" -ForegroundColor Yellow }
+        }
+        $purge.Dispose()
+    } catch { Write-Host '  ⚠ 清缓存步骤跳过（缺少 System.Net.Http）' -ForegroundColor Yellow }
+    Write-Host "`njsDelivr 地址（已清缓存，通常立即生效）：" -ForegroundColor Cyan
     Write-Host "  https://cdn.jsdelivr.net/gh/$owner@$branch/bin/$setupName"
     Write-Host "  https://cdn.jsdelivr.net/gh/$owner@$branch/latest.json"
     Write-Host "`nRaw：" -ForegroundColor Cyan

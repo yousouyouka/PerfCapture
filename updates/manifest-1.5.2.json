@@ -4,7 +4,7 @@
     "channel":  "stable",
     "version":  "1.5.2",
     "date":  "2026-11-17",
-    "serial":  29,
+    "serial":  30,
     "notes":  {
                   "zh":  "修复：应用内更新跑不通；更新流程改为二选一",
                   "en":  "See the release notes in the app (What\u0027s new).",
@@ -15,7 +15,7 @@
                        "kind":  "setup",
                        "name":  "PerfCapture-Setup-1.5.2.exe",
                        "size":  10324992,
-                       "sha256":  "a896079284773222f2196387e8b38de58917e9484be5fa4921c2fb1c8b8383f4",
+                       "sha256":  "ce311b653d104ef40ab6a71dcf74ed183a65968bdb4ba83b298b0177d56e06d3",
                        "urls":  [
                                     "https://raw.githubusercontent.com/yousouyouka/PerfCapture/updates/bin/PerfCapture-Setup-1.5.2.exe",
                                     "https://ghproxy.net/https://github.com/yousouyouka/PerfCapture/releases/download/v1.5.2/PerfCapture-Setup-1.5.2.exe",
@@ -25,8 +25,8 @@
                    {
                        "kind":  "zip",
                        "name":  "PerfCapture-1.5.2.zip",
-                       "size":  10278628,
-                       "sha256":  "fbfcd990d03115829ed06a4e380cfda90248d3dd414e419f29e62965a02185e0",
+                       "size":  10278657,
+                       "sha256":  "fb9c3a9c833e5d0242b58612adf68cc6c5a464017e9430f79f5ea1b65068125d",
                        "urls":  [
                                     "https://cdn.jsdelivr.net/gh/yousouyouka/PerfCapture@updates/bin/PerfCapture-1.5.2.zip",
                                     "https://raw.githubusercontent.com/yousouyouka/PerfCapture/updates/bin/PerfCapture-1.5.2.zip",

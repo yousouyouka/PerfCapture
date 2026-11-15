@@ -19,13 +19,6 @@ window.PerfUpdateAreas = ['capture', 'realtime', 'other'];
 
 window.PerfUpdates = [
   {
-    date: '2026-11-17', version: '1.5.3',
-    title: '验收版：仅用于测试更新链路',
-    items: [
-      ['install', '这一版不是正式版本：只为验证「检查更新 → 弹窗 → 静默覆盖 → 自动重启」整条链路，验收完成后会删除并回到 1.5.2。', 'other']
-    ]
-  },
-  {
     date: '2026-11-17', version: '1.5.2',
     title: '修复：应用内更新时安装失败',
     items: [

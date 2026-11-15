@@ -19,17 +19,19 @@ $script:MetricsIntervalMs = 1000
 $script:MetricsRingSize = 120
 $script:MetricsSamples = New-Object System.Collections.ArrayList
 $script:MetricsCaps = $null
-$script:MetricsCtx = $null
+$script:MetricsWorker = $null
+$script:MetricsQueue = $null
 $script:MetricsTimer = $null
 $script:MetricsRunning = $false
 $script:MetricsConsumers = @{}   # 谁在要数据：page（实时监控页）/ overlay（浮窗）
-$script:MetricsNextAt = [DateTime]::MinValue
 $script:MetricsSmiPath = ''
 $script:MetricsCpuBaseMhz = 0
 
 # ---------- 一轮采样（runspace 里执行；单引号 here-string，禁止变量展开） ----------
 $script:MetricsSampleScript = @'
-param($SmiPath)
+param($SmiPath, $Queue, $IntervalMs, $Ctl)
+while ($true) {
+    if ($Ctl -and $Ctl.stop) { break }
 $out = [ordered]@{
     at = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
     cpu = $null; cpuMhz = $null; cpuMhzMax = $null
@@ -104,8 +106,8 @@ if (-not ('PcMetrics' -as [type])) {
         '        uint csz = 0, isz = 0;'
         '        PdhEnumObjectItemsW(null, null, "Processor Information", IntPtr.Zero, ref csz, IntPtr.Zero, ref isz, 0, 0);'
         '        if (isz > 0 || csz > 0) {'
-        '            IntPtr iBuf = Marshal.AllocHGlobal((int)Math.Max(2, isz));'
-        '            IntPtr cBuf = Marshal.AllocHGlobal((int)Math.Max(2, csz));'
+        '            IntPtr iBuf = Marshal.AllocHGlobal((int)Math.Max(2, isz) * 2);   // 长度单位是 WCHAR，按字节要 ×2'
+        '            IntPtr cBuf = Marshal.AllocHGlobal((int)Math.Max(2, csz) * 2);'
         '            try {'
         '                if (PdhEnumObjectItemsW(null, null, "Processor Information", cBuf, ref csz, iBuf, ref isz, 0, 0) == 0) {'
         '                    long p = iBuf.ToInt64();'
@@ -193,7 +195,7 @@ if ('PcMetrics' -as [type]) {
         }
     } catch { }
 }
-if ($null -eq $out.cpuMhz) {
+if ($null -eq $out.cpuMhz -and -not ('PcMetrics' -as [type])) {
     try {
         $pi = Get-CimInstance -ClassName Win32_PerfFormattedData_Counters_ProcessorInformation -Filter "Name='_Total'" -ErrorAction Stop
         $perf = ToNum $pi.PercentProcessorPerformance
@@ -221,7 +223,9 @@ if ($null -eq $out.ramTotal -and -not ('PcMetrics' -as [type])) {
     } catch { }
 }
 
-return [pscustomobject]$out
+$Queue.Enqueue([pscustomobject]$out)
+    Start-Sleep -Milliseconds $IntervalMs
+}
 '@
 
 # ---------- 能力探测 ----------
@@ -287,49 +291,72 @@ function Update-MetricsCapsFromSample($s) {
 }
 
 # ---------- 采样调度 ----------
-function Start-MetricsRound {
+# 采样线程只创建一次：C# 里编译的原生类型与 PDH 查询都是**进程级静态状态**，
+# 每轮重建 runspace 会重新编译类型（静态状态归零、PDH 查询泄漏），
+# 表现为「首轮永远没有频率、退出时访问冲突 0xC0000005」。
+# 所以：常驻 runspace 循环采样 → ConcurrentQueue 回传 → 宿主计时器取走。
+function Start-MetricsWorker {
+    if ($script:MetricsWorker) { return }
     try {
+        if (-not $script:MetricsQueue) {
+            $script:MetricsQueue = New-Object 'System.Collections.Concurrent.ConcurrentQueue[object]'
+        }
         $ps = [PowerShell]::Create()
         [void]$ps.AddScript($script:MetricsSampleScript)
         [void]$ps.AddParameter('SmiPath', $script:MetricsSmiPath)
+        [void]$ps.AddParameter('Queue', $script:MetricsQueue)
+        [void]$ps.AddParameter('IntervalMs', $script:MetricsIntervalMs)
+        if (-not $script:MetricsCtl) { $script:MetricsCtl = @{ stop = $false } }
+        $script:MetricsCtl.stop = $false
+        [void]$ps.AddParameter('Ctl', $script:MetricsCtl)
         $handle = $ps.BeginInvoke()
-        $script:MetricsCtx = @{ PS = $ps; Handle = $handle; Started = (Get-Date) }
-        $script:MetricsNextAt = (Get-Date).AddMilliseconds($script:MetricsIntervalMs)
+        $script:MetricsWorker = @{ PS = $ps; Handle = $handle; Started = (Get-Date) }
+        Write-AppLog '监控采样线程已启动（常驻 runspace）'
     } catch {
         Write-AppLog ('启动监控采样失败: ' + $_.Exception.Message) 'WARN'
-        $script:MetricsCtx = $null
-        $script:MetricsNextAt = (Get-Date).AddSeconds(2)
+        $script:MetricsWorker = $null
+    }
+}
+
+function Stop-MetricsWorker {
+    if (-not $script:MetricsWorker) { return }
+    $w = $script:MetricsWorker
+    # 先让采样循环自己退出（协作式），避免在原生调用里被硬中断
+    if ($script:MetricsCtl) { $script:MetricsCtl.stop = $true }
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    while (-not $w.Handle.IsCompleted -and $sw.ElapsedMilliseconds -lt 2500) { Start-Sleep -Milliseconds 50 }
+    if (-not $w.Handle.IsCompleted) { try { $w.PS.Stop() } catch { } }
+    try { [void]$w.PS.EndInvoke($w.Handle) } catch { }
+    try { $w.PS.Dispose() } catch { }
+    $script:MetricsWorker = $null
+    if ($script:MetricsQueue) {
+        $tmp = $null
+        while ($script:MetricsQueue.TryDequeue([ref]$tmp)) { }
     }
 }
 
 function Invoke-MetricsTick {
     if (-not $script:MetricsRunning) { return }
-    $ctx = $script:MetricsCtx
-    if ($ctx) {
-        if (-not $ctx.Handle.IsCompleted) {
-            # 卡死保护：单轮超过 10 秒直接丢弃，不拖住后面
-            if (((Get-Date) - $ctx.Started).TotalSeconds -gt 10) {
-                Write-AppLog '监控采样超时，丢弃本轮' 'WARN'
-                try { $ctx.PS.Stop() } catch { }
-                try { $ctx.PS.Dispose() } catch { }
-                $script:MetricsCtx = $null
-                $script:MetricsNextAt = (Get-Date).AddSeconds(1)
-            }
-            return
-        }
-        $sample = $null
-        try { $sample = @($ctx.PS.EndInvoke($ctx.Handle))[0] } catch { $sample = $null }
-        try { $ctx.PS.Dispose() } catch { }
-        $script:MetricsCtx = $null
-        if ($sample) {
-            [void]$script:MetricsSamples.Add($sample)
-            while ($script:MetricsSamples.Count -gt $script:MetricsRingSize) { $script:MetricsSamples.RemoveAt(0) }
-            Update-MetricsCapsFromSample $sample
-            Send-ToUi @{ type = 'metricSample'; sample = $sample; caps = $script:MetricsCaps }
-        }
+    # 采样线程死了就报一次，别静默
+    if ($script:MetricsWorker -and $script:MetricsWorker.Handle.IsCompleted) {
+        $err = $null
+        try { $err = $script:MetricsWorker.Handle.AsyncState } catch { }
+        Write-AppLog '监控采样线程已退出（可能是原生调用异常），本次会话停止采样' 'WARN'
+        Stop-MetricsWorker
+        $script:MetricsRunning = $false
+        Stop-MetricsTimer
+        Send-ToUi @{ type = 'metricsCaps'; caps = $script:MetricsCaps; running = $false; error = 'worker-stopped' }
         return
     }
-    if ((Get-Date) -ge $script:MetricsNextAt) { Start-MetricsRound }
+    if (-not $script:MetricsQueue) { return }
+    $sample = $null
+    while ($script:MetricsQueue.TryDequeue([ref]$sample)) {
+        if (-not $sample) { continue }
+        [void]$script:MetricsSamples.Add($sample)
+        while ($script:MetricsSamples.Count -gt $script:MetricsRingSize) { $script:MetricsSamples.RemoveAt(0) }
+        Update-MetricsCapsFromSample $sample
+        Send-ToUi @{ type = 'metricSample'; sample = $sample; caps = $script:MetricsCaps }
+    }
 }
 
 function Send-MetricsCaps {
@@ -355,8 +382,8 @@ function Start-MetricsSampler {
     if ($script:MetricsRunning) { return }
     Get-MetricsCapabilities | Out-Null
     $script:MetricsRunning = $true
-    $script:MetricsNextAt = (Get-Date)
     $script:MetricsSamples.Clear()
+    Start-MetricsWorker
     Send-MetricsCaps
     Write-AppLog (("实时监控开始：间隔 {0} ms，环形缓冲 {1} 点，GPU 源 {2}" -f $script:MetricsIntervalMs, $script:MetricsRingSize, $(if ($script:MetricsSmiPath) { 'nvidia-smi' } else { '无' })))
 
@@ -374,11 +401,7 @@ function Stop-MetricsSampler {
     if (-not $script:MetricsRunning -and -not $script:MetricsTimer) { return }
     $script:MetricsRunning = $false
     Stop-MetricsTimer
-    if ($script:MetricsCtx) {
-        try { $script:MetricsCtx.PS.Stop() } catch { }
-        try { $script:MetricsCtx.PS.Dispose() } catch { }
-        $script:MetricsCtx = $null
-    }
+    Stop-MetricsWorker
     Send-ToUi @{ type = 'metricsCaps'; caps = $script:MetricsCaps; running = $false }
     Write-AppLog '实时监控已停止'
 }

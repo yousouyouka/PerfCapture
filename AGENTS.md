@@ -143,6 +143,15 @@ build\          pack.ps1 · launcher.cs · setup-core.cs · setup-ui.cs · setup
 
 ## 坑
 
+- **`Add-Type` 编译的类型只在该 runspace 可见**：每轮新建 runspace 采样会让 `[PcMetrics]` 解析失败 →
+  重新编译 → 静态状态归零、PDH 查询泄漏（表现为「频率永远读不到」+ 退出时 0xC0000005）。
+  采样器必须**常驻一个 runspace**循环采样，结果用 `ConcurrentQueue` 回传给宿主计时器。
+- **`PdhEnumObjectItemsW` 的长度单位是 WCHAR 个数**：`AllocHGlobal(isz)` 只给了一半字节，
+  PDH 写入越界 → 堆损坏（0xC0000374，点开实时监控就闪退）。必须 `isz * 2`。
+- 停止常驻采样线程要**协作式**：先置停止标志让循环自己 `break`，再 `EndInvoke`/`Dispose`；
+  直接 `PS.Stop()` 可能打断原生调用，留下坏状态。
+
+
 - `$env:TEMP` 可能是 8.3 短名（`YOUSOU~1`），路径比较前用 `[IO.Path]::GetFullPath()` 归一。
 - PowerShell 单引号多行字符串里出现 `'` 会提前终止（`.querySelector('.x')` 改双引号）。
 - **CDP 不能在 `WebMessageReceived` 回调里调**（必超时）→ `Queue-Export` + `Form.BeginInvoke`。

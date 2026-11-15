@@ -30,6 +30,12 @@
 ### 说明
 - 浮窗是**普通置顶窗口**，不是注入式覆盖层：独占全屏下看不到，无边框/窗口化才显示。
 - 浮窗的 FPS 行在未采集时如实显示「—」；实时帧率要等批次 C 增量读 PresentMon CSV。
+### 修复（1.5.0 内部）
+- **点「实时监控」闪退**：`PdhEnumObjectItemsW` 的长度单位是 WCHAR 个数，之前按字节分配缓冲区，
+  PDH 写越界导致堆损坏（0xC0000374）。已改为 ×2 分配。
+- **CPU 频率一直读不到**：采样原来每轮新建 runspace，`Add-Type` 编译的类型在 runspace 里解析不到，
+  于是每轮重新编译、静态状态归零、PDH 查询泄漏。改为常驻一个采样线程（队列回传），
+  并改成协作式停止（先置标志再回收），退出时不再出现访问冲突。
 ### 工程
 - 新增 `src/app/35-Metrics.ps1`（采样器 + 能力探测 + 环形缓冲）、`ui/js/realtime.js`、
   `ui/css/realtime.css`；桥接新增 `metricsStart` / `metricsStop` 命令与 `metricsCaps` / `metricSample` 消息。

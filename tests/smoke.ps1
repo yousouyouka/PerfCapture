@@ -513,9 +513,10 @@ if ($hasBuild) {
     }
 }
 
-# 版本 1.4.0（主.次.修补：修补位每轮 +1，前两位由用户通知才动——本轮用户通知进 1.4）
-if ($verFile -ne '1.4.0') { Bad "VERSION 不是 1.4.0（实际 $verFile）" }
-if ($dataJs -notmatch "date: '2026-11-16', version: '1\.4\.0'") { Bad '更新公告里没有 1.4.0（2026-11-16）的条目' }
+# 版本：三段十进制；前两位由用户通知才动，修补位每轮 +1
+if ($verFile -notmatch '^\d+\.\d+\.\d+$') { Bad "VERSION 不是三段式：$verFile" }
+if ($idx -notmatch [regex]::Escape("v$verFile")) { Bad "侧边栏版本号与 VERSION 不一致（$verFile）" }
+if ($dataJs -notmatch ("date: '\d{4}-\d{2}-\d{2}', version: '" + [regex]::Escape($verFile) + "'")) { Bad "更新公告首条版本不是 $verFile" }
 if ($dataJs -notmatch "version: '1\.3\.10'") { Bad '更新公告里 1.3.10 的条目被删了' }
 if ($dataJs -notmatch "version: '1\.3\.9'") { Bad '更新公告里 1.3.9 的条目被删了' }
 if ($dataJs -notmatch "version: '1\.3\.8'") { Bad '更新公告里 1.3.8 的条目被删了' }
@@ -563,6 +564,15 @@ if ($updPs -notmatch 'api\.github\.com') { Bad '清单缺 api.github.com 第三�
 if ($updPs -notmatch 'RSAKeyValue') { Bad '没有内置验签公钥' }
 if ($updPs -match 'PRIVATE KEY|private-key|PRIVATEKEY') { Bad '70-Updates.ps1 里疑似写了私钥' }
 if ($updPs -notmatch "UpdateAutoCheckDelayMs = 12000") { Bad '自动检查不是启动后 12 秒' }
+# 1.4.1 加固契约：逐源验签回退 + 重定向复核 + 边下边算哈希 + 取消 + 停滞看门狗 + 路径限制
+if ($updPs -notmatch 'sigFail') { Bad '取清单脚本缺逐源验签标记 sigFail（镜像错配时无法换源）' }
+if ($updPs -notmatch 'Test-Sig') { Bad '取清单脚本没有内联验签（无法逐源回退）' }
+if ($updPs -notmatch 'RequestMessage\.RequestUri') { Bad '没有按最终地址复核白名单（重定向可绕过）' }
+if ($updPs -notmatch 'TransformBlock') { Bad '下载没有边下边算 SHA-256' }
+if ($updPs -notmatch 'CancellationTokenSource') { Bad '下载不支持取消（无法中断）' }
+if ($updPs -notmatch 'TotalSeconds -gt 60') { Bad '没有下载停滞看门狗' }
+if (-not $updPs.Contains('StartsWith($root')) { Bad '运行安装包没有限制在下载目录内' }
+if ($updPs -notmatch 'UpdateDelayTimer') { Bad '自动检查的延时计时器没有纳入管理（可能重复检查）' }
 if ($capPs -notmatch "'checkUpdate'") { Bad '60-Capture.ps1 没登记 checkUpdate 命令' }
 if ($capPs -notmatch 'Start-UpdateAutoCheck') { Bad '60-Capture.ps1 就绪后没有触发自动检查' }
 if ($idx -notmatch 'id="btnCheckUpdate"') { Bad 'index.html 缺「检查更新」按钮' }

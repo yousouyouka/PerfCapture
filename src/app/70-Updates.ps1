@@ -37,6 +37,7 @@ $script:UpdateState = 'idle'        # idle|checking|latest|available|downloading
 $script:UpdateAutoCheckDone = $false
 $script:UpdateCtx = $null
 $script:UpdateTimer = $null
+$script:UpdateDelayTimer = $null   # 启动后自动检查的延时计时器
 
 # ---------- 工具 ----------
 function Compare-AppVersion {
@@ -94,8 +95,25 @@ function Stop-UpdateTimer {
 
 # ---------- 后台线程里跑的脚本（runspace，不阻塞 UI 线程） ----------
 $script:UpdateFetchScript = @'
-param($ManifestUrls, $TimeoutSec)
+param($ManifestUrls, $TimeoutSec, $PublicKeyXml, $AllowedHosts)
+# 逐源验签：某个镜像拿到「新清单 + 旧签名」这类混用内容时，直接换下一个源，
+# 而不是让整次检查失败（jsDelivr 实测出现过这种错配）。
+function Test-Host($uri) {
+    try { return ($AllowedHosts -contains $uri.Host.ToLowerInvariant()) } catch { return $false }
+}
+function Test-Sig([byte[]]$Data, [byte[]]$Sig) {
+    try {
+        $rsa = New-Object System.Security.Cryptography.RSACryptoServiceProvider
+        $rsa.PersistKeyInCsp = $false
+        $rsa.FromXmlString($PublicKeyXml)
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        $ok = $rsa.VerifyData($Data, $sha, $Sig)
+        $sha.Dispose(); $rsa.Dispose()
+        return $ok
+    } catch { return $false }
+}
 $errs = @()
+$sigFail = $false
 $http = New-Object System.Net.Http.HttpClient
 $http.Timeout = [TimeSpan]::FromSeconds($TimeoutSec)
 try { $http.DefaultRequestHeaders.UserAgent.ParseAdd('PerfCapture/1.4') } catch {}
@@ -103,53 +121,111 @@ try { $http.DefaultRequestHeaders.Add('Accept', 'application/vnd.github.raw, app
 foreach ($u in $ManifestUrls) {
     $sw = [Diagnostics.Stopwatch]::StartNew()
     try {
-        $mb = $http.GetByteArrayAsync($u).GetAwaiter().GetResult()
+        $r = $http.GetAsync($u).GetAwaiter().GetResult()
+        if (-not $r.IsSuccessStatusCode) { $errs += ('{0} HTTP {1}' -f $u, [int]$r.StatusCode); continue }
+        # 白名单要按**最终**地址判：允许自动重定向，但重定向到白名单外一律拒绝
+        if (-not (Test-Host $r.RequestMessage.RequestUri)) {
+            $errs += ('{0} 被重定向到白名单外主机 {1}' -f $u, $r.RequestMessage.RequestUri.Host); continue
+        }
+        $declared = $r.Content.Headers.ContentLength
+        if ($declared -and $declared -gt 262144) { $errs += ('{0} 过大 {1} 字节' -f $u, $declared); continue }
+        $mb = $r.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult()
         if ($mb.Length -lt 2 -or $mb.Length -gt 262144) { $errs += ('{0} 大小异常 {1}' -f $u, $mb.Length); continue }
-        $sigBytes = $http.GetByteArrayAsync($u + '.sig').GetAwaiter().GetResult()
-        $sigText = ([Text.Encoding]::ASCII.GetString($sigBytes)) -replace '\s', ''
+
+        $sr = $http.GetAsync($u + '.sig').GetAwaiter().GetResult()
+        if (-not $sr.IsSuccessStatusCode) { $errs += ('{0}.sig HTTP {1}' -f $u, [int]$sr.StatusCode); continue }
+        if (-not (Test-Host $sr.RequestMessage.RequestUri)) { $errs += ('{0}.sig 被重定向到白名单外主机' -f $u); continue }
+        $sb = $sr.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult()
+        $sigText = ([Text.Encoding]::ASCII.GetString($sb)) -replace '\s', ''
         $sigRaw = $null
         try { $sigRaw = [Convert]::FromBase64String($sigText) } catch { }
-        if (-not $sigRaw -or $sigRaw.Length -ne 256) { $errs += ('{0} 签名不可用（长度 {1}）' -f $u, $sigText.Length); continue }
+        if (-not $sigRaw -or $sigRaw.Length -ne 256) { $errs += ('{0} 签名不可用（{1} 字符）' -f $u, $sigText.Length); continue }
+
+        if (-not (Test-Sig $mb $sigRaw)) {
+            $sigFail = $true
+            $errs += ('{0} 签名不符（镜像清单与签名不同步？）' -f $u)
+            continue
+        }
         return [pscustomobject]@{ ok = $true; url = $u; ms = $sw.ElapsedMilliseconds
-            manifest = [Convert]::ToBase64String($mb); sig = [Convert]::ToBase64String($sigRaw); errors = $errs }
+            manifest = [Convert]::ToBase64String($mb); sig = [Convert]::ToBase64String($sigRaw)
+            sigFail = $false; errors = $errs }
     } catch {
         $errs += ('{0} 失败: {1}' -f $u, (($_.Exception.Message -split "`r?`n")[0]))
     }
 }
-return [pscustomobject]@{ ok = $false; url = ''; ms = 0; manifest = ''; sig = ''; errors = $errs }
+return [pscustomobject]@{ ok = $false; url = ''; ms = 0; manifest = ''; sig = ''; sigFail = $sigFail; errors = $errs }
 '@
 
 $script:UpdateDownloadScript = @'
-param($Url, $OutPath, $MaxBytes, $ExpectedSize)
+param($Url, $OutPath, $MaxBytes, $ExpectedSize, $AllowedHosts, $Token)
+function Test-Host($uri) {
+    try { return ($AllowedHosts -contains $uri.Host.ToLowerInvariant()) } catch { return $false }
+}
+function Fail([string]$code) {
+    if ($OutPath -and (Test-Path -LiteralPath $OutPath)) { Remove-Item -LiteralPath $OutPath -Force -ErrorAction SilentlyContinue }
+    return [pscustomobject]@{ ok = $false; err = $code; sha256 = ''; size = 0 }
+}
 $http = New-Object System.Net.Http.HttpClient
 $http.Timeout = [TimeSpan]::FromSeconds(180)
 try { $http.DefaultRequestHeaders.UserAgent.ParseAdd('PerfCapture/1.4') } catch {}
+$sha = $null
 try {
     $resp = $http.GetAsync($Url, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
-    if (-not $resp.IsSuccessStatusCode) { return ('HTTP ' + [int]$resp.StatusCode) }
+    if (-not $resp.IsSuccessStatusCode) { return (Fail ('HTTP ' + [int]$resp.StatusCode)) }
+    if (-not (Test-Host $resp.RequestMessage.RequestUri)) { return (Fail 'REDIRECT') }
+    $declared = $resp.Content.Headers.ContentLength
+    if ($ExpectedSize -gt 0 -and $declared -and $declared -ne $ExpectedSize) { return (Fail ('SIZE ' + $declared)) }
+    if ($MaxBytes -gt 0 -and $declared -and $declared -gt $MaxBytes) { return (Fail 'TOO_LARGE') }
+
     $in = $resp.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
     $dir = Split-Path -Parent $OutPath
     if ($dir -and -not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     $out = [IO.File]::Open($OutPath, [IO.FileMode]::Create, [IO.FileAccess]::Write)
     $total = [long]0
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    $buf = New-Object byte[] 65536
+    $async = $true
+    $canCancel = $false
+    try { $canCancel = $Token.CanBeCanceled } catch { }
     try {
-        $buf = New-Object byte[] 65536
         while ($true) {
-            $n = $in.Read($buf, 0, $buf.Length)
+            if ($canCancel -and $Token.IsCancellationRequested) { throw 'CANCELLED' }
+            $n = 0
+            if ($async -and $canCancel) {
+                try { $n = $in.ReadAsync($buf, 0, $buf.Length, $Token).GetAwaiter().GetResult() }
+                catch [System.NotSupportedException] { $async = $false; $n = $in.Read($buf, 0, $buf.Length) }
+            } else {
+                $n = $in.Read($buf, 0, $buf.Length)
+            }
             if ($n -le 0) { break }
             $total += $n
-            if ($MaxBytes -gt 0 -and $total -gt $MaxBytes) { $out.Close(); Remove-Item $OutPath -Force -ErrorAction SilentlyContinue; return 'TOO_LARGE' }
+            if ($MaxBytes -gt 0 -and $total -gt $MaxBytes) { throw 'TOO_LARGE' }
+            [void]$sha.TransformBlock($buf, 0, $n, $buf, 0)
             $out.Write($buf, 0, $n)
         }
-    } finally { $out.Close(); $in.Dispose() }
-    return ''
-} catch { return (($_.Exception.Message -split "`r?`n")[0]) }
+        [void]$sha.TransformFinalBlock($buf, 0, 0)
+        $hex = (($sha.Hash) | ForEach-Object { $_.ToString('x2') }) -join ''
+    } finally {
+        try { $out.Close() } catch { }
+        try { $in.Dispose() } catch { }
+        if ($sha) { try { $sha.Dispose() } catch { } }
+    }
+    if ($ExpectedSize -gt 0 -and $total -ne $ExpectedSize) { return (Fail ('SIZE ' + $total)) }
+    return [pscustomobject]@{ ok = $true; err = ''; sha256 = $hex; size = $total }
+} catch {
+    $msg = (($_.Exception.Message -split "`r?`n")[0])
+    if ($_.Exception -is [System.OperationCanceledException]) { $msg = 'CANCELLED' }
+    if (Test-Path -LiteralPath $OutPath) { Remove-Item -LiteralPath $OutPath -Force -ErrorAction SilentlyContinue }
+    if ($sha) { try { $sha.Dispose() } catch { } }
+    return [pscustomobject]@{ ok = $false; err = $msg; sha256 = ''; size = 0 }
+}
 '@
 
 # ---------- 检查更新（异步） ----------
 function Start-UpdateCheck {
     param([string]$Reason = 'manual')
-    if ($script:UpdateCtx -and $script:UpdateCtx.Kind -eq 'check' -and -not $script:UpdateCtx.Handle.IsCompleted) { return }
+    if ($script:UpdateCtx) { Write-AppLog ("已有任务在进行（$($script:UpdateCtx.Kind)），忽略本次检查") 'WARN'; return }
+    if ($script:UpdateDelayTimer) { try { $script:UpdateDelayTimer.Stop(); $script:UpdateDelayTimer.Dispose() } catch { }; $script:UpdateDelayTimer = $null }
     $script:UpdateState = 'checking'
     Send-UpdateState @{ state = 'checking'; reason = $Reason }
     Write-AppLog ("检查更新开始（$Reason）")
@@ -157,7 +233,9 @@ function Start-UpdateCheck {
     $ps = [PowerShell]::Create()
     [void]$ps.AddScript($script:UpdateFetchScript)
     [void]$ps.AddParameter('ManifestUrls', $script:UpdateManifestSources)
-    [void]$ps.AddParameter('TimeoutSec', 5)
+    [void]$ps.AddParameter('TimeoutSec', 6)
+    [void]$ps.AddParameter('PublicKeyXml', $script:UpdatePublicKeyXml)
+    [void]$ps.AddParameter('AllowedHosts', $script:UpdateAllowedHosts)
     $handle = $ps.BeginInvoke()
     $script:UpdateCtx = @{ Kind = 'check'; PS = $ps; Handle = $handle; Reason = $Reason; Started = (Get-Date) }
 
@@ -184,6 +262,13 @@ function Complete-UpdateCheck {
     if (-not $obj -or -not $obj.ok) {
         $detail = ''
         if ($obj -and $obj.errors) { $detail = (@($obj.errors) -join '；') }
+        if ($obj -and $obj.sigFail) {
+            # 至少有一个源确实取到了文件，但签名对不上 —— 按被篡改处理，不降级接受
+            Write-AppLog ('所有可取到的清单都验签失败，已拒绝: ' + $detail) 'WARN'
+            $script:UpdateState = 'error'
+            Send-UpdateState @{ state = 'error'; reason = $Ctx.Reason; detail = 'signature'; hint = 'update.hint.tampered'; sources = $detail }
+            return
+        }
         Write-AppLog ('检查更新失败（所有源都不通）: ' + $detail) 'WARN'
         $script:UpdateState = 'error'
         Send-UpdateState @{ state = 'error'; reason = $Ctx.Reason; detail = $detail; hint = 'update.hint.offline' }
@@ -197,6 +282,10 @@ function Complete-UpdateCheck {
         $script:UpdateState = 'error'
         Send-UpdateState @{ state = 'error'; reason = $Ctx.Reason; detail = 'signature'; hint = 'update.hint.tampered' }
         return
+    }
+    # 有源被跳过（签名错配 / 体积超限 / 重定向等）：正常也要记一笔，方便排查镜像问题
+    if ($obj.errors -and @($obj.errors).Count) {
+        Write-AppLog ('已跳过 ' + @($obj.errors).Count + ' 个清单源：' + (@($obj.errors) -join '；')) 'WARN'
     }
 
     $man = $null
@@ -226,6 +315,21 @@ function Complete-UpdateCheck {
     $urls = @()
     if ($asset -and $asset.urls) { $urls = @($asset.urls | Where-Object { Test-UpdateHost $_ }) }
 
+    # 资产元信息必须自洽：文件名不带路径（防目录穿越）、sha256 是 64 位十六进制、大小为正、地址能用
+    $assetOk = [bool]$asset
+    if ($assetOk) {
+        if ([string]$asset.name -ne (Split-Path -Leaf ([string]$asset.name))) { $assetOk = $false }
+        if ([string]$asset.sha256 -notmatch '^[0-9a-fA-F]{64}$') { $assetOk = $false }
+        if (-not ([long]$asset.size -gt 0)) { $assetOk = $false }
+        if (-not $urls.Count) { $assetOk = $false }
+    }
+    if (-not $assetOk) {
+        Write-AppLog '清单里的资产信息不合法（名称/大小/哈希/地址），已拒绝' 'WARN'
+        $script:UpdateState = 'error'
+        Send-UpdateState @{ state = 'error'; reason = $Ctx.Reason; detail = 'asset'; hint = 'update.hint.tampered' }
+        return
+    }
+
     $script:UpdateState = 'available'
     $script:UpdateAutoCheckDone = $true
     Send-UpdateState @{
@@ -249,23 +353,38 @@ function Set-UpdateCheckedAt {
 function Start-UpdateDownload {
     param([string]$Name, [string[]]$Urls, [string]$Sha256, [long]$Size)
     if ($script:UpdateCtx) { Write-AppLog '已有下载/检查任务在进行' 'WARN'; return }
+    # 资产名只取文件名，杜绝用 ../ 之类写到目录外
+    $Name = Split-Path -Leaf ([string]$Name)
     $safe = ($Name -replace '[\\/:*?"<>|]', '_')
-    $dir = Join-Path $env:TEMP ('PerfCapture\updates')
+    if (-not $safe) { $safe = 'PerfCapture-update.exe' }
+    $dir = Join-Path $env:TEMP 'PerfCapture\updates'
     if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     $out = Join-Path $dir $safe
     if (Test-Path $out) { Remove-Item $out -Force -ErrorAction SilentlyContinue }
     $allowed = @($Urls | Where-Object { Test-UpdateHost $_ })
-    if (-not $allowed.Count) { Send-UpdateState @{ state = 'error'; detail = 'url'; hint = 'update.hint.offline' }; return }
+    if (-not $allowed.Count) {
+        $script:UpdateState = 'error'
+        Send-UpdateState @{ state = 'error'; detail = 'url'; hint = 'update.hint.offline' }
+        return
+    }
 
+    $cts = New-Object System.Threading.CancellationTokenSource
     $ps = [PowerShell]::Create()
     [void]$ps.AddScript($script:UpdateDownloadScript)
     [void]$ps.AddParameter('Url', $allowed[0])
     [void]$ps.AddParameter('OutPath', $out)
     [void]$ps.AddParameter('MaxBytes', $script:UpdateMaxAssetBytes)
     [void]$ps.AddParameter('ExpectedSize', $Size)
+    [void]$ps.AddParameter('AllowedHosts', $script:UpdateAllowedHosts)
+    [void]$ps.AddParameter('Token', $cts.Token)
     $handle = $ps.BeginInvoke()
     $script:UpdateState = 'downloading'
-    $script:UpdateCtx = @{ Kind = 'download'; PS = $ps; Handle = $handle; Out = $out; Sha = $Sha256; Size = $Size; Url = $allowed[0]; Rest = @($allowed | Select-Object -Skip 1) }
+    $script:UpdateCtx = @{
+        Kind = 'download'; PS = $ps; Handle = $handle; Out = $out
+        Sha = $Sha256; Size = $Size; Url = $allowed[0]
+        Rest = @($allowed | Select-Object -Skip 1)
+        Cts = $cts; LastBytes = 0; LastAt = (Get-Date)
+    }
     Send-UpdateState @{ state = 'downloading'; progress = 0; name = $safe; source = $allowed[0] }
     Write-AppLog ("开始下载更新: $($allowed[0])")
 
@@ -281,13 +400,24 @@ function Start-UpdateDownload {
 
 function Complete-UpdateDownload {
     param($Ctx)
-    $err = ''
-    try { $err = [string]@($Ctx.PS.EndInvoke($Ctx.Handle))[0] } catch { $err = $_.Exception.Message }
+    $res = $null
+    try { $res = @($Ctx.PS.EndInvoke($Ctx.Handle))[0] } catch { $res = [pscustomobject]@{ ok = $false; err = $_.Exception.Message; sha256 = ''; size = 0 } }
     try { $Ctx.PS.Dispose() } catch { }
     Stop-UpdateTimer
     $script:UpdateCtx = $null
+    if ($Ctx.Cts) { try { $Ctx.Cts.Dispose() } catch { } }
 
-    if ($err -and $err.Length -gt 0) {
+    $err = ''
+    if (-not $res) { $err = 'unknown' } elseif (-not $res.ok) { $err = [string]$res.err }
+
+    if ($err) {
+        if ($err -eq 'CANCELLED') {
+            if (Test-Path -LiteralPath $Ctx.Out) { Remove-Item -LiteralPath $Ctx.Out -Force -ErrorAction SilentlyContinue }
+            Write-AppLog '用户取消了下载'
+            $script:UpdateState = 'idle'
+            Send-UpdateState @{ state = 'idle'; detail = 'cancelled' }
+            return
+        }
         # 当前源失败：还有备用源就换下一个，否则报错
         if ($Ctx.Rest -and $Ctx.Rest.Count) {
             Write-AppLog ("下载失败（$err），换备用源: $($Ctx.Rest[0])") 'WARN'
@@ -303,21 +433,27 @@ function Complete-UpdateDownload {
     $script:UpdateState = 'verifying'
     Send-UpdateState @{ state = 'verifying'; name = (Split-Path $Ctx.Out -Leaf) }
 
-    # 本地完整性校验：大小 + SHA-256 必须与已验签清单一致
+    # 本地完整性校验：脚本边下边算的 SHA-256 + 落盘大小，都要和已验签清单一致
+    $actual = 0
     $okSize = $true
+    try { $actual = (Get-Item -LiteralPath $Ctx.Out).Length } catch { $okSize = $false }
     if ($Ctx.Size -gt 0) {
-        $actual = (Get-Item -LiteralPath $Ctx.Out).Length
-        $okSize = ($actual -eq $Ctx.Size)
-        if (-not $okSize) { Write-AppLog ("资产大小不符: 期望 $($Ctx.Size)，实际 $actual") 'WARN' }
+        $okSize = ($okSize -and $actual -eq $Ctx.Size -and [long]$res.size -eq $Ctx.Size)
+        if (-not $okSize) { Write-AppLog ("资产大小不符: 期望 $($Ctx.Size)，落盘 $actual，流 $($res.size)") 'WARN' }
     }
     $okHash = $true
     if ($Ctx.Sha) {
-        $h = (Get-FileHash -LiteralPath $Ctx.Out -Algorithm SHA256).Hash.ToLowerInvariant()
-        $okHash = ($h -eq ([string]$Ctx.Sha).ToLowerInvariant())
-        if (-not $okHash) { Write-AppLog ("SHA-256 不符: 期望 $($Ctx.Sha)，实际 $h") 'WARN' }
+        $okHash = ([string]$res.sha256).ToLowerInvariant() -eq ([string]$Ctx.Sha).ToLowerInvariant()
+        if (-not $okHash) { Write-AppLog ("SHA-256 不符: 期望 $($Ctx.Sha)，实际 $($res.sha256)") 'WARN' }
     }
     if (-not ($okSize -and $okHash)) {
         Remove-Item -LiteralPath $Ctx.Out -Force -ErrorAction SilentlyContinue
+        # 镜像可能缓存了旧文件：只要还有备用源就换一个再试，别让用户白等
+        if ($Ctx.Rest -and $Ctx.Rest.Count) {
+            Write-AppLog '本地校验不通过，换备用源重试' 'WARN'
+            Start-UpdateDownload -Name (Split-Path $Ctx.Out -Leaf) -Urls $Ctx.Rest -Sha256 $Ctx.Sha -Size $Ctx.Size
+            return
+        }
         $script:UpdateState = 'error'
         Send-UpdateState @{ state = 'error'; detail = 'integrity'; hint = 'update.hint.tampered' }
         return
@@ -335,7 +471,7 @@ function Invoke-UpdateTick {
 
     if ($ctx.Kind -eq 'check') {
         if (-not $ctx.Handle.IsCompleted) {
-            if (((Get-Date) - $ctx.Started).TotalSeconds -gt 30) {
+            if (((Get-Date) - $ctx.Started).TotalSeconds -gt 45) {
                 try { $ctx.PS.Stop() } catch { }
                 try { $ctx.PS.Dispose() } catch { }
                 $script:UpdateCtx = $null
@@ -352,10 +488,26 @@ function Invoke-UpdateTick {
     if ($ctx.Kind -eq 'download') {
         $len = 0
         try { if (Test-Path -LiteralPath $ctx.Out) { $len = (Get-Item -LiteralPath $ctx.Out).Length } } catch { }
+        if ($len -ne $ctx.LastBytes) { $ctx.LastBytes = $len; $ctx.LastAt = Get-Date }
         $pct = 0
         if ($ctx.Size -gt 0) { $pct = [int][Math]::Min(99, [Math]::Floor(100.0 * $len / $ctx.Size)) }
         Send-UpdateState @{ state = 'downloading'; progress = $pct; received = $len; size = $ctx.Size; name = (Split-Path $ctx.Out -Leaf) }
-        if ($ctx.Handle.IsCompleted) { Complete-UpdateDownload -Ctx $ctx }
+        if ($ctx.Handle.IsCompleted) { Complete-UpdateDownload -Ctx $ctx; return }
+        # 停滞看门狗：60 秒没有新增字节就放弃这个源（避免卡死在半开的连接上）
+        if (((Get-Date) - $ctx.LastAt).TotalSeconds -gt 60) {
+            Write-AppLog '下载停滞超过 60 秒，放弃当前源' 'WARN'
+            try { $ctx.Cts.Cancel() } catch { }
+            try { $ctx.PS.Stop() } catch { }
+            try { $ctx.PS.Dispose() } catch { }
+            $script:UpdateCtx = $null
+            Stop-UpdateTimer
+            if ($ctx.Rest -and $ctx.Rest.Count) {
+                Start-UpdateDownload -Name (Split-Path $ctx.Out -Leaf) -Urls $ctx.Rest -Sha256 $ctx.Sha -Size $ctx.Size
+            } else {
+                $script:UpdateState = 'error'
+                Send-UpdateState @{ state = 'error'; detail = 'stalled'; hint = 'update.hint.download' }
+            }
+        }
         return
     }
 }
@@ -374,6 +526,7 @@ function Start-UpdateAutoCheck {
         Start-UpdateCheck -Reason 'auto'
     })
     $delay.Start()
+    $script:UpdateDelayTimer = $delay
 }
 
 # ---------- 公开操作（供桥接调用） ----------
@@ -387,36 +540,61 @@ function Invoke-UpdateCommand {
         }
         'cancelUpdate' {
             if ($script:UpdateCtx) {
+                try { if ($script:UpdateCtx.Cts) { $script:UpdateCtx.Cts.Cancel() } } catch { }
                 try { $script:UpdateCtx.PS.Stop() } catch { }
                 try { $script:UpdateCtx.PS.Dispose() } catch { }
+                # 取消后不留半截文件，免得用户误点「运行安装包」
+                try {
+                    if ($script:UpdateCtx.Out -and (Test-Path -LiteralPath $script:UpdateCtx.Out)) {
+                        Remove-Item -LiteralPath $script:UpdateCtx.Out -Force -ErrorAction SilentlyContinue
+                    }
+                } catch { }
                 $script:UpdateCtx = $null
             }
             Stop-UpdateTimer
             $script:UpdateState = 'idle'
-            Send-UpdateState @{ state = 'idle' }
+            Send-UpdateState @{ state = 'idle'; detail = 'cancelled'; current = $script:AppVersion }
         }
         'openUpdatePage' {
             try { Start-Process 'https://github.com/yousouyouka/PerfCapture/releases' } catch { }
         }
         'runUpdateInstaller' {
             $path = [string]$Msg.path
-            if ($path -and (Test-Path -LiteralPath $path)) {
-                # 二次校验：跑安装包前再算一次哈希，防止下载后被替换
-                $sha = [string]$Msg.sha256
-                if ($sha) {
-                    $h = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
-                    if ($h -ne $sha.ToLowerInvariant()) {
-                        Write-AppLog '安装包哈希已变化，拒绝运行' 'ERROR'
-                        Send-UpdateState @{ state = 'error'; detail = 'integrity'; hint = 'update.hint.tampered' }
-                        return
-                    }
-                }
-                try { Start-Process -FilePath $path } catch { Write-AppLog ('启动安装包失败: ' + $_.Exception.Message) 'ERROR' }
+            $root = [IO.Path]::GetFullPath((Join-Path $env:TEMP 'PerfCapture\updates'))
+            $full = ''
+            try { $full = [IO.Path]::GetFullPath($path) } catch { }
+            # 只允许运行我们自己下载到临时目录里的文件（UI 消息被伪造也执行不到别处）
+            if (-not $full -or -not $full.StartsWith($root, [StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path -LiteralPath $full)) {
+                Write-AppLog ('拒绝运行不在更新目录内的文件: ' + $path) 'ERROR'
+                Send-UpdateState @{ state = 'error'; detail = 'path'; hint = 'update.hint.tampered' }
+                return
             }
+            # 二次校验：跑安装包前再算一次哈希，防止下载后被替换
+            $sha = [string]$Msg.sha256
+            if ($sha -match '^[0-9a-fA-F]{64}$') {
+                $h = (Get-FileHash -LiteralPath $full -Algorithm SHA256).Hash.ToLowerInvariant()
+                if ($h -ne $sha.ToLowerInvariant()) {
+                    Write-AppLog '安装包哈希已变化，拒绝运行' 'ERROR'
+                    Send-UpdateState @{ state = 'error'; detail = 'integrity'; hint = 'update.hint.tampered' }
+                    return
+                }
+            } else {
+                Write-AppLog '缺少可用哈希，拒绝运行安装包' 'ERROR'
+                Send-UpdateState @{ state = 'error'; detail = 'integrity'; hint = 'update.hint.tampered' }
+                return
+            }
+            try { Start-Process -FilePath $full } catch { Write-AppLog ('启动安装包失败: ' + $_.Exception.Message) 'ERROR' }
         }
         'openUpdateFolder' {
             $path = [string]$Msg.path
-            if ($path -and (Test-Path -LiteralPath $path)) { try { Start-Process 'explorer.exe' ('/select,"' + $path + '"') } catch { } }
+            $root = [IO.Path]::GetFullPath((Join-Path $env:TEMP 'PerfCapture\updates'))
+            $full = ''
+            try { $full = [IO.Path]::GetFullPath($path) } catch { }
+            if ($full -and $full.StartsWith($root, [StringComparison]::OrdinalIgnoreCase) -and (Test-Path -LiteralPath $full)) {
+                try { Start-Process 'explorer.exe' ('/select,"' + $full + '"') } catch { }
+            } else {
+                try { Start-Process 'explorer.exe' $root } catch { }
+            }
         }
         'skipUpdateVersion' {
             $v = [string]$Msg.version

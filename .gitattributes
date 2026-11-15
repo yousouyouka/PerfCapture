@@ -1,0 +1,19 @@
+# 让 git 自己判断文本，二进制显式声明，避免 diff / 换行噪声
+* text=auto
+
+*.exe binary
+*.dll binary
+*.ico binary
+*.png binary
+*.jpg binary
+*.ttf binary
+*.zip binary
+
+*.ps1 text
+*.cmd text
+*.cs text
+*.js text
+*.css text
+*.html text
+*.json text
+*.md text

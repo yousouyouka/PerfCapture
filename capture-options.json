@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "note": "采集项清单的唯一事实来源。宿主读取本文件后随 init 消息下发给界面，界面据此渲染勾选框；引擎按 skip 字符串判断是否采集。新增采集项 = 这里加一条 + 引擎实现对应采集逻辑（共两处）。label 是 i18n 键，不要写具体文案。",
+  "always": {
+    "keys": ["fps", "p1low", "frametime"],
+    "label": "capture.itemsHint"
+  },
+  "options": [
+    { "skip": "latency",  "label": "capture.item.latency",  "default": true },
+    { "skip": "gputemp",  "label": "capture.item.gputemp",  "default": true },
+    { "skip": "gpuusage", "label": "capture.item.gpuusage", "default": true },
+    { "skip": "vram",     "label": "capture.item.vram",     "default": true },
+    { "skip": "ram",      "label": "capture.item.ram",      "default": true },
+    { "skip": "features", "label": "capture.item.features", "default": true },
+    { "skip": "res",      "label": "capture.item.res",      "default": true }
+  ]
+}

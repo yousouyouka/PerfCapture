@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PerfCapture</title>
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/layout.css">
+<link rel="stylesheet" href="css/components.css">
+<link rel="stylesheet" href="css/terminal.css">
+<link rel="stylesheet" href="css/report.css">
+<link rel="stylesheet" href="css/popup.css">
+<link rel="stylesheet" href="css/updates.css">
+<link rel="stylesheet" href="css/survey.css">
+</head>
+<body>
+<div class="app" id="app">
+
+  <aside class="sidebar">
+    <div class="sidebar-head">
+      <span class="brand-mark"></span>
+      <span class="sidebar-name">PerfCapture</span>
+      <button class="sidebar-toggle" id="sidebarToggle" type="button" title="收起 / 展开侧边栏">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+      </button>
+    </div>
+    <nav class="sidebar-nav">
+      <!-- 功能区 -->
+      <div class="nav-group">
+        <button class="nav-item is-active" type="button" data-page="capture">
+          <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M3 17l5-6 4 4 4-5 5 6"/>
+          </svg>
+          <span class="nav-label" data-i18n="nav.capture">性能采集</span>
+        </button>
+        <button class="nav-item" type="button" data-page="realtime">
+          <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M3 12h4l2-6 3 12 3-8 2 2h4"/>
+          </svg>
+          <span class="nav-label" data-i18n="nav.realtime">实时监控</span>
+        </button>
+      </div>
+
+      <!-- 底部：更新公告 / 设置 + 版本号 -->
+      <div class="nav-group nav-group-bottom">
+        <button class="nav-item" type="button" data-page="updates">
+          <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 10v4h3l6 4V6L7 10H4z"/>
+            <path d="M18 9a4 4 0 0 1 0 6"/>
+          </svg>
+          <span class="nav-label" data-i18n="nav.updates">更新公告</span>
+        </button>
+        <button class="nav-item" type="button" data-page="survey">
+          <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M9 5h6v2H9z"/>
+            <path d="M7 5h10v15H7z"/>
+            <path d="M10 13l2 2 3-4"/>
+          </svg>
+          <span class="nav-label" data-i18n="nav.survey">问卷调查</span>
+        </button>
+        <button class="nav-item" type="button" data-page="settings">
+          <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="3.1"/>
+            <path d="M19.2 14.6a1.6 1.6 0 0 0 .32 1.76l.06.06a1.9 1.9 0 1 1-2.69 2.69l-.06-.06a1.6 1.6 0 0 0-1.76-.32 1.6 1.6 0 0 0-.97 1.47V20a1.9 1.9 0 1 1-3.8 0v-.1a1.6 1.6 0 0 0-1.05-1.47 1.6 1.6 0 0 0-1.76.32l-.06.06a1.9 1.9 0 1 1-2.69-2.69l.06-.06a1.6 1.6 0 0 0 .32-1.76 1.6 1.6 0 0 0-1.47-.97H4a1.9 1.9 0 1 1 0-3.8h.1a1.6 1.6 0 0 0 1.47-1.05 1.6 1.6 0 0 0-.32-1.76l-.06-.06a1.9 1.9 0 1 1 2.69-2.69l.06.06a1.6 1.6 0 0 0 1.76.32h.08a1.6 1.6 0 0 0 .97-1.47V4a1.9 1.9 0 1 1 3.8 0v.1a1.6 1.6 0 0 0 .97 1.47 1.6 1.6 0 0 0 1.76-.32l.06-.06a1.9 1.9 0 1 1 2.69 2.69l-.06.06a1.6 1.6 0 0 0-.32 1.76v.08a1.6 1.6 0 0 0 1.47.97H20a1.9 1.9 0 1 1 0 3.8h-.1a1.6 1.6 0 0 0-1.47.97z"/>
+          </svg>
+          <span class="nav-label" data-i18n="nav.settings">设置</span>
+        </button>
+        <div class="sidebar-version" id="sidebarVersion">v1.3.10</div>
+      </div>
+    </nav>
+  </aside>
+
+  <div class="main">
+
+    <!-- ── 页面一：性能采集 ── -->
+    <section class="page" data-page="capture">
+
+      <section class="card card-proc">
+        <label class="field-label" data-i18n="capture.targetProcess">目标进程</label>
+        <div class="proc-row">
+          <button id="btnProc" class="btn btn-select" type="button">
+            <span id="procText" data-i18n="capture.pickProcess">（点击选择目标进程）</span>
+            <svg viewBox="0 0 12 8" aria-hidden="true"><path d="M1 1l5 5 5-5"/></svg>
+          </button>
+          <button id="btnRefresh" class="btn btn-ghost" type="button" data-i18n="capture.refresh">刷新列表</button>
+          <span class="hint" data-i18n="capture.keepForeground">采集期间请保持游戏窗口在前台</span>
+        </div>
+      </section>
+
+      <main class="layout">
+        <div class="col-left">
+
+          <section class="card" data-collapse="settings">
+            <h2 class="card-title">
+              <span data-i18n="capture.settings">采集设置</span>
+              <button class="card-toggle" type="button" aria-expanded="true" data-i18n-title="card.toggle" title="折叠 / 展开">
+                <svg viewBox="0 0 12 8" aria-hidden="true"><path d="M1 1l5 5 5-5"/></svg>
+              </button>
+            </h2>
+            <div class="card-body"><div class="card-body-inner">
+              <div class="setting-row">
+                <label class="field-label" for="seconds" data-i18n="capture.seconds">采集秒数</label>
+                <input id="seconds" class="input input-num" type="number" min="10" max="1800" step="10" value="120">
+                <span class="unit" data-i18n="capture.secondsUnit">秒</span>
+                <span class="hint hint-right" data-i18n="capture.secondsHint">范围 10 – 1800 秒，建议 120 秒</span>
+              </div>
+              <div class="setting-row checks">
+                <label class="check"><input id="chkMin" type="checkbox" checked><span data-i18n="capture.countdown">采集前倒计时 5 秒并最小化窗口</span></label>
+                <label class="check"><input id="chkSound" type="checkbox" checked><span data-i18n="capture.sound">采集结束提示音</span></label>
+              </div>
+            </div></div>
+          </section>
+
+          <!-- 勾选项由 capture-options.json 驱动，运行时渲染（ui/js/capture-options.js） -->
+          <section class="card" data-collapse="items">
+            <h2 class="card-title">
+              <span data-i18n="capture.items">采集内容</span>
+              <button class="card-toggle" type="button" aria-expanded="true" data-i18n-title="card.toggle" title="折叠 / 展开">
+                <svg viewBox="0 0 12 8" aria-hidden="true"><path d="M1 1l5 5 5-5"/></svg>
+              </button>
+            </h2>
+            <div class="card-body"><div class="card-body-inner">
+              <p class="card-note" data-i18n="capture.itemsHint">帧率 / 1% Low / 帧时间 始终采集</p>
+              <div class="collect-grid"></div>
+            </div></div>
+          </section>
+
+          <div class="action-row">
+            <button id="btnStart" class="btn btn-primary" type="button" data-i18n="capture.start">开始采集</button>
+            <button id="btnStop" class="btn btn-stop" type="button" hidden data-i18n="capture.stop">停止采集</button>
+            <button id="btnExport" class="btn btn-ghost" type="button" disabled data-i18n="capture.export">导出报告</button>
+            <button id="btnExportPng" class="btn btn-ghost" type="button" disabled data-i18n="capture.exportPng">导出长图</button>
+            <button id="btnOpen" class="btn btn-ghost" type="button" data-i18n="capture.openDir">打开数据目录</button>
+          </div>
+
+          <div class="status-row">
+            <span id="status" data-i18n="capture.idle">选择进程后点「开始采集」</span>
+          </div>
+          <div class="progress"><div id="progressBar" class="progress-bar"></div></div>
+
+          <!-- 终端：默认面积固定（不随上方卡片收起展开变化），可折叠、可拉长覆盖左栏 -->
+          <section class="card card-term" id="cardTerm" data-collapse="term">
+            <h2 class="card-title">
+              <span data-i18n="capture.terminal">终端</span>
+              <span class="card-title-actions">
+                <button class="card-toggle" type="button" aria-expanded="true" data-i18n-title="card.toggle" title="折叠 / 展开">
+                  <svg viewBox="0 0 12 8" aria-hidden="true"><path d="M1 1l5 5 5-5"/></svg>
+                </button>
+                <button class="card-toggle card-toggle-stretch" id="termStretch" type="button" aria-pressed="false"
+                        data-i18n-title="term.stretch" title="拉长展示">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5"/></svg>
+                </button>
+              </span>
+            </h2>
+            <div class="card-body"><div class="card-body-inner">
+              <div id="term" class="term"></div>
+            </div></div>
+          </section>
+
+        </div>
+
+        <div class="col-right">
+          <div class="splitter splitter-col" id="splitCol" role="separator" aria-orientation="vertical"
+               tabindex="0" data-i18n-title="split.col" title="拖动调整左右宽度"></div>
+          <section class="card card-preview">
+            <h2 class="card-title" data-i18n="capture.preview">报告预览</h2>
+            <div id="preview" class="preview">
+              <div class="empty">
+                <strong data-i18n="capture.emptyTitle">还没有数据</strong>
+                <p data-i18n="capture.emptyHint">点「开始采集」，完成后这里直接显示报告。需要文件时点「导出报告」。</p>
+              </div>
+            </div>
+          </section>
+        </div>
+      </main>
+    </section>
+
+    <!-- ── 页面二：设置 ── -->
+    <section class="page" data-page="settings" hidden>
+      <div class="settings-wrap">
+
+        <section class="card">
+          <h2 class="card-title" data-i18n="settings.appearance">外观</h2>
+          <div class="setting-block">
+            <div class="setting-label">
+              <strong data-i18n="settings.theme">主题风格</strong>
+              <small data-i18n="settings.themeHint">只影响界面外观，不改动采集设置</small>
+            </div>
+            <div class="segmented" id="segTheme">
+              <button type="button" data-theme-value="system" data-i18n="theme.system">跟随系统</button>
+              <button type="button" data-theme-value="light" data-i18n="theme.light">浅色</button>
+              <button type="button" data-theme-value="dark" data-i18n="theme.dark">深色</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2 class="card-title" data-i18n="settings.general">通用</h2>
+          <div class="setting-block">
+            <div class="setting-label">
+              <strong data-i18n="settings.language">页面语言</strong>
+              <small data-i18n="settings.languageHint">界面与报告正文同时切换</small>
+            </div>
+            <div class="segmented" id="segLang">
+              <button type="button" data-lang="zh-CN">中文</button>
+              <button type="button" data-lang="en-US">English</button>
+              <button type="button" data-lang="ja-JP">日本語</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2 class="card-title" data-i18n="settings.about">关于</h2>
+          <div class="setting-block">
+            <div class="setting-label">
+              <strong>PerfCapture</strong>
+              <small>v1.3.10 · PresentMon ETW · 零注入</small>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </section>
+
+    <!-- ── 页面三：实时监控（待开发） ── -->
+    <section class="page" data-page="realtime" hidden>
+      <div class="settings-wrap">
+        <section class="card realtime-card">
+          <h2 class="card-title" data-i18n="realtime.title">实时监控</h2>
+          <span class="realtime-badge" data-i18n="realtime.badge">待开发</span>
+          <p class="realtime-desc" data-i18n="realtime.desc">这里将显示采集过程中的实时帧率、帧时间与 GPU 状态。目前采集仍是一次性完整测量，实时曲线尚未实现。</p>
+        </section>
+      </div>
+    </section>
+
+    <!-- ── 页面四：更新公告（排版与板块照搬 TextAxis 的 updates 页） ── -->
+    <section class="page" data-page="updates" hidden>
+      <div class="updates-wrap">
+        <header class="updates-header">
+          <div>
+            <span class="updates-eyebrow" data-i18n="updates.eyebrow">What's new</span>
+            <div class="updates-title-line">
+              <h1 data-i18n="updates.title">更新公告</h1>
+              <span class="updates-current" id="updatesCurrent"></span>
+            </div>
+            <p data-i18n="updates.lead">按日期回顾每次改动，一眼看到版本与功能归属。</p>
+          </div>
+        </header>
+
+        <nav class="updates-versions" aria-label="版本快捷跳转">
+          <span class="updates-nav-label"><span data-i18n="updates.versions">版本记录</span><small data-i18n="updates.versionsHint">点击查看更新</small></span>
+          <div class="updates-version-track" id="updatesVersions"></div>
+        </nav>
+
+        <div class="updates-areas" id="updatesAreas" role="group" aria-label="按板块筛选"></div>
+
+        <div class="updates-filters" id="updatesFilters" role="group" aria-label="按分类筛选"></div>
+
+        <div class="updates-layout">
+          <aside class="updates-dates">
+            <span class="updates-nav-label" data-i18n="updates.dates">更新日期</span>
+            <nav id="updatesDates" aria-label="跳转更新日期"></nav>
+          </aside>
+          <div class="updates-scroll" id="updatesScroll">
+            <div class="updates-note">
+              <span data-i18n="updates.noteLabel">更新说明</span>
+              <em data-i18n="updates.note">每条按完成时刻记录；时间前带 ≈ 的是按文件时间回填的早期条目。</em>
+            </div>
+            <div id="updatesEntries"></div>
+            <footer class="updates-footer" data-i18n="updates.footer">改动都写在这里，方便随时回看。</footer>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── 页面五：问卷调查（本轮纯前端：只定样式与排版，不接后端） ── -->
+    <section class="page" data-page="survey" hidden>
+      <div class="survey-wrap">
+        <header class="survey-header">
+          <div>
+            <span class="survey-eyebrow" data-i18n="survey.eyebrow">Feedback</span>
+            <div class="survey-title-line">
+              <h1 data-i18n="survey.title">问卷调查</h1>
+              <span class="survey-count" id="surveyCount"></span>
+            </div>
+            <p data-i18n="survey.lead">你的反馈会直接影响下一个版本改什么。</p>
+          </div>
+        </header>
+        <div class="survey-scroll">
+          <div id="surveyList"></div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<div id="popup" class="popup" hidden>
+  <div class="popup-list" id="popupList"></div>
+</div>
+
+<script src="js/util.js"></script>
+<script src="js/i18n.js"></script>
+<script src="js/capture-options.js"></script>
+<script src="js/bridge.js"></script>
+<script src="js/theme.js"></script>
+<script src="js/popup.js"></script>
+<script src="js/terminal.js"></script>
+<script src="js/ui-state.js"></script>
+<script src="js/report.js"></script>
+<script src="js/updates-data.js"></script>
+<script src="js/updates.js"></script>
+<script src="js/survey-data.js"></script>
+<script src="js/survey.js"></script>
+<script src="js/collapse.js"></script>
+<script src="js/split.js"></script>
+<script src="js/sidebar.js"></script>
+<script src="js/settings.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,148 @@
+/* 报告预览与图表 */
+
+/* ── 报告预览 ── */
+.preview {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 0.35rem;
+  scroll-behavior: smooth;
+}
+.preview .empty {
+  border: 1px dashed var(--line-strong);
+  border-radius: 12px;
+  padding: 1.4rem 1.1rem;
+  color: var(--faint);
+  font-size: 0.82rem;
+}
+.preview .empty strong { display: block; color: var(--muted); margin-bottom: 0.4rem; }
+.preview .empty p { margin: 0; line-height: 1.7; }
+
+.rp-title {
+  font-size: 1.12rem;
+  color: var(--text-strong);
+  margin: 0 0 0.15rem;
+}
+.rp-meta {
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin-bottom: 0.7rem;
+  padding-bottom: 0.55rem;
+  border-bottom: 1px solid var(--line);
+}
+.rp-section { font-size: 0.78rem; color: var(--muted); margin: 0.9rem 0 0.45rem; }
+
+.rp-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.5rem;
+}
+.rp-tile {
+  background: var(--tile);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 0.5rem 0.65rem;
+  min-width: 0;
+}
+.rp-tile .k { font-size: 0.68rem; color: var(--muted); }
+.rp-tile .v {
+  font-size: 1.16rem;
+  color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+  margin-top: 0.12rem;
+}
+.rp-tile .v small,
+.rp-tile .v .p { font-size: 0.66rem; color: var(--muted); margin-left: 0.2rem; }
+
+.rp-verdict {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  background: var(--tile);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.45rem 0.7rem;
+  font-size: 0.8rem;
+  margin-bottom: 0.35rem;
+}
+.rp-verdict i {
+  width: 3px;
+  align-self: stretch;
+  border-radius: 2px;
+  background: var(--line-strong);
+  flex: 0 0 auto;
+}
+.rp-verdict.good i { background: var(--good); }
+.rp-verdict.warn i { background: var(--warn); }
+.rp-verdict.bad i { background: var(--bad); }
+
+.rp-chart {
+  background: var(--tile);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 0.5rem;
+}
+.rp-chart canvas { display: block; width: 100%; height: 7.2rem; }
+.rp-chart .cap { font-size: 0.66rem; color: var(--faint); margin-top: 0.3rem; }
+
+.rp-rows { border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+.rp-rows .row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+  padding: 0.42rem 0.65rem;
+  font-size: 0.78rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--tile);
+}
+.rp-rows .row:last-child { border-bottom: none; }
+.rp-rows .row .k { color: var(--muted); }
+.rp-rows .row .v { color: var(--text-strong); font-variant-numeric: tabular-nums; text-align: right; }
+
+
+/* ── 图表块：标题 + 画布 + 说明，两张图平铺 ── */
+.rp-chart-block { margin-bottom: 0.9rem; }
+.rp-chart-block:last-child { margin-bottom: 0; }
+.rp-chart-title {
+  font-size: 0.78rem;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+  margin-bottom: 0.35rem;
+}
+.rp-chart-note {
+  margin-top: 0.4rem;
+  font-size: 0.72rem;
+  color: var(--faint);
+}
+
+/* ── 导出长图视图（html.is-exporting） ──
+   宿主用 CDP 整页截图前，前端先把页面收拾成"一整张报告"：
+   隐藏侧栏 / 目标进程 / 左栏（含终端）/ 操作区，报告卡解除高度与滚动限制，
+   全部用 display:block + height:auto，让内容自然撑开，截图才能拿到完整长度。
+   注意：**不要覆盖背景**。长图要"和窗口一模一样"，body 自己的主题色 + 背景图 +
+   遮罩必须原样保留（早前误写成 var(--page)，那个变量不存在，截出来的图背景是透明的）。 */
+html.is-exporting,
+html.is-exporting body { height: auto; overflow: visible; }
+html.is-exporting .app { display: block; height: auto; overflow: visible; }
+html.is-exporting .main { display: block; height: auto; overflow: visible; padding: 22px 24px; }
+/* 只展开采集页：设置页（外观 / 通用 / 关于）绝不能进长图。 */
+html.is-exporting .page:not([data-page="capture"]) { display: none !important; }
+html.is-exporting .page[data-page="capture"] { display: block; height: auto; overflow: visible; }
+html.is-exporting .layout { display: block; height: auto; }
+html.is-exporting .col-right { display: block; }
+html.is-exporting .sidebar,
+html.is-exporting .card-proc,
+html.is-exporting .col-left,
+html.is-exporting .action-row,
+html.is-exporting .status-row,
+html.is-exporting .progress { display: none !important; }
+html.is-exporting .card-preview {
+  flex: none;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+html.is-exporting .card-preview > .card-title { display: none; }
+html.is-exporting .preview { overflow: visible; height: auto; max-height: none; padding-right: 0; }

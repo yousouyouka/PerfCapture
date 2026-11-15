@@ -1,0 +1,163 @@
+/* 设计令牌：字体、颜色变量（浅/深）、页面基底、滚动条 */
+
+/* PerfCapture · 视觉层
+   参考 TextAxis：浅紫画布 + 半透明白卡 + 细描边 + 柔和阴影
+   字体统一方正兰亭圆（本地文件），滚动条全部自绘圆角 */
+
+@font-face {
+  font-family: 'PerfFont';
+  src: url('../../assets/方正兰亭圆_GBK_中粗.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;   /* 字体文件缺失时立刻用回退字体，不留白屏 */
+}
+
+:root {
+  --bg-page: #e9e8ef;
+  --bg-overlay: rgba(238, 237, 243, 0.66);
+  --card: rgba(255, 255, 255, 0.76);        /* 比上一版再透明 10% */
+  --card-solid: #ffffff;
+  --tile: rgba(240, 236, 246, 0.85);
+  --line: #e3e0ec;
+  --line-strong: #d3cee0;
+  --text: #333649;
+  --text-strong: #262330;
+  --muted: #666278;
+  --faint: #8b8a99;
+  --accent: #716493;
+  --accent-hover: #7f72a3;
+  --accent-press: #5b4e7e;
+  --accent-soft: #ece8f6;
+  --input: #ffffff;
+  --good: #2f8f46;
+  --warn: #a86f14;
+  --bad: #cf3b32;
+  --term-bg: #f7f6fa;
+  --term-line: #e3e0ec;
+  --term-text: #22543a;
+  --term-accent: #5b4e7e;
+  --term-warn: #96601b;
+  --shadow: 0 2px 12px rgba(37, 32, 49, 0.08);
+  --shadow-hover: 0 4px 18px rgba(37, 32, 49, 0.12);
+  color-scheme: light;
+}
+
+html[data-theme='dark'] {
+  --bg-page: #10131a;
+  --bg-overlay: rgba(10, 12, 17, 0.72);
+  --card: rgba(30, 33, 41, 0.80);           /* 比上一版再透明 10% */
+  --card-solid: #1e2129;
+  --tile: rgba(255, 255, 255, 0.06);
+  --line: #333842;
+  --line-strong: #454b58;
+  --text: #e6e8ec;
+  --text-strong: #f2f4f8;
+  --muted: #a6acb8;
+  --faint: #848a96;
+  --accent: #8672ba;
+  --accent-hover: #9a85d0;
+  --accent-press: #70609c;
+  --accent-soft: rgba(134, 114, 186, 0.18);
+  --input: #1a1d24;
+  --good: #5cbe78;
+  --warn: #d6ac5c;
+  --bad: #e86e68;
+  --term-bg: #0f1217;
+  --term-line: #2a2f39;
+  --term-text: #8ee0a8;
+  --term-accent: #b3a2e0;
+  --term-warn: #e6c27a;
+  --shadow: 0 2px 14px rgba(0, 0, 0, 0.35);
+  --shadow-hover: 0 6px 22px rgba(0, 0, 0, 0.45);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* 跟随窗口等比缩放：最大化时整体放大，不是把空白拉长 */
+html {
+  font-size: clamp(13.5px, 1.18vw, 19px);
+}
+
+body {
+  font-family: 'PerfFont', 'Microsoft YaHei UI', 'Microsoft YaHei', 'Segoe UI', sans-serif;
+  font-weight: 400;                    /* 字体本身是中粗，不要再加粗，否则糊 */
+  font-size: 0.94rem;
+  line-height: 1.55;
+  color: var(--text);
+  background-color: var(--bg-page);
+  background-image:
+    linear-gradient(var(--bg-overlay), var(--bg-overlay)),
+    url('../../assets/background.jpg');
+  background-size: cover, cover;
+  background-position: center, center 45%;
+  background-repeat: no-repeat, no-repeat;
+  user-select: none;
+}
+
+/* ── 滚动条：统一圆角细条（8px 宽，滑块 4px 圆角，可拖动） ── */
+/* 注意：不要写 scrollbar-width / scrollbar-color —— 一旦写了，Chromium 会忽略
+   下面所有 ::-webkit-scrollbar 规则，退回系统窄条，又难拖又没圆角。 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(122, 114, 140, 0.42);
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+  min-height: 2.2rem;
+  transition: background-color 0.15s ease;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(122, 114, 140, 0.72);
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:active {
+  background: rgba(113, 100, 147, 0.85);
+  background-clip: content-box;
+}
+::-webkit-scrollbar-corner { background: transparent; }
+
+/* 外层：左侧固定导航 + 右侧主区；折叠时只改列宽，不用绝对定位 */
+.app {
+  height: 100%;
+  display: grid;
+  grid-template-columns: 13.5rem minmax(0, 1fr);
+  overflow: hidden;
+  transition: grid-template-columns 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.app.is-collapsed { grid-template-columns: 4.4rem minmax(0, 1fr); }
+
+.main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: 0.9rem 1.1rem 1.1rem;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 页面容器：同一时刻只显示一个 */
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+.page[hidden] { display: none; }
+

@@ -1,0 +1,71 @@
+/* 终端日志区 */
+
+/* ── 终端 ── */
+/* 面积固定：不再用 flex:1 吃掉剩余空间，否则上方卡片收起/展开时终端会跟着变高变矮。
+   margin-top:auto 让它在内容不满一屏时贴住底部，看起来和以前一样。
+   内容超出一屏时由 .col-left 自己滚动。 */
+.card-term {
+  flex: 0 0 auto;
+  margin-top: auto;
+  min-height: 8rem;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 0.6rem;
+}
+.card-term .card-body { flex: 1 1 auto; min-height: 0; }
+/* 日志区默认高度（占屏高三成，上下夹住；固定值，不随上方卡片收起展开变化） */
+.card-term .term { height: clamp(9rem, 30vh, 20rem); }
+.card-term.is-collapsed { min-height: 0; }
+.card-term.is-collapsed .term { height: auto; }
+
+/* 拉长展示：覆盖左栏（目标进程以下的部分），再点一次还原。
+   动画做成"从终端原来那块向上掀开"：用 clip-path 的上边距从原位置收起到 0，
+   --term-reveal-top 由 JS 按终端原本高度算出来，动画结束点正好是整片左栏。 */
+@keyframes term-stretch-in {
+  from { clip-path: inset(var(--term-reveal-top, 55%) 0 0 0); opacity: 0.35; }
+  to   { clip-path: inset(0 0 0 0); opacity: 1; }
+}
+@keyframes term-stretch-out {
+  from { clip-path: inset(0 0 0 0); opacity: 1; }
+  to   { clip-path: inset(var(--term-reveal-top, 55%) 0 0 0); opacity: 0.2; }
+}
+.col-left.is-term-stretched { overflow: hidden; }
+.card-term.is-stretched {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  z-index: 5;
+  height: auto;
+  /* 覆盖在卡片之上，阴影要更沉一点才有层次 */
+  box-shadow: var(--shadow), 0 12px 32px -10px rgba(24, 20, 36, 0.34), 0 3px 0 -1px var(--line-strong);
+  animation: term-stretch-in 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.card-term.is-restoring { animation: term-stretch-out 160ms ease-in forwards; }
+.card-term.is-stretched .card-body-inner { height: 100%; }
+.card-term.is-stretched .term { height: 100%; }
+/* 拉长时只留"还原"按钮，避免叠上折叠 */
+.card-term.is-stretched .card-toggle:not(.card-toggle-stretch) { display: none; }
+/* 系统要求减少动效时直接切，不播动画 */
+@media (prefers-reduced-motion: reduce) {
+  .card-term.is-stretched, .card-term.is-restoring { animation: none; }
+}
+.term {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--term-bg);
+  border: 1px solid var(--term-line);
+  border-radius: 9px;
+  padding: 0.5rem 0.65rem;
+  font-family: 'PerfFont', 'Microsoft YaHei UI', 'Consolas', monospace;
+  font-size: 0.76rem;
+  line-height: 1.5;
+  color: var(--term-text);
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: text;
+  scroll-behavior: smooth;
+}
+.term .ln-accent { color: var(--term-accent); }
+.term .ln-warn { color: var(--term-warn); }
+

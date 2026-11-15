@@ -1,0 +1,19 @@
+# ── 构建产物（打包生成，不进仓库）──
+/dist/
+# 根目录的 PerfCapture.exe 是本地编译的启动器，随 dist 产物走，源码仓库不带
+/PerfCapture.exe
+/build/payload.zip
+
+# ── 运行时数据：报告、日志、用户配置 ──
+/reports/
+/PerfCapture.settings.json
+*.log
+
+# ── 编辑器与系统噪声 ──
+.vs/
+.vscode/
+.idea/
+*.tmp
+*.bak
+Thumbs.db
+desktop.ini

@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "updated": "2026-11-14",
+  "note": "依赖声明。bundled=true 表示已随包分发，正常永不缺失；installable=false 表示无法下载安装（驱动组件），只能提示。新增大依赖时追加一条，并在功能入口声明 requires。",
+  "deps": [
+    {
+      "id": "webview2-runtime",
+      "title": "WebView2 运行时",
+      "required": true,
+      "bundled": false,
+      "installable": true,
+      "sizeMB": 0,
+      "howToBundle": "从微软官方下载 WebView2 固定版 CAB（约 180MB），解压到 runtime\\webview2，目录内须同时含 msedgewebview2.exe 与 msedge.dll；打包脚本会自动识别并内置。注意：NuGet 的 WebView2.Runtime.X64 包不含 msedge.dll，用它会启动失败（CO_E_SERVER_EXEC_FAILURE）。",
+      "detect": [
+        { "type": "dir", "path": "{root}\\runtime\\webview2", "mustContain": "msedgewebview2.exe" },
+        { "type": "registry", "path": "HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\EdgeUpdate\\Clients\\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}", "value": "pv" }
+      ],
+      "fallback": "内置目录缺失时自动回退系统 Evergreen；两者皆无则提示安装",
+      "sources": [
+        { "id": "nuget-fixed", "kind": "nuget", "package": "WebView2.Runtime.X64", "note": "固定版，解压到 runtime\\webview2 即可，无需管理员" },
+        { "id": "ms-bootstrap", "kind": "download-then-run", "url": "https://go.microsoft.com/fwlink/p/?LinkId=2124703", "note": "微软官方在线安装器（Evergreen）" },
+        { "id": "manual", "kind": "open-url", "url": "https://developer.microsoft.com/microsoft-edge/webview2/" }
+      ],
+      "offline": { "inbox": "deps-inbox", "accept": ["MicrosoftEdgeWebview2Setup.exe", "WebView2.Runtime.X64*.nupkg"] }
+    },
+    {
+      "id": "presentmon",
+      "title": "PresentMon（帧采集后端）",
+      "required": true,
+      "bundled": true,
+      "installable": true,
+      "sizeMB": 1,
+      "detect": [
+        { "type": "file", "path": "{root}\\tools\\presentmon.exe" },
+        { "type": "command", "name": "presentmon" }
+      ],
+      "affects": ["avg_fps", "fps_1pct_low", "frametime", "latency"],
+      "fallback": "内置缺失时用系统已装版本（winget install Intel.PresentMon.Console）",
+      "sources": [
+        { "id": "winget", "kind": "hint", "note": "winget install Intel.PresentMon.Console" }
+      ],
+      "offline": { "inbox": "deps-inbox", "accept": ["presentmon.exe"] }
+    },
+    {
+      "id": "nvidia-smi",
+      "title": "NVIDIA 驱动工具",
+      "required": false,
+      "bundled": false,
+      "installable": false,
+      "sizeMB": 0,
+      "detect": [
+        { "type": "file", "path": "%SystemRoot%\\System32\\nvidia-smi.exe" }
+      ],
+      "affects": ["gpu_util", "gpu_temp", "vram"],
+      "whenMissing": {
+        "log": "nvidia-smi 未找到：GPU 温度/占用/显存将记为空值（帧率与延迟不受影响）",
+        "ui": "GPU 指标显示为 —"
+      },
+      "note": "驱动组件，不能随程序分发，也无法下载安装；缺失只影响 GPU 相关指标"
+    },
+    {
+      "id": "rtss-shared-memory",
+      "title": "RTSS 共享内存（可选数据源）",
+      "required": false,
+      "bundled": false,
+      "installable": false,
+      "status": "planned",
+      "note": "RTSS 免费但闭源，不能打包或再分发。计划通过 RTSSSharedMemoryV2 读取帧率/帧时间作为可选数据源：用户自行安装 RTSS 后由程序检测并提示启用，程序内不内置、不静默安装。",
+      "warning": "RTSS 的注入式覆盖层可能触发部分游戏的反作弊与 DLSS 门禁（本工具最初就是为了排查这类问题），因此该数据源必须默认关闭、显式开启。",
+      "detect": [ { "type": "process", "name": "RTSS.exe" } ],
+      "sources": [ { "id": "official", "kind": "open-url", "url": "https://www.guru3d.com/files-details/rtss-rivatuner-statistics-server-download.html", "note": "仅提供官方下载渠道，不代下载" } ],
+      "affects": ["avg_fps", "frametime"]
+    }
+  ]
+}

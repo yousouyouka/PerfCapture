@@ -1,0 +1,275 @@
+/* 表单控件、复选框、按钮 */
+
+/* ── 表单 ── */
+.field-label {
+  font-size: 0.86rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.proc-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin-top: 0.45rem;
+  min-width: 0;
+}
+.hint { font-size: 0.7rem; color: var(--faint); }
+.hint-right { margin-left: auto; text-align: right; }
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+}
+.setting-row.checks { margin-top: 0.6rem; gap: 1.4rem; flex-wrap: wrap; }
+
+.input {
+  font-family: inherit;
+  font-size: 0.92rem;
+  color: var(--text);
+  background: var(--input);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.4rem 0.6rem;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.input-num {
+  width: 5.2rem;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.unit { font-size: 0.82rem; color: var(--muted); }
+
+/* 复选框：自绘，不用系统方块 */
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.86rem;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.check input {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 1.02rem;
+  height: 1.02rem;
+  margin: 0;
+  border: 1.5px solid var(--line-strong);
+  border-radius: 5px;
+  background: transparent;
+  position: relative;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+  flex: 0 0 auto;
+}
+.check input:hover { border-color: var(--accent); }
+.check input:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.check input:checked::after {
+  content: '';
+  position: absolute;
+  left: 33%;
+  top: 12%;
+  width: 26%;
+  height: 56%;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(42deg);
+}
+.check input:focus-visible { box-shadow: 0 0 0 3px var(--accent-soft); }
+
+.collect-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem 1rem;
+}
+
+/* ── 卡片折叠 ── */
+/* 用 grid-template-rows 1fr → 0fr 做高度动画：内容多高都能收干净，不依赖固定 max-height */
+.card-body {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 0.2s ease;
+}
+.card-body-inner { overflow: hidden; min-height: 0; }
+.card.is-collapsed .card-body { grid-template-rows: 0fr; }
+.card.is-collapsed .card-title { margin-bottom: 0; }
+
+.card-toggle {
+  flex: 0 0 auto;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  margin: -0.2rem -0.25rem -0.2rem 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.card-toggle:hover { background: var(--tile); color: var(--text-strong); }
+.card-toggle:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--accent-soft); }
+.card-toggle svg {
+  width: 0.68rem;
+  height: 0.5rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transform: rotate(180deg);
+  transition: transform 0.2s ease;
+}
+.card.is-collapsed .card-toggle svg { transform: rotate(0deg); }
+
+/* 标题右侧的按钮组（终端：折叠 + 拉长） */
+.card-title-actions { display: inline-flex; align-items: center; gap: 0.1rem; flex: 0 0 auto; }
+/* 拉长按钮的图标是四角箭头：不跟着折叠箭头一起旋转，尺寸也按方形给 */
+.card-toggle-stretch svg {
+  width: 0.78rem;
+  height: 0.78rem;
+  transform: none !important;
+  transition: none;
+}
+.card-toggle-stretch.is-on { color: var(--accent); background: var(--accent-soft); }
+
+/* ── 拖动分割条 ── */
+/* 热区比视觉线宽：默认完全不可见，hover / 聚焦 / 拖动时才浮出一道细线。
+   位置靠负偏移压在卡片边框与栅格间隙上，不占布局尺寸。 */
+.splitter {
+  position: absolute;
+  z-index: 3;
+  touch-action: none;
+  outline: none;
+}
+.splitter::after {
+  content: '';
+  position: absolute;
+  border-radius: 999px;
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.splitter-col {
+  top: 0;
+  bottom: 0;
+  left: -0.65rem;      /* 只压在栅格间隙里，不盖住左栏的滚动条 */
+  width: 0.9rem;
+  cursor: col-resize;
+}
+.splitter-col::after {
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  margin-left: -1px;
+}
+.splitter:hover::after,
+.splitter:focus-visible::after { opacity: 0.5; }
+body.is-col-resizing .splitter-col::after { opacity: 0.9; }
+
+/* 拖动期间锁住光标与选中，避免拖出一片蓝色高亮 */
+body.is-col-resizing,
+body.is-col-resizing * { cursor: col-resize !important; user-select: none !important; }
+
+/* ── 按钮 ── */
+.btn {
+  font-family: inherit;
+  font-size: 0.88rem;
+  line-height: 1;
+  padding: 0.62rem 1.05rem;
+  border-radius: 9px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  transition: background-color 0.15s ease, border-color 0.15s ease,
+              box-shadow 0.15s ease, transform 0.06s ease;
+  white-space: nowrap;
+}
+.btn:active { transform: translateY(1px); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 3px 10px rgba(113, 100, 147, 0.28);
+}
+.btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+.btn-primary:active:not(:disabled) { background: var(--accent-press); }
+/* 停止采集：警示色，与主按钮并列时不抢视觉焦点 */
+.btn-stop {
+  background: var(--warn);
+  color: #fff;
+  box-shadow: 0 3px 10px rgba(168, 111, 20, 0.26);
+}
+.btn-stop:hover:not(:disabled) { filter: brightness(1.07); }
+.btn-stop:active:not(:disabled) { filter: brightness(0.94); }
+.btn-ghost {
+  background: var(--card-solid);
+  color: var(--text);
+  border-color: var(--line);
+  box-shadow: var(--shadow);
+}
+.btn-ghost:hover:not(:disabled) { border-color: var(--line-strong); box-shadow: var(--shadow-hover); }
+.btn-select {
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: space-between;
+  background: var(--input);
+  border-color: var(--line);
+  color: var(--text);
+  padding: 0.55rem 0.8rem;
+  text-align: left;
+}
+.btn-select:hover { border-color: var(--line-strong); }
+.btn-select svg {
+  width: 0.62rem;
+  height: 0.42rem;
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.6;
+  flex: 0 0 auto;
+}
+.btn-select span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.action-row { display: flex; gap: 0.6rem; flex-wrap: wrap; flex: 0 0 auto; }
+.action-row .btn-primary { min-width: 8.2rem; }
+
+.status-row {
+  font-size: 0.76rem;
+  color: var(--muted);
+  min-height: 1.1rem;
+  padding: 0 0.15rem;
+  flex: 0 0 auto;
+}
+.progress {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line);
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+.progress-bar {
+  height: 100%;
+  width: 0;
+  border-radius: 3px;
+  background: var(--accent);
+  transition: width 0.18s linear;
+}
+

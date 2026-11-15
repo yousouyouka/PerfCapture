@@ -1,0 +1,39 @@
+{
+    "schema":  1,
+    "app":  "PerfCapture",
+    "channel":  "stable",
+    "version":  "1.4.0",
+    "date":  "2026-11-16",
+    "serial":  3,
+    "notes":  {
+                  "zh":  "检查更新：多源清单 + 验签 + 本地校验",
+                  "en":  "See the release notes in the app (What\u0027s new).",
+                  "ja":  "アプリ内の更新情報をご覧ください。"
+              },
+    "assets":  [
+                   {
+                       "kind":  "setup",
+                       "name":  "PerfCapture-Setup-1.4.0.exe",
+                       "size":  10270720,
+                       "sha256":  "b0c553d7846c655f95d65705d6df3c72baaa08f92d5abd1f451440d99fd2da51",
+                       "urls":  [
+                                    "https://cdn.jsdelivr.net/gh/yousouyouka/PerfCapture@updates/bin/PerfCapture-Setup-1.4.0.exe",
+                                    "https://raw.githubusercontent.com/yousouyouka/PerfCapture/updates/bin/PerfCapture-Setup-1.4.0.exe",
+                                    "https://ghproxy.net/https://github.com/yousouyouka/PerfCapture/releases/download/v1.4.0/PerfCapture-Setup-1.4.0.exe",
+                                    "https://github.com/yousouyouka/PerfCapture/releases/download/v1.4.0/PerfCapture-Setup-1.4.0.exe"
+                                ]
+                   },
+                   {
+                       "kind":  "zip",
+                       "name":  "PerfCapture-1.4.0.zip",
+                       "size":  10228849,
+                       "sha256":  "854f4fbfbfd3a33ffad8db32146341d91dd5440dce6edc1b813521f18286100b",
+                       "urls":  [
+                                    "https://cdn.jsdelivr.net/gh/yousouyouka/PerfCapture@updates/bin/PerfCapture-1.4.0.zip",
+                                    "https://raw.githubusercontent.com/yousouyouka/PerfCapture/updates/bin/PerfCapture-1.4.0.zip",
+                                    "https://ghproxy.net/https://github.com/yousouyouka/PerfCapture/releases/download/v1.4.0/PerfCapture-1.4.0.zip",
+                                    "https://github.com/yousouyouka/PerfCapture/releases/download/v1.4.0/PerfCapture-1.4.0.zip"
+                                ]
+                   }
+               ]
+}

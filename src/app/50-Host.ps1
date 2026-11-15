@@ -125,6 +125,7 @@ $form.Add_Shown({
         }
         $coreEnv = $envTask.Result
         Write-AppLog ('WebView2 浏览器版本: ' + $coreEnv.BrowserVersionString)
+        $script:WV2Version = [string]$coreEnv.BrowserVersionString
 
         $task = $wv.EnsureCoreWebView2Async($coreEnv)
         $guard = 0

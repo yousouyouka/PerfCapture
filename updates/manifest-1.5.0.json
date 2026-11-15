@@ -4,9 +4,9 @@
     "channel":  "stable",
     "version":  "1.5.0",
     "date":  "2026-11-17",
-    "serial":  11,
+    "serial":  16,
     "notes":  {
-                  "zh":  "实时监控：CPU / GPU 进度条视图",
+                  "zh":  "实时监控：三种视图 + 浮窗 + 实时帧率 + 采集侧扩展",
                   "en":  "See the release notes in the app (What\u0027s new).",
                   "ja":  "アプリ内の更新情報をご覧ください。"
               },
@@ -14,8 +14,8 @@
                    {
                        "kind":  "setup",
                        "name":  "PerfCapture-Setup-1.5.0.exe",
-                       "size":  10298880,
-                       "sha256":  "73353977575d03a4770c52ef1bc7bd5d8848ab620c8fc3d820d0d9c05dcfe8fb",
+                       "size":  10316288,
+                       "sha256":  "08ba06f0448aa7cb81afe10400682350d85d5313f438d09a8c6946f644c2bb0a",
                        "urls":  [
                                     "https://raw.githubusercontent.com/yousouyouka/PerfCapture/updates/bin/PerfCapture-Setup-1.5.0.exe",
                                     "https://ghproxy.net/https://github.com/yousouyouka/PerfCapture/releases/download/v1.5.0/PerfCapture-Setup-1.5.0.exe",
@@ -25,8 +25,8 @@
                    {
                        "kind":  "zip",
                        "name":  "PerfCapture-1.5.0.zip",
-                       "size":  10256931,
-                       "sha256":  "e17b879b53ea5e6229b28ee6663840a55e4037369ef5632056b89123ee1f13ae",
+                       "size":  10274226,
+                       "sha256":  "ae7148104d5a7d4d283935c077a4bf58baa7c81f2a4c60d40feb94a7c5d0ad9a",
                        "urls":  [
                                     "https://cdn.jsdelivr.net/gh/yousouyouka/PerfCapture@updates/bin/PerfCapture-1.5.0.zip",
                                     "https://raw.githubusercontent.com/yousouyouka/PerfCapture/updates/bin/PerfCapture-1.5.0.zip",

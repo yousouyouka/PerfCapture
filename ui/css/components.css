@@ -1,4 +1,4 @@
-/* 表单控件、复选框、按钮 */
+﻿/* 表单控件、复选框、按钮 */
 
 /* ── 表单 ── */
 .field-label {
@@ -273,3 +273,37 @@ body.is-col-resizing * { cursor: col-resize !important; user-select: none !impor
   transition: width 0.18s linear;
 }
 
+/* ---- 采集预设（快速 / 标准 / 专业）：沿用实时监控页分段按钮的观感 ---- */
+.preset-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding-bottom: 0.55rem;
+}
+.preset-views {
+  display: inline-flex;
+  gap: 0.25rem;
+  padding: 0.2rem;
+  background: var(--tile);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.preset-views button {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 0.7rem;
+  font-weight: 400;
+  padding: 0.28rem 0.6rem;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.preset-views button:hover { background: var(--accent-soft); color: var(--text); }
+.preset-views button[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-color: var(--line-strong);
+  color: var(--text);
+}

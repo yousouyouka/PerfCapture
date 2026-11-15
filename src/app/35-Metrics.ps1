@@ -26,10 +26,60 @@ $script:MetricsRunning = $false
 $script:MetricsConsumers = @{}   # 谁在要数据：page（实时监控页）/ overlay（浮窗）
 $script:MetricsSmiPath = ''
 $script:MetricsCpuBaseMhz = 0
+# 实时 FPS（批次 C）：独立 PresentMon 增量 tail，目标进程取「采集页上次选中的进程」
+$script:MetricsPmPath = ''
+$script:MetricsFpsPid = 0
+$script:MetricsFpsName = ''
+$script:MetricsFpsCsv = ''
 
 # ---------- 一轮采样（runspace 里执行；单引号 here-string，禁止变量展开） ----------
 $script:MetricsSampleScript = @'
-param($SmiPath, $Queue, $IntervalMs, $Ctl)
+param($SmiPath, $Queue, $IntervalMs, $Ctl, $PmExe, $FpsCsv, $FpsPid)
+
+# ---- 实时 FPS：PresentMon 增量 tail（批次 C）----
+# 独立 PresentMon 进程（ETW，零注入）写 CSV；每轮只读「自上次以来新增的整行」，
+# 帧数 / 间隔 = FPS。拿不到（没提权 / 目标进程不出帧）就保持 $null，界面显示「—」。
+$fps = @{ proc = $null; offset = 0; sw = $null; leftover = ''; header = $false; framesSeen = 0; ok = $false }
+if ($PmExe -and $FpsCsv -and $FpsPid -gt 0 -and (Test-Path -LiteralPath $PmExe)) {
+    try {
+        if (Test-Path -LiteralPath $FpsCsv) { Remove-Item -LiteralPath $FpsCsv -Force -ErrorAction SilentlyContinue }
+        $pmArgs = @('--process_id', "$FpsPid", '--output_file', $FpsCsv, '--v2_metrics', '--no_console_stats')
+        $fps.proc = Start-Process -FilePath $PmExe -ArgumentList $pmArgs -PassThru -WindowStyle Hidden
+        $fps.sw = [Diagnostics.Stopwatch]::StartNew()
+        $fps.ok = $true
+    } catch { $fps.ok = $false }
+}
+function Read-NewFrames {
+    if (-not $fps.ok) { return 0 }
+    if (-not (Test-Path -LiteralPath $FpsCsv)) { return 0 }
+    $txt = ''
+    try {
+        $fs = [IO.File]::Open($FpsCsv, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+        try {
+            if ($fs.Length -le $fps.offset) { return 0 }
+            [void]$fs.Seek($fps.offset, [IO.SeekOrigin]::Begin)
+            $sr = New-Object IO.StreamReader($fs)
+            $txt = $sr.ReadToEnd()
+            $fps.offset = $fs.Position
+            $sr.Dispose()
+        } finally { $fs.Dispose() }
+    } catch { return 0 }
+    if (-not $txt) { return 0 }
+    $all = [string]$fps.leftover + $txt
+    $nl = $all.LastIndexOf("`n")
+    if ($nl -lt 0) { $fps.leftover = $all; return 0 }
+    $complete = $all.Substring(0, $nl)
+    $fps.leftover = $all.Substring($nl + 1)
+    $n = 0
+    foreach ($line in ($complete -split "`r?`n")) {
+        if (-not $line) { continue }
+        if (-not $fps.header) { $fps.header = $true; continue }   # 第一行是表头
+        $n++
+    }
+    $fps.framesSeen += $n
+    return $n
+}
+
 while ($true) {
     if ($Ctl -and $Ctl.stop) { break }
 $out = [ordered]@{
@@ -38,6 +88,7 @@ $out = [ordered]@{
     gpu = $null; gpuClock = $null; gpuMemClock = $null; gpuTemp = $null; gpuPower = $null; gpuFan = $null
     vramUsed = $null; vramTotal = $null
     ramUsed = $null; ramTotal = $null
+    fps = $null
 }
 function ToNum($v) {
     if ($null -eq $v) { return $null }
@@ -223,8 +274,33 @@ if ($null -eq $out.ramTotal -and -not ('PcMetrics' -as [type])) {
     } catch { }
 }
 
+# ---- 实时 FPS（PresentMon 增量）----
+# 只有这一轮真的解析出帧才「结账并重置窗口」：否则生产者一次写一批会让读数在 0 与真值之间抖动。
+# 连续 2 秒以上没有新帧，才判定为「游戏不出了」，如实报 0（而不是一直显示上一次的旧值）。
+if ($fps.ok) {
+    $n = Read-NewFrames
+    if ($fps.sw) {
+        $elapsed = $fps.sw.Elapsed.TotalSeconds
+        if ($n -gt 0 -and $fps.framesSeen -gt 0 -and $elapsed -gt 0.2) {
+            $out.fps = [math]::Round($n / $elapsed, 1)
+            $fps.sw.Restart()
+        } elseif ($elapsed -gt 2.0) {
+            if ($fps.framesSeen -gt 0) { $out.fps = 0.0 }
+            $fps.sw.Restart()
+        }
+    }
+}
+
 $Queue.Enqueue([pscustomobject]$out)
     Start-Sleep -Milliseconds $IntervalMs
+}
+
+# 采样循环退出：收掉自己起的 PresentMon 与临时 CSV，绝不留给下一次会话
+if ($fps.proc) {
+    try { if (-not $fps.proc.HasExited) { Stop-Process -Id $fps.proc.Id -Force } } catch { }
+}
+if ($FpsCsv -and (Test-Path -LiteralPath $FpsCsv)) {
+    Remove-Item -LiteralPath $FpsCsv -Force -ErrorAction SilentlyContinue
 }
 '@
 
@@ -239,6 +315,21 @@ function Get-MetricsCapabilities {
     } catch { }
     $script:MetricsCpuBaseMhz = $base
 
+    # 实时 FPS：找 PresentMon（优先随包 tools\，退回 PATH），临时 CSV 放 %TEMP%\PerfCapture
+    $script:MetricsPmPath = ''
+    try {
+        $cand = Join-Path $script:ToolsDir 'presentmon.exe'
+        if (Test-Path -LiteralPath $cand) { $script:MetricsPmPath = $cand }
+        else {
+            $g = Get-Command presentmon -ErrorAction SilentlyContinue
+            if ($g) { $script:MetricsPmPath = $g.Source }
+        }
+    } catch { }
+    try {
+        if (-not (Test-Path -LiteralPath $script:TempDir)) { New-Item -ItemType Directory -Path $script:TempDir -Force | Out-Null }
+        $script:MetricsFpsCsv = Join-Path $script:TempDir 'live.presentmon.csv'
+    } catch { $script:MetricsFpsCsv = '' }
+
     $script:MetricsCaps = @{
         # true=可用，false=不可用，$null=未探测
         gpu = [bool]$script:MetricsSmiPath
@@ -252,6 +343,9 @@ function Get-MetricsCapabilities {
         cpuMhz = $null
         cpuMhzMax = $null
         ram = $null
+        # 实时 FPS：样本里 fps 非空才算可用；fpsTarget 是当前盯着的进程名
+        fps = $false
+        fpsTarget = ''
         # 本轮不做，占位：将来由「可选传感器组件」置 true
         cpuTemp = $false
         cpuFan = $false
@@ -309,6 +403,9 @@ function Start-MetricsWorker {
         if (-not $script:MetricsCtl) { $script:MetricsCtl = @{ stop = $false } }
         $script:MetricsCtl.stop = $false
         [void]$ps.AddParameter('Ctl', $script:MetricsCtl)
+        [void]$ps.AddParameter('PmExe', $script:MetricsPmPath)
+        [void]$ps.AddParameter('FpsCsv', $script:MetricsFpsCsv)
+        [void]$ps.AddParameter('FpsPid', $script:MetricsFpsPid)
         $handle = $ps.BeginInvoke()
         $script:MetricsWorker = @{ PS = $ps; Handle = $handle; Started = (Get-Date) }
         Write-AppLog '监控采样线程已启动（常驻 runspace）'
@@ -385,12 +482,29 @@ function Set-MetricsConsumer {
 function Start-MetricsSampler {
     if ($script:MetricsRunning) { return }
     Get-MetricsCapabilities | Out-Null
+    # 实时 FPS 目标：采集页上次选中的进程（还活着才算数）；否则不启用，界面显示「—」
+    $script:MetricsFpsPid = 0
+    $script:MetricsFpsName = ''
+    try {
+        $lp = [int]$script:Cfg.lastPid
+        if ($lp -gt 0) {
+            $p = Get-Process -Id $lp -ErrorAction Stop
+            $script:MetricsFpsPid = $p.Id
+            $script:MetricsFpsName = $p.ProcessName
+        }
+    } catch { }
     $script:MetricsRunning = $true
     $script:MetricsSamples.Clear()
     $script:MetricsFirstLogged = $false
+    # 能力表如实反映 FPS：没有 PresentMon 或没有目标进程 = false（界面显示「—」并说明原因）
+    if ($script:MetricsCaps) {
+        $script:MetricsCaps.fps = ($script:MetricsFpsPid -gt 0 -and [bool]$script:MetricsPmPath -and [bool]$script:MetricsFpsCsv)
+        $script:MetricsCaps.fpsTarget = $script:MetricsFpsName
+    }
     Start-MetricsWorker
     Send-MetricsCaps
-    Write-AppLog (("实时监控开始：间隔 {0} ms，环形缓冲 {1} 点，GPU 源 {2}" -f $script:MetricsIntervalMs, $script:MetricsRingSize, $(if ($script:MetricsSmiPath) { 'nvidia-smi' } else { '无' })))
+    $fpsNote = if ($script:MetricsFpsPid -gt 0) { ('FPS 目标 ' + $script:MetricsFpsName + '(' + $script:MetricsFpsPid + ')') } else { 'FPS 未启用（没选中过进程）' }
+    Write-AppLog (("实时监控开始：间隔 {0} ms，环形缓冲 {1} 点，GPU 源 {2}，{3}" -f $script:MetricsIntervalMs, $script:MetricsRingSize, $(if ($script:MetricsSmiPath) { 'nvidia-smi' } else { '无' }), $fpsNote))
 
     Stop-MetricsTimer
     $timer = New-Object System.Windows.Forms.Timer

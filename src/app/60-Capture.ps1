@@ -2,7 +2,7 @@
 
 # ---------- UI 消息处理 ----------
 # 白名单：只接受约定的命令；未知命令记日志并回传错误，绝不抛异常打断消息泵
-$script:KnownCommands = @('ready', 'refreshProcs', 'saveSettings', 'openReports', 'export', 'exportHtml', 'exportPng', 'start', 'stop',
+$script:KnownCommands = @('ready', 'refreshProcs', 'saveSettings', 'openReports', 'export', 'exportHtml', 'exportPng', 'exportDiag', 'start', 'stop',
     'checkUpdate', 'downloadUpdate', 'cancelUpdate', 'openUpdatePage', 'runUpdateInstaller', 'openUpdateFolder', 'skipUpdateVersion', 'setUpdateAuto',
     'metricsStart', 'metricsStop', 'overlayToggle', 'overlayShow', 'overlayHide')
 
@@ -66,7 +66,7 @@ function Handle-UiMessage($msg) {
             }
             'saveSettings' {
                 if ($msg.settings) {
-                    foreach ($k in 'theme', 'language', 'seconds', 'minimize', 'sound', 'skip') {
+                    foreach ($k in 'theme', 'language', 'seconds', 'minimize', 'sound', 'skip', 'preset', 'warmup') {
                         Set-ConfigValue $k $msg.settings.$k
                     }
                     Save-Config
@@ -80,6 +80,7 @@ function Handle-UiMessage($msg) {
             'export'      { Queue-Export @{ cmd = 'export' } }
             'exportHtml'  { Queue-Export @{ cmd = 'exportHtml'; html = [string]$msg.html } }
             'exportPng'   { Queue-Export @{ cmd = 'exportPng' } }
+            'exportDiag'  { Queue-Export @{ cmd = 'exportDiag' } }
             'start'       { Start-Capture $msg }
             'stop'        { Stop-Capture }
         }
@@ -102,6 +103,76 @@ function Invoke-PendingExport {
         'export'     { Export-Report }
         'exportHtml' { Export-Report ([string]$job.html) }
         'exportPng'  { Export-ReportPng }
+        'exportDiag' { Export-DiagBundle }
+    }
+}
+
+# ---------- 诊断包（复现包） ----------
+# 排查「我这崩了」时最缺的是现场：日志 + 环境快照。
+# 只取日志与配置，不碰报告正文、不碰任何凭据；保存位置由用户自己选。
+function Export-DiagBundle {
+    # -Path 给定时直接写到该路径（探针/排障用），否则弹保存对话框由用户选位置。
+    param([string]$Path)
+    $target = $Path
+    if (-not $target) {
+        $dlg = New-Object System.Windows.Forms.SaveFileDialog
+        $dlg.Title = '保存诊断包'
+        $dlg.Filter = 'ZIP 压缩包 (*.zip)|*.zip'
+        $dlg.FileName = ('PerfCapture-diag-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.zip')
+        if ($dlg.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { return }
+        $target = $dlg.FileName
+    }
+    if (-not $target) { return }
+    $stage = Join-Path $script:TempDir ('diag_' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+    try {
+        New-Item -ItemType Directory -Path $stage -Force | Out-Null
+        # 1) 环境快照
+        $sb = New-Object System.Text.StringBuilder
+        [void]$sb.AppendLine('PerfCapture 诊断包 / diagnostic bundle')
+        [void]$sb.AppendLine('生成时间: ' + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
+        [void]$sb.AppendLine('应用版本: ' + $script:AppVersion)
+        [void]$sb.AppendLine('Windows : ' + [System.Environment]::OSVersion.VersionString)
+        [void]$sb.AppendLine('PowerShell: ' + $PSVersionTable.PSVersion.ToString())
+        [void]$sb.AppendLine('管理员权限: ' + [bool]$isAdmin)
+        [void]$sb.AppendLine('WebView2 : ' + $(if ($script:WV2Version) { $script:WV2Version } else { '未知' }))
+        try {
+            $cpu = Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop | Select-Object -First 1
+            if ($cpu) { [void]$sb.AppendLine('CPU: ' + $cpu.Name + ' / ' + $cpu.NumberOfCores + 'C' + $cpu.NumberOfLogicalProcessors + 'T / ' + $cpu.MaxClockSpeed + ' MHz') }
+            $os = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
+            if ($os) { [void]$sb.AppendLine('内存: ' + [math]::Round($os.TotalVisibleMemorySize / 1MB, 1) + ' GB') }
+        } catch { }
+        $smi = Join-Path $env:SystemRoot 'System32\nvidia-smi.exe'
+        if (Test-Path -LiteralPath $smi) {
+            try {
+                $g = & $smi --query-gpu=name,driver_version,memory.total --format=csv,noheader 2>$null | Select-Object -First 1
+                if ($g) { [void]$sb.AppendLine('GPU: ' + ([string]$g).Trim()) }
+            } catch { }
+        }
+        [void]$sb.AppendLine('日志目录: ' + $script:LogDir)
+        [void]$sb.AppendLine('数据目录: ' + $script:DataDir)
+        [void]$sb.AppendLine('设置摘要: seconds=' + $script:Cfg.seconds + ' preset=' + $script:Cfg.preset + ' warmup=' + $script:Cfg.warmup + ' skip=' + $script:Cfg.skip + ' theme=' + $script:Cfg.theme + ' lang=' + $script:Cfg.language)
+        [IO.File]::WriteAllText((Join-Path $stage 'environment.txt'), $sb.ToString(), (New-Object Text.UTF8Encoding($true)))
+
+        # 2) 最近两天的日志
+        if (Test-Path $script:LogDir) {
+            Get-ChildItem $script:LogDir -Filter 'app-*.log' -ErrorAction SilentlyContinue |
+                Sort-Object LastWriteTime -Descending | Select-Object -First 2 | ForEach-Object {
+                    Copy-Item $_.FullName (Join-Path $stage $_.Name) -ErrorAction SilentlyContinue
+                }
+        }
+        # 3) 设置文件（不含任何密钥：本应用没有密钥）
+        if (Test-Path $script:CfgPath) { Copy-Item $script:CfgPath (Join-Path $stage 'PerfCapture.settings.json') -ErrorAction SilentlyContinue }
+
+        if (Test-Path $target) { Remove-Item $target -Force -ErrorAction SilentlyContinue }
+        Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $target -CompressionLevel Optimal
+        Write-AppLog ('诊断包已导出: ' + $target)
+        Send-Log ('> 诊断包已保存: ' + $target) 'ln-accent'
+        Send-ToUi @{ type = 'status'; text = '诊断包已保存' }
+    } catch {
+        Write-AppLog ('诊断包导出失败: ' + $_.Exception.Message) 'ERROR'
+        Send-ToUi @{ type = 'error'; text = ('诊断包导出失败: ' + $_.Exception.Message) }
+    } finally {
+        if (Test-Path $stage) { Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue }
     }
 }
 
@@ -139,6 +210,12 @@ function Start-Capture($msg) {
     if (-not $pname) { $pname = 'game.exe' }
 
     $skip = [string]$msg.skip
+    # 预热丢弃：界面按预设给的秒数，越界一律夹到 0–30（引擎侧还会再校验一次）
+    $warmup = 0
+    if ($null -ne $msg.warmup) { $warmup = [int]$msg.warmup }
+    if ($warmup -lt 0) { $warmup = 0 }
+    if ($warmup -gt 30) { $warmup = 30 }
+    if ($warmup -ge $sec - 10) { $warmup = [math]::Max(0, $sec - 10) }   # 别把整段采集都丢光
     $theme = [string]$msg.theme
     if ($theme -eq 'system') {
         $light = $true
@@ -148,6 +225,13 @@ function Start-Capture($msg) {
         $theme = if ($light) { 'light' } else { 'dark' }
     }
     $cd = if ($msg.minimize) { 5 } else { 0 }
+
+    # PresentMon 的 ETW 会话是全局互斥的：采集开始时必须停掉实时监控的增量 PresentMon，
+    # 否则引擎会先杀进程再抢会话，实时值变成一串假的 0。停掉后回到实时页会重新启动。
+    if ($script:MetricsRunning) {
+        try { Stop-MetricsSampler } catch { }
+        Write-AppLog '开始采集：已暂停实时监控（PresentMon 会话互斥）'
+    }
 
     $script:Cfg.lastPid = $pid0
     $script:Cfg.seconds = $sec
@@ -165,10 +249,10 @@ function Start-Capture($msg) {
     if ($msg.minimize) { $form.WindowState = 'Minimized' }
 
     $script:T0 = Get-Date
-    $script:Job = Start-Job -ArgumentList $script:Engine, $sec, $pid0, $pname, $script:OutDir, $cd, $skip, $theme, $script:TempHtml -ScriptBlock {
-        param($eng, $s, $targetPid, $pname, $out, $cd, $skip, $theme, $html)
+    $script:Job = Start-Job -ArgumentList $script:Engine, $sec, $pid0, $pname, $script:OutDir, $cd, $skip, $theme, $script:TempHtml, $warmup -ScriptBlock {
+        param($eng, $s, $targetPid, $pname, $out, $cd, $skip, $theme, $html, $warmup)
         & $eng -Seconds $s -ProcessId $targetPid -ProcessName $pname -Label 'run' -OutDir $out `
-              -Countdown $cd -NoPause -Skip $skip -Theme $theme -HtmlPath $html *>&1
+              -Countdown $cd -NoPause -Skip $skip -Theme $theme -HtmlPath $html -WarmupSec $warmup *>&1
     }
     $script:Timer.Start()
 }

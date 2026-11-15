@@ -35,6 +35,7 @@ $('#btnStart').addEventListener('click', () => {
   if (!state.selectedText) return;
 
   const skip = $$('.collect-grid input').filter(el => !el.checked).map(el => el.dataset.skip).join(',');
+  const warmup = (typeof currentWarmup === 'function') ? currentWarmup() : 0;
   saveSettings();
   setBusy(true);
   setProgress(0);
@@ -44,12 +45,14 @@ $('#btnStart').addEventListener('click', () => {
   addLog('  目标: ' + state.selectedText);
   addLog('  时长: ' + seconds + ' 秒' + ($('#chkMin').checked ? '，倒计时 5 秒' : ''));
   addLog('  跳过: ' + (skip || '无'));
+  if (warmup > 0) addLog('  预热丢弃: 开头 ' + warmup + ' 秒不参与统计');
   send({
     cmd: 'start',
     pid: state.selectedPid,
     name: state.selectedName || '',
     seconds,
     skip,
+    warmup,
     minimize: $('#chkMin').checked,
     sound: $('#chkSound').checked,
     theme: state.themeMode,
@@ -89,16 +92,18 @@ function saveSettings() {
       minimize: $('#chkMin').checked,
       sound: $('#chkSound').checked,
       skip,
+      preset: (typeof activePreset !== 'undefined' && activePreset) ? activePreset : '',
+      warmup: (typeof currentWarmup === 'function') ? currentWarmup() : 0,
       theme: state.themeMode,
       language: state.language || LANG,
     },
   });
 }
 ['#seconds', '#chkMin', '#chkSound'].forEach(sel => {
-  $(sel).addEventListener('change', saveSettings);
+  $(sel).addEventListener('change', () => { if (sel === '#seconds') markPresetCustom(); saveSettings(); });
 });
 /* 勾选框是运行时渲染的，用事件委托，避免渲染顺序影响绑定 */
-$('.collect-grid').addEventListener('change', saveSettings);
+$('.collect-grid').addEventListener('change', () => { markPresetCustom(); saveSettings(); });
 
 /* ── 启动 ── */
 

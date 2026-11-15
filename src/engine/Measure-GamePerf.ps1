@@ -15,7 +15,8 @@ param(
     [switch]$NoPause,
     [string]$Skip = '',
     [string]$Theme = 'dark',
-    [string]$HtmlPath = ''
+    [string]$HtmlPath = '',
+    [int]$WarmupSec = 0          # 预热丢弃：丢掉开头这么多秒的帧（管线/编译着色器造成的假卡顿）
 )
 
 # ---------------------------------------------------------------- collection switches
@@ -46,6 +47,7 @@ if (-not $isAdmin) {
     if ($Skip) { $argList += @('-Skip', ('"' + $Skip + '"')) }
     $argList += @('-Theme', $Theme)
     if ($HtmlPath) { $argList += @('-HtmlPath', ('"' + $HtmlPath + '"')) }
+    if ($WarmupSec -gt 0) { $argList += @('-WarmupSec', "$WarmupSec") }
     if ($NoPause) { $argList += '-NoPause' }
     Write-Host 'Requesting administrator rights (PresentMon needs an ETW session)...' -ForegroundColor Yellow
     Start-Process $ps -Verb RunAs -ArgumentList ($argList -join ' ') -Wait | Out-Null
@@ -115,19 +117,65 @@ Write-Host ''
 & logman stop PresentMon  -ets  2>$null | Out-Null
 
 # ---------------------------------------------------------------- sensor sampler (background job)
+# 批次 C：一次 nvidia-smi 取全部 GPU 字段（时钟/功耗/风扇/PCIe/降频原因），
+# CPU 每核占用用 CIM 的 formatted data（英文类名，不受系统语言影响）。
+# 老驱动/老 nvidia-smi 不认识新字段时整条查询会报错 -> 退回 1.4 的三字段，绝不因此丢数据。
 $sampler = Start-Job -ArgumentList $GamePid, $sensCsv, ($Seconds + 10), $smi, $collectGpuSensors, $collectVram, $collectRam -ScriptBlock {
     param($gpid, $csv, $maxSec, $smi, $wantGpu, $wantVram, $wantRam)
     if (-not ($wantGpu -or $wantVram -or $wantRam)) { return }
     $script:t0 = Get-Date
-    'timestamp_utc,gpu_temp_c,gpu_util_pct,gpu_mem_used_mb,proc_vram_mb,proc_ram_mb' | Out-File -FilePath $csv -Encoding ASCII
+    $cols = @('timestamp_utc', 'gpu_temp_c', 'gpu_util_pct', 'gpu_mem_used_mb', 'proc_vram_mb', 'proc_ram_mb',
+              'gpu_clock_mhz', 'gpu_mem_clock_mhz', 'gpu_clock_max_mhz', 'gpu_power_w', 'gpu_fan_pct',
+              'pcie_gen', 'pcie_width', 'cpu_util_pct', 'cpu_max_core_pct',
+              'thr_sw_power_cap', 'thr_sw_thermal', 'thr_hw_thermal', 'thr_hw_slowdown', 'thr_sync_boost',
+              'thr_gpu_idle', 'thr_app_clocks', 'thr_hw_power_brake')
+    ($cols -join ',') | Out-File -FilePath $csv -Encoding ASCII
+
+    $baseQ = 'temperature.gpu,utilization.gpu,memory.used'
+    $extQ  = $baseQ + ',clocks.current.graphics,clocks.current.memory,clocks.max.graphics,power.draw,fan.speed,pcie.link.gen.current,pcie.link.width.current,' +
+             'clocks_throttle_reasons.sw_power_cap,clocks_throttle_reasons.sw_thermal_slowdown,clocks_throttle_reasons.hw_thermal_slowdown,' +
+             'clocks_throttle_reasons.hw_slowdown,clocks_throttle_reasons.sync_boost,clocks_throttle_reasons.gpu_idle,' +
+             'clocks_throttle_reasons.applications_clocks_setting,clocks_throttle_reasons.hw_power_brake_slowdown'
+    $extOk = $null          # $null = 还没探测；false = 这台机器的 nvidia-smi 不支持扩展字段
+    $tick = 0
     while (((Get-Date) - $script:t0).TotalSeconds -lt $maxSec) {
         $ts = (Get-Date).ToString('HH:mm:ss')
-        $temp = 'NA'; $util = 'NA'; $mem = 'NA'
+        $v = @{}
+        foreach ($k in $cols) { $v[$k] = 'NA' }
+        $v['timestamp_utc'] = $ts
         # 温度与占用来自同一次 nvidia-smi 查询，分开开关只在汇总时区分
         if ($wantGpu -and (Test-Path $smi)) {
             try {
-                $q = & $smi --query-gpu=temperature.gpu,utilization.gpu,memory.used --format=csv,noheader,nounits 2>$null
-                if ($q) { $p = ($q -split ',') | ForEach-Object { $_.Trim() }; $temp = $p[0]; $util = $p[1]; $mem = $p[2] }
+                $p = $null
+                if ($extOk -ne $false) {
+                    $q = & $smi --query-gpu=$extQ --format=csv,noheader,nounits 2>$null
+                    if ($q -and $LASTEXITCODE -eq 0) { $p = @($q -split ',' | ForEach-Object { $_.Trim() }); $extOk = $true }
+                    elseif ($extOk -eq $null) { $extOk = $false }
+                }
+                if (-not $p) {
+                    $q = & $smi --query-gpu=$baseQ --format=csv,noheader,nounits 2>$null
+                    if ($q) { $p = @($q -split ',' | ForEach-Object { $_.Trim() }) }
+                }
+                if ($p -and $p.Count -ge 3) {
+                    $v['gpu_temp_c'] = $p[0]; $v['gpu_util_pct'] = $p[1]; $v['gpu_mem_used_mb'] = $p[2]
+                    if ($p.Count -ge 18) {
+                        $v['gpu_clock_mhz']     = $p[3]
+                        $v['gpu_mem_clock_mhz'] = $p[4]
+                        $v['gpu_clock_max_mhz'] = $p[5]
+                        $v['gpu_power_w']       = $p[6]
+                        $v['gpu_fan_pct']       = $p[7]
+                        $v['pcie_gen']          = $p[8]
+                        $v['pcie_width']        = $p[9]
+                        $v['thr_sw_power_cap']  = $p[10]
+                        $v['thr_sw_thermal']    = $p[11]
+                        $v['thr_hw_thermal']    = $p[12]
+                        $v['thr_hw_slowdown']   = $p[13]
+                        $v['thr_sync_boost']    = $p[14]
+                        $v['thr_gpu_idle']      = $p[15]
+                        $v['thr_app_clocks']    = $p[16]
+                        $v['thr_hw_power_brake']= $p[17]
+                    }
+                }
             } catch { }
         }
         $vram = 'NA'
@@ -139,11 +187,26 @@ $sampler = Start-Job -ArgumentList $GamePid, $sensCsv, ($Seconds + 10), $smi, $c
                 }
             } catch { }
         }
+        $v['proc_vram_mb'] = $vram
         $ram = 'NA'
         if ($wantRam) {
             try { $pr = Get-Process -Id $gpid -ErrorAction Stop; $ram = [math]::Round($pr.WorkingSet64 / 1MB, 0) } catch { }
         }
-        ($ts + ',' + $temp + ',' + $util + ',' + $mem + ',' + $vram + ',' + $ram) | Out-File -FilePath $csv -Append -Encoding ASCII
+        $v['proc_ram_mb'] = $ram
+        # CPU 每核占用：2 s 一采（CIM 单次约 0.3 s，1 s 一采会吃掉 1/3 的采样周期），中间秒沿用上次值
+        if (($tick % 2) -eq 0) {
+            try {
+                $all = @(Get-CimInstance -ClassName Win32_PerfFormattedData_PerfOS_Processor -ErrorAction Stop)
+                $total = @($all | Where-Object { $_.Name -eq '_Total' })
+                $cores = @($all | Where-Object { $_.Name -ne '_Total' } | ForEach-Object { [double]$_.PercentProcessorTime })
+                if ($total.Count -gt 0) { $script:cpuTotal = [math]::Round([double]$total[0].PercentProcessorTime, 1) }
+                if ($cores.Count -gt 0) { $script:cpuMaxCore = [math]::Round(($cores | Measure-Object -Maximum).Maximum, 1) }
+            } catch { }
+        }
+        if ($null -ne $script:cpuTotal)   { $v['cpu_util_pct'] = $script:cpuTotal }
+        if ($null -ne $script:cpuMaxCore) { $v['cpu_max_core_pct'] = $script:cpuMaxCore }
+        (($cols | ForEach-Object { [string]$v[$_] }) -join ',') | Out-File -FilePath $csv -Append -Encoding ASCII
+        $tick++
         Start-Sleep -Milliseconds 1000
     }
 }
@@ -315,6 +378,12 @@ if (-not (Test-Path $pmCsv)) {
 $frameTimes = New-Object System.Collections.Generic.List[double]
 $dispLat    = New-Object System.Collections.Generic.List[double]
 $inLat      = New-Object System.Collections.Generic.List[double]
+$ftRows     = New-Object System.Collections.Generic.List[object]   # 帧时间 + 该帧的起点时刻（CPUStartTime，用于预热丢弃与按秒分桶）
+$dispTimes  = New-Object System.Collections.Generic.List[double]   # 上屏时刻（DisplayedTime），用来看「呈现 → 上屏」这一层
+$syncHist   = @{}      # SyncInterval 取值分布（0 = 不等待垂直同步）
+$flagsHist  = @{}      # PresentFlags 取值分布（0x200 = 允许撕裂）
+$allowTearN = 0
+$rowN       = 0
 
 # Robust CSV read: the file may end with a partially written line after the kill.
 $csvLines = @(Get-Content -Path $pmCsv -ErrorAction Stop)
@@ -331,6 +400,11 @@ $iDl  = [array]::IndexOf($hdr, 'DisplayLatency')
 $iCl  = [array]::IndexOf($hdr, 'ClickToPhotonLatency')
 $iRt  = [array]::IndexOf($hdr, 'PresentRuntime')
 $iPm  = [array]::IndexOf($hdr, 'PresentMode')
+$iOns = [array]::IndexOf($hdr, 'CPUStartTime')
+$iDsp = [array]::IndexOf($hdr, 'DisplayedTime')
+$iSyn = [array]::IndexOf($hdr, 'SyncInterval')
+$iFlg = [array]::IndexOf($hdr, 'PresentFlags')
+$iAlw = [array]::IndexOf($hdr, 'AllowsTearing')
 
 for ($ln = 1; $ln -lt $csvLines.Count; $ln++) {
     $f = $csvLines[$ln] -split ','
@@ -339,9 +413,12 @@ for ($ln = 1; $ln -lt $csvLines.Count; $ln++) {
     if ($iPid -ge 0 -and $f[$iPid] -eq "$GamePid") { $isMe = $true }
     if (-not $isMe -and $iApp -ge 0 -and $f[$iApp] -eq ($exeBase + '.exe')) { $isMe = $true }
     if (-not $isMe) { continue }
+    $rowN++
+    $onset = $null
+    if ($iOns -ge 0) { $o = 0.0; if ([double]::TryParse($f[$iOns], [ref]$o)) { $onset = $o } }
     if ($iFt -ge 0) {
         $ft = 0.0
-        if ([double]::TryParse($f[$iFt], [ref]$ft) -and $ft -gt 0) { $frameTimes.Add($ft) }
+        if ([double]::TryParse($f[$iFt], [ref]$ft) -and $ft -gt 0) { $ftRows.Add([pscustomobject]@{ onset = $onset; ft = $ft }) }
     }
     if ($iDl -ge 0) {
         $dl = 0.0
@@ -351,7 +428,29 @@ for ($ln = 1; $ln -lt $csvLines.Count; $ln++) {
         $cl = 0.0
         if ([double]::TryParse($f[$iCl], [ref]$cl) -and $cl -gt 0) { $inLat.Add($cl) }
     }
+    if ($iDsp -ge 0) {
+        $dt = 0.0
+        if ([double]::TryParse($f[$iDsp], [ref]$dt) -and $dt -gt 0) { $dispTimes.Add($dt) }
+    }
+    if ($iSyn -ge 0) { $k = $f[$iSyn]; if ($k) { if ($syncHist.ContainsKey($k)) { $syncHist[$k]++ } else { $syncHist[$k] = 1 } } }
+    if ($iFlg -ge 0) { $k = $f[$iFlg]; if ($k) { if ($flagsHist.ContainsKey($k)) { $flagsHist[$k]++ } else { $flagsHist[$k] = 1 } } }
+    if ($iAlw -ge 0 -and $f[$iAlw] -eq '1') { $allowTearN++ }
 }
+
+# 预热丢弃：按 CPUStartTime 去掉开头 WarmupSec 秒的帧；没有该列时按帧时间累加近似
+$warmupDropped = 0
+if ($WarmupSec -gt 0 -and $ftRows.Count -gt 0) {
+    $o0 = $ftRows[0].onset
+    if ($null -ne $o0) {
+        $cut = $o0 + $WarmupSec * 1000.0
+        while ($ftRows.Count -gt 0 -and $null -ne $ftRows[0].onset -and $ftRows[0].onset -lt $cut) { $ftRows.RemoveAt(0); $warmupDropped++ }
+    } else {
+        $acc = 0.0
+        while ($ftRows.Count -gt 0 -and $acc -lt $WarmupSec * 1000.0) { $acc += $ftRows[0].ft; $ftRows.RemoveAt(0); $warmupDropped++ }
+    }
+}
+$onsets = New-Object System.Collections.Generic.List[double]
+foreach ($r in $ftRows) { $frameTimes.Add($r.ft); if ($null -ne $r.onset) { $onsets.Add($r.onset) } }
 
 function Get-Stat($list) {
     if ($null -eq $list -or $list.Count -eq 0) { return $null }
@@ -384,6 +483,85 @@ $slowest1  = ($trimmed | Select-Object -First $n1 | Measure-Object -Average).Ave
 $fps1Low   = 1000.0 / $slowest1
 $ftP95     = Get-Percentile $frameTimes 0.95
 
+# ---- 帧时间分布（批次 C）------------------------------------------------
+$ftP999    = Get-Percentile $frameTimes 0.999
+$ftMedian  = Get-Percentile $frameTimes 0.5
+# 抖动：帧时间的标准差（越小越稳）+ 变异系数（std / 平均，跨帧率可比）
+$ftStd = $null; $ftStdPct = $null
+if ($frameTimes.Count -gt 1 -and $avgFT -gt 0) {
+    $sumSq = 0.0
+    foreach ($v in $frameTimes) { $d = $v - $avgFT; $sumSq += $d * $d }
+    $ftStd = [math]::Sqrt($sumSq / $frameTimes.Count)
+    $ftStdPct = 100.0 * $ftStd / $avgFT
+}
+# 长帧分桶：相对中位（2× / 4×）看「卡一下」的量级，绝对阈值（>50 / >100 ms）看能不能被感知
+$thr2x = $ftMedian * 2.0; $thr4x = $ftMedian * 4.0
+$long2x = 0; $long4x = 0; $long50 = 0; $long100 = 0
+foreach ($v in $frameTimes) {
+    if ($v -gt $thr2x)  { $long2x++ }
+    if ($v -gt $thr4x)  { $long4x++ }
+    if ($v -gt 50.0)    { $long50++ }
+    if ($v -gt 100.0)   { $long100++ }
+}
+$longPct = if ($frameTimes.Count -gt 0) { [math]::Round(100.0 * $long2x / $frameTimes.Count, 2) } else { 0 }
+
+# ---- 呈现 → 上屏（同一层数据的第二个视角）--------------------------------
+# 重复帧：两帧落在同一个上屏时刻，说明上屏没刷新（垂直同步/限帧/合成器重复刷新）
+$repeatFrames = 0
+$dispDeltaSum = 0.0; $dispDeltaN = 0
+if ($dispTimes.Count -gt 1) {
+    for ($i = 1; $i -lt $dispTimes.Count; $i++) {
+        $d = $dispTimes[$i] - $dispTimes[$i - 1]
+        if ([math]::Abs($d) -lt 0.001) { $repeatFrames++ }
+        elseif ($d -gt 0) { $dispDeltaSum += $d; $dispDeltaN++ }
+    }
+}
+$dispIntervalAvg = if ($dispDeltaN -gt 0) { $dispDeltaSum / $dispDeltaN } else { $null }
+$displayedFps    = if ($dispIntervalAvg -and $dispIntervalAvg -gt 0) { 1000.0 / $dispIntervalAvg } else { $null }
+$repeatPct       = if ($dispTimes.Count -gt 1) { [math]::Round(100.0 * $repeatFrames / ($dispTimes.Count - 1), 2) } else { $null }
+
+# SyncInterval / PresentFlags：取出现最多的那个值（游戏中途改设置会让分布变宽，这里报主值 + 分布宽度）
+function Get-ModeKey($hist) {
+    if (-not $hist -or $hist.Count -eq 0) { return $null }
+    $best = $null; $bestN = -1
+    foreach ($k in $hist.Keys) { if ($hist[$k] -gt $bestN) { $bestN = $hist[$k]; $best = $k } }
+    return $best
+}
+$syncMode  = Get-ModeKey $syncHist
+$flagsMode = Get-ModeKey $flagsHist
+$syncDistinct  = if ($syncHist.Count)  { $syncHist.Count }  else { 0 }
+$flagsDistinct = if ($flagsHist.Count) { $flagsHist.Count } else { 0 }
+$allowTearPct  = if ($rowN -gt 0) { [math]::Round(100.0 * $allowTearN / $rowN, 1) } else { $null }
+
+# ---- 1% Low 第二口径：按 1 秒窗口的帧率序列取最差 1% ----------------------
+# 口径 A（上面 $fps1Low）= 最差 1% 的**帧**的平均帧率；口径 B = 最差 1% 的**秒**的平均帧率。
+# 两者差别正是「偶发一次尖峰」与「持续掉一段」的区别。
+$fps1LowTime = $null; $fps1LowTimeRatio = $null; $secBins = 0
+if ($onsets.Count -gt 2 -and $onsets.Count -eq $frameTimes.Count) {
+    $binIdx = New-Object System.Collections.Generic.List[int]
+    $o0 = $onsets[0]
+    $lastBin = -1
+    foreach ($o in $onsets) {
+        $b = [int][math]::Floor(($o - $o0) / 1000.0)
+        $binIdx.Add($b); if ($b -gt $lastBin) { $lastBin = $b }
+    }
+    if ($lastBin -ge 3) {
+        $counts = New-Object 'int[]' ($lastBin + 1)
+        foreach ($b in $binIdx) { if ($b -ge 0 -and $b -le $lastBin) { $counts[$b]++ } }
+        # 首末两桶可能不满 1 秒，剔除以免把「半秒」当成低帧率
+        $full = @()
+        for ($b = 1; $b -lt $lastBin; $b++) { $full += [double]$counts[$b] }
+        if ($full.Count -ge 5) {
+            $secBins = $full.Count
+            $sortedSec = @($full | Sort-Object)                 # 升序：最差在前
+            $nSec = [math]::Max(1, [int][math]::Ceiling($sortedSec.Count * 0.01))
+            $worstSec = ($sortedSec | Select-Object -First $nSec | Measure-Object -Average).Average
+            $fps1LowTime = $worstSec                             # 1 秒桶里的帧数 = 该秒的 FPS
+            if ($avgFPS -gt 0) { $fps1LowTimeRatio = [math]::Round(100.0 * $fps1LowTime / $avgFPS, 1) }
+        }
+    }
+}
+
 $sensors = @()
 if (Test-Path $sensCsv) { $sensors = Import-Csv $sensCsv }
 function Get-SensorStat([string]$col) {
@@ -399,6 +577,53 @@ $gpuUtil    = if ($collectGpuUsage) { Get-SensorStat 'gpu_util_pct' } else { $nu
 $gpuMemUsed = if ($collectGpuUsage) { Get-SensorStat 'gpu_mem_used_mb' } else { $null }   # 整卡占用，随 GPU 占用
 $procVram   = if ($collectVram) { Get-SensorStat 'proc_vram_mb' } else { $null }
 $procRam    = if ($collectRam)  { Get-SensorStat 'proc_ram_mb' } else { $null }
+
+# 批次 C：GPU 时钟 / 功耗 / 风扇 / PCIe + 降频原因 + CPU 占用
+$gpuClock    = if ($collectGpuUsage) { Get-SensorStat 'gpu_clock_mhz' } else { $null }
+$gpuClockMax = if ($collectGpuUsage) { Get-SensorStat 'gpu_clock_max_mhz' } else { $null }
+$gpuMemClock = if ($collectGpuUsage) { Get-SensorStat 'gpu_mem_clock_mhz' } else { $null }
+$gpuPower    = if ($collectGpuTemp)  { Get-SensorStat 'gpu_power_w' } else { $null }
+$gpuFan      = if ($collectGpuTemp)  { Get-SensorStat 'gpu_fan_pct' } else { $null }
+$cpuUtil     = Get-SensorStat 'cpu_util_pct'
+$cpuMaxCore  = Get-SensorStat 'cpu_max_core_pct'
+
+# PCIe 链路：取采样里出现最多的「代数 x 通道」
+$pcieText = $null
+if ($sensors.Count -gt 0) {
+    $ph = @{}
+    foreach ($s in $sensors) {
+        $g = $s.pcie_gen; $w = $s.pcie_width
+        if ($g -and $g -ne 'NA' -and $w -and $w -ne 'NA') {
+            $k = ('Gen' + $g + ' x' + $w)
+            if ($ph.ContainsKey($k)) { $ph[$k]++ } else { $ph[$k] = 1 }
+        }
+    }
+    $pcieText = Get-ModeKey $ph
+}
+
+# 降频原因：按「有多少比例的采样点处于该原因」统计，只保留 > 0 的
+$throttle = [ordered]@{}
+$thrNames = [ordered]@{
+    sw_power_cap  = '功耗墙'
+    sw_thermal    = '温度墙（软）'
+    hw_thermal    = '温度墙（硬）'
+    hw_slowdown   = '硬件降频'
+    sync_boost    = '同步加速'
+    gpu_idle      = 'GPU 空闲'
+    app_clocks    = '应用锁频'
+    hw_power_brake = '功耗刹车'
+}
+foreach ($k in $thrNames.Keys) {
+    $col = 'thr_' + $k
+    $act = 0; $seen = 0
+    foreach ($s in $sensors) {
+        $x = $s.$col
+        if ($null -eq $x -or $x -eq '' -or $x -eq 'NA') { continue }
+        $seen++
+        if ($x -match '^Active$') { $act++ }
+    }
+    if ($seen -gt 0 -and $act -gt 0) { $throttle[$k] = [math]::Round(100.0 * $act / $seen, 1) }
+}
 
 $latStat = if ($collectLatency) { Get-Stat $dispLat } else { $null }
 $latP95  = if ($collectLatency) { Get-Percentile $dispLat 0.95 } else { $null }
@@ -631,6 +856,37 @@ $summary = [ordered]@{
     gpu_mem_total_avg_mb = if ($gpuMemUsed) { [math]::Round($gpuMemUsed.Avg, 0) } else { $null }
     pc_latency_avg_ms  = if ($null -ne $pcLatAvg) { [math]::Round($pcLatAvg, 2) } else { $null }
     pc_latency_p95_ms  = if ($null -ne $pcLatP95) { [math]::Round($pcLatP95, 2) } else { $null }
+    # ---- 批次 C：帧时间分布 / 呈现→上屏 / 1% Low 双口径 / 预热 ----
+    frametime_p999_ms   = [math]::Round($ftP999, 2)
+    frametime_median_ms = [math]::Round($ftMedian, 2)
+    frametime_stddev_ms = if ($null -ne $ftStd) { [math]::Round($ftStd, 2) } else { $null }
+    frametime_jitter_pct = if ($null -ne $ftStdPct) { [math]::Round($ftStdPct, 1) } else { $null }
+    long_frames      = [ordered]@{ over2x = $long2x; over4x = $long4x; over50 = $long50; over100 = $long100; pct_over2x = $longPct; base_ms = [math]::Round($ftMedian, 2) }
+    displayed_fps    = if ($null -ne $displayedFps) { [math]::Round($displayedFps, 1) } else { $null }
+    repeat_frames    = $repeatFrames
+    repeat_pct       = $repeatPct
+    sync_interval    = $syncMode
+    present_flags    = $flagsMode
+    allows_tearing_pct = $allowTearPct
+    fps_1pct_low_time  = if ($null -ne $fps1LowTime) { [math]::Round($fps1LowTime, 1) } else { $null }
+    fps_1pct_low_time_pct = $fps1LowTimeRatio
+    time_bins        = $secBins
+    warmup_seconds   = $WarmupSec
+    warmup_dropped   = $warmupDropped
+    # ---- 批次 C：GPU 时钟 / 功耗 / 风扇 / PCIe / 降频原因 / CPU ----
+    gpu_clock_avg_mhz     = if ($gpuClock) { [math]::Round($gpuClock.Avg, 0) } else { $null }
+    gpu_clock_max_mhz     = if ($gpuClock) { [math]::Round($gpuClock.Max, 0) } else { $null }
+    gpu_clock_hw_max_mhz  = if ($gpuClockMax) { [math]::Round($gpuClockMax.Max, 0) } else { $null }
+    gpu_mem_clock_avg_mhz = if ($gpuMemClock) { [math]::Round($gpuMemClock.Avg, 0) } else { $null }
+    gpu_power_avg_w       = if ($gpuPower) { [math]::Round($gpuPower.Avg, 1) } else { $null }
+    gpu_power_max_w       = if ($gpuPower) { [math]::Round($gpuPower.Max, 1) } else { $null }
+    gpu_fan_avg_pct       = if ($gpuFan) { [math]::Round($gpuFan.Avg, 0) } else { $null }
+    pcie                  = $pcieText
+    throttle              = $throttle
+    cpu_util_avg_pct      = if ($cpuUtil) { [math]::Round($cpuUtil.Avg, 1) } else { $null }
+    cpu_util_max_pct      = if ($cpuUtil) { [math]::Round($cpuUtil.Max, 1) } else { $null }
+    cpu_max_core_avg_pct  = if ($cpuMaxCore) { [math]::Round($cpuMaxCore.Avg, 1) } else { $null }
+    cpu_max_core_peak_pct = if ($cpuMaxCore) { [math]::Round($cpuMaxCore.Max, 1) } else { $null }
     chart            = if ($chartMs -and $chartMs.Count -gt 0) { [ordered]@{ per_bin = $chartPerBin; limit = $chartLimit; over = $chartOver; ms = @($chartMs); avg = @($chartAvg) } } else { $null }
     features         = @($features)
     verdicts         = @($verdicts)
@@ -644,7 +900,18 @@ Write-Host '================ RESULT ================' -ForegroundColor Cyan
 Write-Host ("  captured        : " + $summary.captured_seconds + " s / " + $summary.frames + " frames")
 Write-Host ("  avg FPS         : " + $summary.avg_fps)
 Write-Host ("  1% low FPS      : " + $summary.fps_1pct_low + "  (占平均 " + $summary.fps_1pct_low_pct + "%, 落回 1% Low 附近 " + $summary.low_hits_pct + "% 的时间)")
-Write-Host ("  avg frame time  : " + $summary.avg_frametime_ms + " ms  (p95 " + $summary.frametime_p95_ms + " ms)")
+Write-Host ("  avg frame time  : " + $summary.avg_frametime_ms + " ms  (p95 " + $summary.frametime_p95_ms + " ms, p99.9 " + $summary.frametime_p999_ms + " ms)")
+Write-Host ("  jitter          : " + $(if ($null -ne $summary.frametime_stddev_ms) { "" + $summary.frametime_stddev_ms + " ms (" + $summary.frametime_jitter_pct + "%)" } else { "NA" }) + "   long frames >2x median: " + $summary.long_frames.over2x + " 帧 (" + $summary.long_frames.pct_over2x + "%)")
+Write-Host ("  displayed FPS   : " + $(if ($null -ne $summary.displayed_fps) { "" + $summary.displayed_fps + " (上屏节奏; 重复帧 " + $summary.repeat_frames + " 帧 = " + $summary.repeat_pct + "%)" } else { "NA" }))
+Write-Host ("  1% low (by sec) : " + $(if ($null -ne $summary.fps_1pct_low_time) { "" + $summary.fps_1pct_low_time + " FPS (占平均 " + $summary.fps_1pct_low_time_pct + "%, " + $summary.time_bins + " 个整秒桶)" } else { "NA" }))
+Write-Host ("  sync / flags    : SyncInterval=" + $(if ($null -ne $summary.sync_interval) { $summary.sync_interval } else { "NA" }) + "  PresentFlags=" + $(if ($null -ne $summary.present_flags) { $summary.present_flags } else { "NA" }))
+Write-Host ("  GPU clock/power : " + $(if ($null -ne $summary.gpu_clock_avg_mhz) { "" + $summary.gpu_clock_avg_mhz + " MHz avg / " + $summary.gpu_clock_max_mhz + " max (硬件上限 " + $summary.gpu_clock_hw_max_mhz + ")" } else { "NA" }) + $(if ($null -ne $summary.gpu_power_avg_w) { "  " + $summary.gpu_power_avg_w + " W avg / " + $summary.gpu_power_max_w + " max" } else { "" }))
+if ($summary.throttle.Count -gt 0) {
+    $thrText = @(); foreach ($k in $summary.throttle.Keys) { $thrText += ($k + ' ' + $summary.throttle[$k] + '%') }
+    Write-Host ("  throttle        : " + ($thrText -join ', '))
+} else { Write-Host '  throttle        : none' }
+Write-Host ("  CPU             : " + $(if ($null -ne $summary.cpu_util_avg_pct) { "" + $summary.cpu_util_avg_pct + " % avg, 最高单核 " + $summary.cpu_max_core_avg_pct + " % (峰值 " + $summary.cpu_max_core_peak_pct + " %)" } else { "NA" }))
+if ($summary.warmup_dropped -gt 0) { Write-Host ("  warmup          : 已丢弃开头 " + $summary.warmup_seconds + " s（" + $summary.warmup_dropped + " 帧）") }
 Write-Host ("  display latency : " + $(if ($null -ne $summary.display_latency_avg_ms) { "" + $summary.display_latency_avg_ms + " ms (p95 " + $summary.display_latency_p95_ms + " ms)" } else { "NA" }))
 Write-Host ("  GPU usage       : " + $(if ($null -ne $summary.gpu_util_avg_pct) { "" + $summary.gpu_util_avg_pct + " % (max " + $summary.gpu_util_max_pct + " %)" } else { "NA" }))
 Write-Host ("  GPU temp        : " + $(if ($null -ne $summary.gpu_temp_avg_c) { "" + $summary.gpu_temp_avg_c + " C (max " + $summary.gpu_temp_max_c + " C)" } else { "NA" }))
@@ -781,6 +1048,23 @@ if ($featureRows) {
 
 $detRows = ''
 $detRows += '<tr><td>帧时间 平均 / p95</td><td>' + (Fmt $summary.avg_frametime_ms '0.00') + ' ms / ' + (Fmt $summary.frametime_p95_ms '0.00') + ' ms</td></tr>'
+$detRows += '<tr><td>帧时间 中位 / p99.9</td><td>' + (Fmt $summary.frametime_median_ms '0.00') + ' ms / ' + (Fmt $summary.frametime_p999_ms '0.00') + ' ms</td></tr>'
+if ($null -ne $summary.frametime_stddev_ms) {
+    $detRows += '<tr><td>帧时间抖动<br><span style="font-size:11.5px">标准差 / 变异系数，越小越稳</span></td><td>' + (Fmt $summary.frametime_stddev_ms '0.00') + ' ms / ' + (Fmt $summary.frametime_jitter_pct '0.0') + ' %</td></tr>'
+}
+$lf = $summary.long_frames
+$detRows += '<tr><td>长帧分桶<br><span style="font-size:11.5px">&gt;2× / &gt;4× 中位（' + (Fmt $lf.base_ms '0.00') + ' ms）· &gt;50 / &gt;100 ms</span></td><td>' + $lf.over2x + ' / ' + $lf.over4x + ' / ' + $lf.over50 + ' / ' + $lf.over100 + ' 帧（' + (Fmt $lf.pct_over2x '0.00') + ' %）</td></tr>'
+if ($null -ne $summary.displayed_fps) {
+    $detRows += '<tr><td>上屏节奏 / 重复帧<br><span style="font-size:11.5px">DisplayedTime 间隔换算；重复帧 = 两帧落在同一上屏时刻</span></td><td>' + (Fmt $summary.displayed_fps '0.0') + ' FPS / ' + $summary.repeat_frames + ' 帧（' + (Fmt $summary.repeat_pct '0.00') + ' %）</td></tr>'
+}
+if ($null -ne $summary.sync_interval -or $null -ne $summary.present_flags) {
+    $syncTxt = if ($null -ne $summary.sync_interval) { [string]$summary.sync_interval } else { 'NA' }
+    $flagTxt = if ($null -ne $summary.present_flags) { [string]$summary.present_flags } else { 'NA' }
+    $detRows += '<tr><td>同步间隔 / 呈现标志</td><td>SyncInterval ' + $syncTxt + ' · PresentFlags ' + $flagTxt + $(if ($null -ne $summary.allows_tearing_pct) { ' · 允许撕裂 ' + (Fmt $summary.allows_tearing_pct '0.0') + ' %' } else { '' }) + '</td></tr>'
+}
+if ($null -ne $summary.fps_1pct_low_time) {
+    $detRows += '<tr><td>1% Low（按秒口径）<br><span style="font-size:11.5px">最差 1% 的整秒桶平均帧率，' + $summary.time_bins + ' 个桶</span></td><td>' + (Fmt $summary.fps_1pct_low_time '0.0') + ' FPS（占平均 ' + (Fmt $summary.fps_1pct_low_time_pct '0.0') + ' %）</td></tr>'
+}
 if ($collectLatency) {
     $detRows += '<tr><td>上屏延迟 平均 / p95<br><span style="font-size:11.5px">生成好 → 被看到</span></td><td>' + (Fmt $summary.display_latency_avg_ms '0.00') + ' ms / ' + (Fmt $summary.display_latency_p95_ms '0.00') + ' ms</td></tr>'
 }
@@ -792,6 +1076,28 @@ if ($collectGpuTemp) {
 }
 if ($collectGpuUsage) {
     $detRows += '<tr><td>GPU 占用 平均 / 最高</td><td>' + (Fmt $summary.gpu_util_avg_pct '0.0') + ' / ' + (Fmt $summary.gpu_util_max_pct '0.0') + ' %</td></tr>'
+}
+if ($null -ne $summary.gpu_clock_avg_mhz) {
+    $detRows += '<tr><td>GPU 频率 平均 / 最高<br><span style="font-size:11.5px">硬件上限 ' + (Fmt $summary.gpu_clock_hw_max_mhz '0') + ' MHz · 显存 ' + (Fmt $summary.gpu_mem_clock_avg_mhz '0') + ' MHz</span></td><td>' + (Fmt $summary.gpu_clock_avg_mhz '0') + ' / ' + (Fmt $summary.gpu_clock_max_mhz '0') + ' MHz</td></tr>'
+}
+if ($null -ne $summary.gpu_power_avg_w) {
+    $detRows += '<tr><td>GPU 功耗 平均 / 最高' + $(if ($null -ne $summary.gpu_fan_avg_pct) { '<br><span style="font-size:11.5px">风扇 ' + (Fmt $summary.gpu_fan_avg_pct '0') + ' %</span>' } else { '' }) + '</td><td>' + (Fmt $summary.gpu_power_avg_w '0.0') + ' / ' + (Fmt $summary.gpu_power_max_w '0.0') + ' W</td></tr>'
+}
+if ($summary.pcie) {
+    $detRows += '<tr><td>PCIe 链路</td><td>' + [string]$summary.pcie + '</td></tr>'
+}
+if ($summary.throttle.Count -gt 0) {
+    $thrParts = @()
+    foreach ($k in $summary.throttle.Keys) {
+        $nm = if ($thrNames.Contains($k)) { $thrNames[$k] } else { $k }
+        $thrParts += ($nm + ' ' + (Fmt $summary.throttle[$k] '0.0') + '%')
+    }
+    $detRows += '<tr><td>降频原因<br><span style="font-size:11.5px">采样点里处于该原因的比例</span></td><td>' + ($thrParts -join ' · ') + '</td></tr>'
+} else {
+    $detRows += '<tr><td>降频原因</td><td>采集期间未触发降频</td></tr>'
+}
+if ($null -ne $summary.cpu_util_avg_pct) {
+    $detRows += '<tr><td>CPU 占用 平均 / 最高' + $(if ($null -ne $summary.cpu_max_core_avg_pct) { '<br><span style="font-size:11.5px">最高单核 ' + (Fmt $summary.cpu_max_core_avg_pct '0.0') + ' %（峰值 ' + (Fmt $summary.cpu_max_core_peak_pct '0.0') + ' %）</span>' } else { '' }) + '</td><td>' + (Fmt $summary.cpu_util_avg_pct '0.0') + ' / ' + (Fmt $summary.cpu_util_max_pct '0.0') + ' %</td></tr>'
 }
 if ($collectVram) {
     $detRows += '<tr><td>显存 平均 / 最高（本程序）</td><td>' + (Fmt $summary.vram_avg_mb '0') + ' / ' + (Fmt $summary.vram_max_mb '0') + ' MB</td></tr>'

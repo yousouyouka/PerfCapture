@@ -1,6 +1,6 @@
 {
-  "schemaVersion": 1,
-  "note": "采集项清单的唯一事实来源。宿主读取本文件后随 init 消息下发给界面，界面据此渲染勾选框；引擎按 skip 字符串判断是否采集。新增采集项 = 这里加一条 + 引擎实现对应采集逻辑（共两处）。label 是 i18n 键，不要写具体文案。",
+  "schemaVersion": 2,
+  "note": "采集项清单的唯一事实来源。宿主读取本文件后随 init 消息下发给界面，界面据此渲染勾选框；引擎按 skip 字符串判断是否采集。新增采集项 = 这里加一条 + 引擎实现对应采集逻辑（共两处）。label 是 i18n 键，不要写具体文案。presets 是高级预设：套用后仍可手工改，改完即视为自定义。warmup = 引擎 -WarmupSec（预热丢弃秒数）。",
   "always": {
     "keys": ["fps", "p1low", "frametime"],
     "label": "capture.itemsHint"
@@ -13,5 +13,10 @@
     { "skip": "ram",      "label": "capture.item.ram",      "default": true },
     { "skip": "features", "label": "capture.item.features", "default": true },
     { "skip": "res",      "label": "capture.item.res",      "default": true }
+  ],
+  "presets": [
+    { "id": "quick",    "label": "capture.preset.quick",    "seconds": 60,  "warmup": 0, "skip": ["latency", "features", "res"] },
+    { "id": "standard", "label": "capture.preset.standard", "seconds": 120, "warmup": 3, "skip": ["features"] },
+    { "id": "pro",      "label": "capture.preset.pro",      "seconds": 180, "warmup": 5, "skip": [] }
   ]
 }

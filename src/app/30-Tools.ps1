@@ -44,11 +44,26 @@ function Get-CaptureOptions {
         }
         $hint = ''
         if ($cfg.always -and $cfg.always.label) { $hint = [string]$cfg.always.label }
-        Write-AppLog ('采集项清单已加载: ' + $list.Count + ' 项')
+        # 高级预设（快速 / 标准 / 专业）：界面据此套用时长、勾选项与预热丢弃
+        $presets = New-Object System.Collections.ArrayList
+        foreach ($p in @($cfg.presets)) {
+            if ($null -eq $p -or -not $p.id) { continue }
+            $skipList = @()
+            foreach ($s in @($p.skip)) { if ($s) { $skipList += [string]$s } }
+            [void]$presets.Add([pscustomobject]@{
+                id      = [string]$p.id
+                label   = [string]$p.label
+                seconds = if ($null -eq $p.seconds) { 120 } else { [int]$p.seconds }
+                warmup  = if ($null -eq $p.warmup) { 0 } else { [int]$p.warmup }
+                skip    = $skipList
+            })
+        }
+        Write-AppLog ('采集项清单已加载: ' + $list.Count + ' 项' + $(if ($presets.Count -gt 0) { '，预设 ' + $presets.Count + ' 档' } else { '' }))
         return [pscustomobject]@{
             schemaVersion = [int]$cfg.schemaVersion
             hint          = $hint
             options       = $list.ToArray()
+            presets       = $presets.ToArray()
         }
     } catch {
         Write-AppLog ('采集项清单解析失败，界面将使用内置清单: ' + $_.Exception.Message) 'ERROR'

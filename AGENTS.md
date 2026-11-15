@@ -160,3 +160,20 @@ build\          pack.ps1 · launcher.cs · setup-core.cs · setup-ui.cs · setup
 - `ZipFile` 目录项可能用反斜杠，判断目录要 `entry.FullName.Replace('\\','/')`。
 - 单实例：**先提权再抢锁**；`AbandonedMutexException` 的语义是"锁归你"，必须当作拿到。
 - 导出长图的图表位图取**原 canvas**（`cloneNode` 不带位图）；拖动分割用按下时的尺寸做基准。
+- **PresentMon 的 ETW 会话是全局互斥的**：实时监控（增量 tail）与正式采集不能并存；
+  Start-Capture 里必须先停实时采样，否则引擎会先杀进程再抢会话，实时值会变成一串假的 0。
+- PresentMon v2 的 CSV 列名是 FrameTime / CPUStartTime / DisplayedTime / SyncInterval / PresentFlags / AllowsTearing；
+  **重复帧 = 两帧 DisplayedTime 相同**（同一上屏时刻），不要拿 PresentFlags 猜。
+- 
+vidia-smi --query-gpu= 只要有**一个**字段名不被识别就整条查询失败（例：clocks_throttle_reasons.display_clock_setting）。
+  字段表必须实测，且写成「扩展查询失败 → 退回基础三项」，否则老驱动上连温度都采不到。
+- Get-CimInstance Win32_PerfFormattedData_PerfOS_Processor 单次约 0.28 s（33 实例），**不能 1 Hz**；
+  现在 2 秒一采、中间秒沿用上一次的值。
+- 实时 FPS 的取窗口规则：**只有这一轮真的解析出帧才结账并重启计时**；连续 2 秒无新帧才报 0。
+  否则生产者一次写一批会让读数在 0 与真值之间交替。
+- 1% Low 的「按秒口径」要求整秒桶 ≥5 个（10 秒采集只有 8 个桶），少于 5 就如实留空而不是给个离谱值。
+- 未提权时**引擎跑不了**（Start-Process -Verb RunAs 只弹 UAC），所以引擎数值靠「从源码抽真实代码块 + 合成数据」
+  自证（b40/b41/b42 模式），界面靠真 WebView2（#preview 是报告容器，不是 #reportBox）。
+- Start-Job 会把参数**序列化成副本**（ConcurrentQueue / 共享 stop 标志都传不进去）；
+  要共享就用 [PowerShell]::Create() + AddParameter（模块本身也是这么做的）。
+- cmd 脚本里 `echo 1,2,3>>file` 的 3>> 会被当成**句柄 3 重定向**，一行都不写；写成 `echo 1,2,3 >>file`。

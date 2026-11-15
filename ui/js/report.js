@@ -74,6 +74,34 @@ function renderReport(r) {
 
   const rows = [];
   if (r.avg_frametime_ms != null) rows.push([t('metric.ftRow', '帧时间 平均 / p95'), `${r.avg_frametime_ms} / ${r.frametime_p95_ms} ms`]);
+  if (r.frametime_p999_ms != null) rows.push([t('metric.ftP999Row', '帧时间 中位 / p99.9'), `${r.frametime_median_ms} / ${r.frametime_p999_ms} ms`]);
+  if (r.frametime_stddev_ms != null) rows.push([t('metric.jitterRow', '帧时间抖动 标准差 / 变异'), `${r.frametime_stddev_ms} ms / ${r.frametime_jitter_pct} %`]);
+  if (r.long_frames) {
+    const lf = r.long_frames;
+    rows.push([t('metric.longRow', '长帧 >2× / >4× 中位 · >50 / >100 ms'),
+      `${lf.over2x} / ${lf.over4x} · ${lf.over50} / ${lf.over100} 帧（${lf.pct_over2x} %）`]);
+  }
+  if (r.fps_1pct_low_time != null) rows.push([t('metric.lowSecRow', '1% Low（按秒口径）'), `${r.fps_1pct_low_time} FPS（占平均 ${r.fps_1pct_low_time_pct} %）`]);
+  if (r.displayed_fps != null) rows.push([t('metric.displayedRow', '上屏节奏 / 重复帧'), `${r.displayed_fps} FPS / ${r.repeat_frames} 帧（${r.repeat_pct} %）`]);
+  if (r.sync_interval != null || r.present_flags != null) {
+    rows.push([t('metric.syncRow', '同步间隔 / 呈现标志'),
+      `SyncInterval ${r.sync_interval ?? '—'} · PresentFlags ${r.present_flags ?? '—'}`]);
+  }
+  if (r.gpu_clock_avg_mhz != null) {
+    rows.push([t('metric.gpuClockRow', 'GPU 频率 平均 / 最高'),
+      `${r.gpu_clock_avg_mhz} / ${r.gpu_clock_max_mhz} MHz${r.gpu_clock_hw_max_mhz ? `（上限 ${r.gpu_clock_hw_max_mhz}）` : ''}`]);
+  }
+  if (r.gpu_power_avg_w != null) rows.push([t('metric.gpuPowerRow', 'GPU 功耗 平均 / 最高'), `${r.gpu_power_avg_w} / ${r.gpu_power_max_w} W`]);
+  if (r.gpu_fan_avg_pct != null) rows.push([t('metric.gpuFanRow', 'GPU 风扇 平均'), `${r.gpu_fan_avg_pct} %`]);
+  if (r.pcie) rows.push([t('metric.pcieRow', 'PCIe 链路'), String(r.pcie)]);
+  if (r.throttle && Object.keys(r.throttle).length) {
+    rows.push([t('metric.throttleRow', '降频原因'),
+      Object.entries(r.throttle).map(([k, v]) => `${t('metric.throttle.' + k, k)} ${v} %`).join(' · ')]);
+  }
+  if (r.cpu_util_avg_pct != null) {
+    rows.push([t('metric.cpuRow', 'CPU 占用 平均 / 最高'),
+      `${r.cpu_util_avg_pct} / ${r.cpu_util_max_pct} %${r.cpu_max_core_avg_pct != null ? `（最高单核 ${r.cpu_max_core_avg_pct} %）` : ''}`]);
+  }
   if (r.display_latency_avg_ms != null) rows.push([t('metric.latRow', '上屏延迟 平均 / p95'), `${r.display_latency_avg_ms} / ${r.display_latency_p95_ms} ms`]);
   if (r.pc_latency_avg_ms != null) rows.push([t('metric.pcRow', 'PC 延迟 平均 / p95'), `${r.pc_latency_avg_ms} / ${r.pc_latency_p95_ms} ms`]);
   if (r.gpu_temp_avg_c != null) rows.push([t('metric.gpuTempRow', 'GPU 温度 平均 / 最高'), `${r.gpu_temp_avg_c} / ${r.gpu_temp_max_c} °C`]);

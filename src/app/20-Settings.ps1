@@ -3,6 +3,8 @@
 function New-DefaultConfig {
     [pscustomobject]@{
         theme = 'system'; seconds = 120; minimize = $true; sound = $true; skip = ''
+        # 采集预设：standard 是默认档；warmup = 预热丢弃秒数（引擎 -WarmupSec）
+        preset = 'standard'; warmup = 3
         language = 'zh-CN'
         lastPid = 0; windowW = 1180; windowH = 780
         # 检查更新：auto 关掉后不再自动查；skippedVersion 是用户点过「跳过此版本」的版本号
@@ -40,6 +42,16 @@ function Set-ConfigValue {
         'minimize' { if ($Value -is [bool]) { $script:Cfg.minimize = $Value } }
         'sound'    { if ($Value -is [bool]) { $script:Cfg.sound = $Value } }
         'skip'     { if ($Value -is [string]) { $script:Cfg.skip = $Value } }
+        'preset'   {
+            # 只接受清单里存在的档位；空串 = 自定义
+            if ($Value -is [string] -and ($Value -eq '' -or $Value -in @('quick', 'standard', 'pro'))) { $script:Cfg.preset = [string]$Value }
+            else { Write-AppLog ("配置 preset=$Value 非法，已忽略") 'WARN' }
+        }
+        'warmup'   {
+            $n = ConvertTo-ConfigInt $Value
+            if ($null -ne $n -and $n -ge 0 -and $n -le 30) { $script:Cfg.warmup = $n }
+            else { Write-AppLog ("配置 warmup=$Value 越界（0–30），已忽略") 'WARN' }
+        }
         'lastPid' {
             $n = ConvertTo-ConfigInt $Value
             if ($null -ne $n -and $n -ge 0) { $script:Cfg.lastPid = $n }

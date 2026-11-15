@@ -33,11 +33,12 @@ function handleMessage(msg) {
       const cap = msg.options || null;
       const note = $('.card-note');
       if (cap && cap.hint && note) note.dataset.i18n = cap.hint;
-      renderCaptureOptions(cap ? cap.options : null);
+      renderCaptureOptions(cap ? cap.options : null, cap ? cap.presets : null);
       if (typeof s.skip === 'string') {
         const skip = expandSkip(s.skip);   // 旧配置的 gpu / mem 会展开成拆后的四个
         $$('.collect-grid input').forEach(el => { el.checked = !skip.includes(el.dataset.skip); });
       }
+      restorePresetState(s.preset || '', Number(s.warmup));
       applyTheme(s.theme || 'system');
       if (s.language) { state.language = s.language; setLanguage(s.language); }
       if (window.PerfUpdate) window.PerfUpdate.init(s.updateCheck);

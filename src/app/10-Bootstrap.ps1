@@ -48,6 +48,18 @@ if (-not (Test-Path $coreDll) -or -not (Test-Path $wfDll)) {
     exit
 }
 if (-not ('Microsoft.Web.WebView2.WinForms.WebView2' -as [type])) {
-    Add-Type -Path $coreDll
-    Add-Type -Path $wfDll
+    # WebView2 的 WinForms 包装引用了 System.Windows.Forms；先确保它加载好，否则 Add-Type 会失败，
+    # 之后 50-Host 的 New-Object 只会报一句「找不到类型」，看不出真因。
+    try { Add-Type -AssemblyName System.Windows.Forms -ErrorAction Stop } catch { }
+    try {
+        Add-Type -Path $coreDll -ErrorAction Stop
+        Add-Type -Path $wfDll -ErrorAction Stop
+    } catch {
+        $msg = 'WebView2 依赖加载失败: ' + $_.Exception.Message
+        Write-Host $msg -ForegroundColor Red
+        try {
+            [IO.File]::AppendAllText((Join-Path $env:TEMP 'perfcapture-wv2err.log'),
+                ((Get-Date).ToString('yyyy-MM-dd HH:mm:ss') + ' ' + $msg + "`r`n"), (New-Object Text.UTF8Encoding($true)))
+        } catch { }
+    }
 }

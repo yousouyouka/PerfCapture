@@ -203,9 +203,14 @@ function Update-OverlayReadout {
     foreach ($row in $script:OverlayControls) {
         switch ($row.def.key) {
             'fps' {
-                # 实时 FPS 需要增量读 PresentMon CSV（批次 C），这里如实显示「—」
-                $row.value.Text = '—'
-                $row.fill.Width = 0
+                # 实时 FPS：宿主 35-Metrics.ps1 增量 tail PresentMon CSV 得到 s.fps
+                if ($s -and $null -ne $s.fps) {
+                    $row.value.Text = ('{0:0.#} FPS' -f [double]$s.fps)
+                    $row.fill.Width = [int]([math]::Min(1.0, ([double]$s.fps / 240.0)) * $row.track.Width)
+                } else {
+                    $row.value.Text = '—'
+                    $row.fill.Width = 0
+                }
             }
             'cpu' {
                 if ($s -and $null -ne $s.cpu) {

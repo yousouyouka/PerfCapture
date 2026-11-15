@@ -19,6 +19,14 @@ window.PerfUpdateAreas = ['capture', 'realtime', 'other'];
 
 window.PerfUpdates = [
   {
+    date: '2026-11-17', version: '1.5.1',
+    title: '修复：卸载程序不再「安装」',
+    items: [
+      ['fix', '卸载程序跑成了安装：uninstall.exe 是安装程序的副本，靠命令行 /U 区分模式，双击时没有参数就走进安装分支。现在进程名是 uninstall*.exe 就默认按卸载处理，还会先弹确认框。', 'other'],
+      ['fix', '卸载删目录加了护栏：只删「确实装着本程序的目录」，注册表被改坏时不会误删盘根或系统目录。配置与历史报告仍然保留。', 'other']
+    ]
+  },
+  {
     date: '2026-11-17', version: '1.5.0',
     title: '实时监控上线：CPU / GPU 进度条视图',
     items: [

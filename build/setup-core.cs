@@ -98,6 +98,16 @@ namespace PerfCaptureSetup
             return info;
         }
 
+        private static bool IsUninstallerExe()
+        {
+            try
+            {
+                string name = Path.GetFileNameWithoutExtension(Application.ExecutablePath) ?? "";
+                return name.StartsWith("uninstall", StringComparison.OrdinalIgnoreCase);
+            }
+            catch { return false; }
+        }
+
         private static Options ParseArgs(string[] argv)
         {
             Options o = new Options();
@@ -120,6 +130,10 @@ namespace PerfCaptureSetup
         internal static int Main(string[] argv)
         {
             Options opts = ParseArgs(argv);
+            // 卸载程序是安装程序的副本，靠 /U 区分模式。用户双击 uninstall.exe 时没有任何参数，
+            // 曾经因此走进「安装」分支（界面弹的是安装向导、点完什么都没删）。
+            // 所以：进程名是 uninstall*.exe 且没显式要求安装时，一律按卸载处理。
+            if (!opts.Uninstall && IsUninstallerExe()) opts.Uninstall = true;
             try
             {
                 if (opts.Uninstall) return Uninstaller.Run(opts);
@@ -336,10 +350,13 @@ namespace PerfCaptureSetup
         {
             string dir = Registry.ReadInstallLocation();
             if (dir.Length == 0) dir = Path.GetDirectoryName(Application.ExecutablePath);
+            // 只有目录可信才删：注册表被改坏时，「删整个目录」这个动作可能指向盘根或 Windows。
+            string full = SafeInstallDir(dir);
             if (!opts.Silent)
             {
+                string shown = full.Length > 0 ? full : dir;
                 DialogResult r = MessageBox.Show(
-                    "确定要卸载 " + Program.AppName + " 吗？\r\n\r\n安装目录：" + dir + "\r\n（配置与历史报告会保留在 " + Program.DataDir() + "）",
+                    "确定要卸载 " + Program.AppName + " 吗？\r\n\r\n安装目录：" + shown + "\r\n（配置与历史报告会保留在 " + Program.DataDir() + "）",
                     Program.AppName + " 卸载", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
                 if (r != DialogResult.Yes) return 3;
             }
@@ -349,17 +366,52 @@ namespace PerfCaptureSetup
                 Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), Program.AppName + ".lnk"));
             Registry.DeleteKey();
 
-            // 自己删自己：拷到临时目录再让 cmd 删安装目录（当前 exe 锁着目录）
+            if (full.Length > 0)
+            {
+                // 自己删自己：当前 exe 锁着自己的目录，所以交给 cmd 等几秒再删。
+                // 注意两件事：① cmd 的工作目录不能是安装目录（CWD 被占用时 rmdir 会失败）；
+                //           ② 删一次不够稳（杀软/索引器可能还短暂占着文件），隔 2 秒再补一次。
+                try
+                {
+                    string cmd = "/c cd /d \"" + Path.GetTempPath() + "\" & ping -n 3 127.0.0.1 > nul & rmdir /s /q \"" + full + "\" & ping -n 2 127.0.0.1 > nul & if exist \"" + full + "\" rmdir /s /q \"" + full + "\"";
+                    ProcessStartInfo psi = new ProcessStartInfo("cmd.exe", cmd);
+                    psi.WorkingDirectory = Path.GetTempPath();
+                    psi.WindowStyle = ProcessWindowStyle.Hidden;
+                    psi.CreateNoWindow = true;
+                    Process.Start(psi);
+                }
+                catch { }
+            }
+            else
+            {
+                Program.Log("卸载：安装目录不可信，已跳过删除目录：" + (dir == null ? "(null)" : dir));
+            }
+            return 0;
+        }
+
+        // 判定安装目录是否可信：绝对路径、已存在、不是盘根、不在 Windows 目录下，
+        // 并且目录里确实有本程序的 exe（或是卸载程序自己所在的目录）。
+        private static string SafeInstallDir(string dir)
+        {
             try
             {
-                string cmd = "/c ping -n 3 127.0.0.1 > nul & rmdir /s /q \"" + dir + "\"";
-                ProcessStartInfo psi = new ProcessStartInfo("cmd.exe", cmd);
-                psi.WindowStyle = ProcessWindowStyle.Hidden;
-                psi.CreateNoWindow = true;
-                Process.Start(psi);
+                if (string.IsNullOrEmpty(dir)) return "";
+                string full = Path.GetFullPath(dir).TrimEnd('\\');
+                if (full.Length <= 3) return "";
+                if (!Directory.Exists(full)) return "";
+                string rootPath = Path.GetPathRoot(full);
+                if (rootPath != null && string.Equals(full, rootPath.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase)) return "";
+                string win = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+                win = win == null ? "" : win.TrimEnd('\\');
+                if (win.Length > 0 && full.StartsWith(win + "\\", StringComparison.OrdinalIgnoreCase)) return "";
+                bool hasApp = File.Exists(Path.Combine(full, Program.AppName + ".exe"));
+                string self = Path.GetDirectoryName(Application.ExecutablePath) ?? "";
+                bool isSelf = self.Length > 0 &&
+                    string.Equals(full, Path.GetFullPath(self).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase);
+                if (!hasApp && !isSelf) return "";
+                return full;
             }
-            catch { }
-            return 0;
+            catch { return ""; }
         }
     }
 }

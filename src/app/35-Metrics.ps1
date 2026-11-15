@@ -22,6 +22,7 @@ $script:MetricsCaps = $null
 $script:MetricsCtx = $null
 $script:MetricsTimer = $null
 $script:MetricsRunning = $false
+$script:MetricsConsumers = @{}   # 谁在要数据：page（实时监控页）/ overlay（浮窗）
 $script:MetricsNextAt = [DateTime]::MinValue
 $script:MetricsSmiPath = ''
 $script:MetricsCpuBaseMhz = 0
@@ -31,7 +32,7 @@ $script:MetricsSampleScript = @'
 param($SmiPath)
 $out = [ordered]@{
     at = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
-    cpu = $null; cpuMhz = $null
+    cpu = $null; cpuMhz = $null; cpuMhzMax = $null
     gpu = $null; gpuClock = $null; gpuMemClock = $null; gpuTemp = $null; gpuPower = $null; gpuFan = $null
     vramUsed = $null; vramTotal = $null
     ramUsed = $null; ramTotal = $null
@@ -50,6 +51,7 @@ function ToNum($v) {
 if (-not ('PcMetrics' -as [type])) {
     $cs = @(
         'using System;'
+        'using System.Collections.Generic;'
         'using System.Runtime.InteropServices;'
         'public static class PcMetrics {'
         '    [StructLayout(LayoutKind.Sequential)] private struct FILETIME { public uint Low; public uint High; }'
@@ -65,8 +67,11 @@ if (-not ('PcMetrics' -as [type])) {
         '    [DllImport("pdh.dll", CharSet = CharSet.Unicode)] private static extern uint PdhAddEnglishCounterW(IntPtr q, string path, IntPtr user, out IntPtr c);'
         '    [DllImport("pdh.dll")] private static extern uint PdhCollectQueryData(IntPtr q);'
         '    [DllImport("pdh.dll")] private static extern uint PdhGetFormattedCounterValue(IntPtr c, uint fmt, out uint t, out PdhVal v);'
+        '    [DllImport("pdh.dll", CharSet = CharSet.Unicode)] private static extern uint PdhEnumObjectItemsW(string src, string machine, string obj, IntPtr counters, ref uint csz, IntPtr instances, ref uint isz, uint detail, uint flags);'
+        '    private static List<IntPtr> pdhCoreCounters = new List<IntPtr>();'
         '    private static IntPtr pdhQuery = IntPtr.Zero, pdhPerf = IntPtr.Zero, pdhFreq = IntPtr.Zero;'
         '    private static bool pdhOk;'
+        '    private static int pdhLastTick;'
         '    private static ulong lastIdle, lastKernel, lastUser;'
         '    private static bool hasLast;'
         '    private static ulong U64(FILETIME t) { return ((ulong)t.High << 32) | t.Low; }'
@@ -96,18 +101,47 @@ if (-not ('PcMetrics' -as [type])) {
         '        IntPtr cp, cf;'
         '        if (PdhAddEnglishCounterW(q, "\\Processor Information(_Total)\\% Processor Performance", IntPtr.Zero, out cp) != 0) return false;'
         '        if (PdhAddEnglishCounterW(q, "\\Processor Information(_Total)\\Processor Frequency", IntPtr.Zero, out cf) != 0) return false;'
+        '        uint csz = 0, isz = 0;'
+        '        PdhEnumObjectItemsW(null, null, "Processor Information", IntPtr.Zero, ref csz, IntPtr.Zero, ref isz, 0, 0);'
+        '        if (isz > 0 || csz > 0) {'
+        '            IntPtr iBuf = Marshal.AllocHGlobal((int)Math.Max(2, isz));'
+        '            IntPtr cBuf = Marshal.AllocHGlobal((int)Math.Max(2, csz));'
+        '            try {'
+        '                if (PdhEnumObjectItemsW(null, null, "Processor Information", cBuf, ref csz, iBuf, ref isz, 0, 0) == 0) {'
+        '                    long p = iBuf.ToInt64();'
+        '                    while (true) {'
+        '                        string s = Marshal.PtrToStringUni(new IntPtr(p));'
+        '                        if (string.IsNullOrEmpty(s)) break;'
+        '                        p += (s.Length + 1) * 2;'
+        '                        if (s == "_Total") continue;'
+        '                        IntPtr cc;'
+        '                        if (PdhAddEnglishCounterW(q, "\\Processor Information(" + s + ")\\% Processor Performance", IntPtr.Zero, out cc) == 0) { pdhCoreCounters.Add(cc); }'
+        '                    }'
+        '                }'
+        '            } finally { Marshal.FreeHGlobal(iBuf); Marshal.FreeHGlobal(cBuf); }'
+        '        }'
         '        pdhQuery = q; pdhPerf = cp; pdhFreq = cf; pdhOk = true;'
         '        PdhCollectQueryData(pdhQuery);'
+        '        pdhLastTick = Environment.TickCount;'
         '        return true;'
         '    }'
-        '    public static double PdhClockMhz() {'
-        '        if (!pdhOk && !PdhInit()) return -1;'
+        '    public static string PdhSample() {'
+        '        if (!pdhOk && !PdhInit()) return "";'
         '        PdhCollectQueryData(pdhQuery);'
-        '        uint t; PdhVal v1, v2;'
-        '        if (PdhGetFormattedCounterValue(pdhPerf, 0x200, out t, out v1) != 0 || v1.status != 0) return -1;'
-        '        if (PdhGetFormattedCounterValue(pdhFreq, 0x200, out t, out v2) != 0 || v2.status != 0) return -1;'
-        '        if (v2.dbl <= 0) return -1;'
-        '        return v2.dbl * v1.dbl / 100.0;'
+        '        int nowTick = Environment.TickCount;'
+        '        if (pdhLastTick != 0 && nowTick - pdhLastTick < 400) return "";'
+        '        pdhLastTick = nowTick;'
+        '        uint t; PdhVal freq, avg;'
+        '        if (PdhGetFormattedCounterValue(pdhFreq, 0x200, out t, out freq) != 0 || freq.status != 0 || freq.dbl <= 0) return "";'
+        '        string avgs = "";'
+        '        if (PdhGetFormattedCounterValue(pdhPerf, 0x200, out t, out avg) == 0 && avg.status == 0) avgs = Math.Round(freq.dbl * avg.dbl / 100.0).ToString();'
+        '        double mx = 0;'
+        '        for (int i = 0; i < pdhCoreCounters.Count; i++) {'
+        '            PdhVal v;'
+        '            if (PdhGetFormattedCounterValue(pdhCoreCounters[i], 0x200, out t, out v) == 0 && v.status == 0 && v.dbl > mx) mx = v.dbl;'
+        '        }'
+        '        string maxs = mx > 0 ? Math.Round(freq.dbl * mx / 100.0).ToString() : "";'
+        '        return avgs + "|" + maxs;'
         '    }'
         '}'
     ) -join "`n"
@@ -149,7 +183,15 @@ if ($null -eq $out.cpu -and -not ('PcMetrics' -as [type])) {
 # 说明：CallNtPowerInformation 的 CurrentMhz 在本机只给 2007/2501 两档粗值，
 # 明显低于任务管理器/厂商工具看到的 ~3.5 GHz，所以改用计数器口径（同 Task Manager）。
 if ('PcMetrics' -as [type]) {
-    try { $v = [PcMetrics]::PdhClockMhz(); if ($v -gt 0) { $out.cpuMhz = [math]::Round($v, 0) } } catch { }
+    try {
+        $ps1 = [PcMetrics]::PdhSample()
+        if ($ps1) {
+            $parts = $ps1 -split '\|'
+            $a = 0.0; $b = 0.0
+            if ($parts.Count -ge 1 -and [double]::TryParse($parts[0], [ref]$a) -and $a -gt 0) { $out.cpuMhz = [math]::Round($a, 0) }
+            if ($parts.Count -ge 2 -and [double]::TryParse($parts[1], [ref]$b) -and $b -gt 0) { $out.cpuMhzMax = [math]::Round($b, 0) }
+        }
+    } catch { }
 }
 if ($null -eq $out.cpuMhz) {
     try {
@@ -204,6 +246,7 @@ function Get-MetricsCapabilities {
         vram = $null
         cpu = $null
         cpuMhz = $null
+        cpuMhzMax = $null
         ram = $null
         # 本轮不做，占位：将来由「可选传感器组件」置 true
         cpuTemp = $false
@@ -239,6 +282,7 @@ function Update-MetricsCapsFromSample($s) {
     $c.vram = ($null -ne $s.vramTotal)
     $c.cpu = ($null -ne $s.cpu)
     $c.cpuMhz = ($null -ne $s.cpuMhz)
+    $c.cpuMhzMax = ($null -ne $s.cpuMhzMax)
     $c.ram = ($null -ne $s.ramTotal)
 }
 
@@ -300,6 +344,13 @@ function Stop-MetricsTimer {
     }
 }
 
+function Set-MetricsConsumer {
+    param([string]$Name, [bool]$On)
+    if (-not $script:MetricsConsumers) { $script:MetricsConsumers = @{} }
+    if ($On) { $script:MetricsConsumers[$Name] = $true } else { $script:MetricsConsumers.Remove($Name) }
+    if ($script:MetricsConsumers.Count -gt 0) { Start-MetricsSampler } else { Stop-MetricsSampler }
+}
+
 function Start-MetricsSampler {
     if ($script:MetricsRunning) { return }
     Get-MetricsCapabilities | Out-Null
@@ -336,7 +387,7 @@ function Stop-MetricsSampler {
 function Invoke-MetricsCommand {
     param($Msg)
     switch ($Msg.cmd) {
-        'metricsStart' { Start-MetricsSampler }
-        'metricsStop' { Stop-MetricsSampler }
+        'metricsStart' { Set-MetricsConsumer -Name 'page' -On $true }
+        'metricsStop' { Set-MetricsConsumer -Name 'page' -On $false }
     }
 }

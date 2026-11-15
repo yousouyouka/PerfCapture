@@ -67,7 +67,7 @@
   max-width: 46rem;
 }
 
-.realtime-actions { flex: 0 0 auto; }
+.realtime-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 0.4rem; }
 
 .rt-grid {
   display: grid;
@@ -183,3 +183,81 @@
 @media (max-width: 1080px) {
   .rt-grid { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* ── 批次 B：三种视图 ── */
+.rt-views {
+  display: inline-flex;
+  gap: 0.25rem;
+  padding: 0.2rem;
+  background: var(--tile);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.rt-views button {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 0.7rem;
+  padding: 0.28rem 0.6rem;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.rt-views button:hover { background: var(--card-solid); color: var(--text); }
+.rt-views button[aria-pressed="true"] {
+  background: var(--card-solid);
+  border-color: var(--line-strong);
+  color: var(--text-strong);
+}
+
+.rt-visual {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+.rt-visual .rt-track { flex: 1 1 auto; }
+
+/* 曲线视图：整行只剩曲线（条隐藏） */
+.rt-row[data-view="chart"] .rt-track { display: none; }
+.rt-row[data-view="chart"] .rt-spark { flex: 1 1 auto; height: 1.5rem; }
+
+/* 混合视图：条 + 右侧 60px 迷你曲线 */
+.rt-row[data-view="mix"] .rt-visual .rt-track { flex: 1 1 auto; }
+.rt-row[data-view="mix"] .rt-spark { flex: 0 0 60px; height: 1.1rem; }
+
+.rt-spark { display: none; overflow: visible; }
+.rt-row[data-view="chart"] .rt-spark,
+.rt-row[data-view="mix"] .rt-spark { display: block; }
+
+.rt-spark-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.4;
+  vector-effect: non-scaling-stroke;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.rt-spark-line[data-level="warn"] { stroke: var(--warn); }
+.rt-spark-line[data-level="bad"] { stroke: var(--bad); }
+
+/* 曲线视图下不可用行仍要能看出缺失 */
+.rt-row.is-na .rt-spark { opacity: 0.35; }
+
+/* 悬停读数气泡 */
+.rt-readout {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  padding: 0.18rem 0.45rem;
+  font-size: 0.66rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-strong);
+  background: var(--card-solid);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  box-shadow: var(--shadow);
+  white-space: nowrap;
+}
+.realtime-wrap { position: relative; }

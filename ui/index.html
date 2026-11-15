@@ -249,6 +249,12 @@
             <p data-i18n="realtime.desc">只读系统遥测：CPU 使用率与频率、GPU 占用／频率／温度／功耗／显存。进页面开始采样，离开自动停止。</p>
           </div>
           <div class="realtime-actions">
+            <div class="rt-views" role="group" aria-label="视图">
+              <button type="button" data-view="bars" data-i18n="realtime.view.bars">进度条</button>
+              <button type="button" data-view="chart" data-i18n="realtime.view.chart">曲线</button>
+              <button type="button" data-view="mix" data-i18n="realtime.view.mix">混合</button>
+            </div>
+            <button type="button" class="btn btn-ghost" id="btnOverlay" data-i18n="realtime.overlay">浮窗</button>
             <button type="button" class="btn btn-ghost" id="rtToggle" data-i18n="realtime.pause">暂停</button>
           </div>
         </header>

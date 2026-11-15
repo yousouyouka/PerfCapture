@@ -16,6 +16,7 @@ foreach ($f in @(
     '35-Metrics.ps1',
     '40-Bridge.ps1',
     '50-Host.ps1',
+    '55-Overlay.ps1',
     '60-Capture.ps1',
     '70-Updates.ps1',
     '90-Main.ps1'

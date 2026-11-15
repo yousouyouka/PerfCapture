@@ -4,7 +4,7 @@
 # 白名单：只接受约定的命令；未知命令记日志并回传错误，绝不抛异常打断消息泵
 $script:KnownCommands = @('ready', 'refreshProcs', 'saveSettings', 'openReports', 'export', 'exportHtml', 'exportPng', 'start', 'stop',
     'checkUpdate', 'downloadUpdate', 'cancelUpdate', 'openUpdatePage', 'runUpdateInstaller', 'openUpdateFolder', 'skipUpdateVersion', 'setUpdateAuto',
-    'metricsStart', 'metricsStop')
+    'metricsStart', 'metricsStop', 'overlayToggle', 'overlayShow', 'overlayHide')
 
 function Handle-UiMessage($msg) {
     if ($null -eq $msg -or -not $msg.cmd) { return }
@@ -26,6 +26,12 @@ function Handle-UiMessage($msg) {
         catch { Write-AppLog ('监控命令执行失败: ' + $_.Exception.Message) 'WARN' }
         return
     }
+    # 浮窗命令（宿主侧在 55-Overlay.ps1）
+    if ($msg.cmd -in @('overlayToggle', 'overlayShow', 'overlayHide')) {
+        try { Invoke-OverlayCommand $msg }
+        catch { Write-AppLog ('浮窗命令执行失败: ' + $_.Exception.Message) 'WARN' }
+        return
+    }
     try {
         switch ($msg.cmd) {
             'ready' {
@@ -35,6 +41,8 @@ function Handle-UiMessage($msg) {
                 $opts = Get-CaptureOptions
                 if ($opts) { $init.options = $opts }
                 Send-ToUi $init
+                # 上次退出时浮窗是开着的就恢复（位置/透明度都从配置读）
+                if (Get-Command Restore-OverlayIfNeeded -ErrorAction SilentlyContinue) { Restore-OverlayIfNeeded }
                 Set-TitleBarDark ($script:Cfg.theme -eq 'dark')
                 Send-Log '> PerfCapture 就绪 · PresentMon ETW 零注入' 'ln-accent'
                 Send-Log ('  引擎: ' + [IO.Path]::GetFileName($script:Engine))

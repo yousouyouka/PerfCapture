@@ -66,6 +66,7 @@ function handleMessage(msg) {
     case 'update': if (window.PerfUpdate) window.PerfUpdate.handle(msg); break;
     case 'metricSample': if (window.PerfRealtime) window.PerfRealtime.handle(msg); break;
     case 'metricsCaps': if (window.PerfRealtime) window.PerfRealtime.handle(msg); break;
+    case 'overlayState': if (window.PerfRealtime) window.PerfRealtime.handle(msg); break;
     case 'error': addLog('[错误] ' + msg.text, 'ln-warn'); setStatus(msg.text || '出错'); break;
     default: break;
   }

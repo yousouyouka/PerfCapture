@@ -17,7 +17,7 @@ Write-Host "`n[1/6] 目录结构"
 $structure = @(
     'src\PerfCapture.ps1',
     'src\app\00-Prelude.ps1', 'src\app\05-Paths.ps1', 'src\app\10-Bootstrap.ps1',
-    'src\app\15-Logging.ps1', 'src\app\20-Settings.ps1', 'src\app\30-Tools.ps1', 'src\app\35-Metrics.ps1',
+    'src\app\15-Logging.ps1', 'src\app\20-Settings.ps1', 'src\app\30-Tools.ps1', 'src\app\35-Metrics.ps1', 'src\app\55-Overlay.ps1',
     'src\app\40-Bridge.ps1', 'src\app\50-Host.ps1', 'src\app\60-Capture.ps1', 'src\app\90-Main.ps1',
     'src\engine\Measure-GamePerf.ps1',
     'ui\index.html',
@@ -666,6 +666,26 @@ $iDispatch = $capPs.IndexOf('Invoke-MetricsCommand $msg')
 $iSwitch = $capPs.IndexOf('switch ($msg.cmd) {')
 if ($iDispatch -lt 0 -or $iSwitch -lt 0 -or $iDispatch -gt $iSwitch) { Bad '监控命令必须在 switch 之前分发（否则走不到）' }
 if ((Get-Content (Join-Path $root 'src\PerfCapture.ps1') -Raw -Encoding UTF8) -notmatch "'35-Metrics.ps1'") { Bad '入口没有加载 35-Metrics.ps1' }
+if ((Get-Content (Join-Path $root 'src\PerfCapture.ps1') -Raw -Encoding UTF8) -notmatch "'55-Overlay.ps1'") { Bad '入口没有加载 55-Overlay.ps1' }
+# 批次 B：视图切换 + 曲线 + 浮窗
+foreach ($need in 'rt-views', 'svgPath', 'cpuMhzMax', 'overlayToggle') {
+    if ($rtJs -notmatch [regex]::Escape($need)) { Bad "realtime.js 缺 $need（批次 B）" }
+}
+if ($idx -notmatch 'rt-views') { Bad 'index.html 缺视图切换按钮组' }
+if ($idx -notmatch 'id="btnOverlay"') { Bad 'index.html 缺浮窗按钮' }
+if ($brJs -notmatch 'overlayState') { Bad 'bridge.js 没有分发 overlayState' }
+$ovPs = Get-Content (Join-Path $root 'src\app\55-Overlay.ps1') -Raw -Encoding UTF8
+foreach ($need in 'Show-Overlay', 'Hide-Overlay', 'Toggle-Overlay', 'GetAsyncKeyState', 'opacity') {
+    if ($ovPs -notmatch [regex]::Escape($need)) { Bad "55-Overlay.ps1 缺 $need" }
+}
+# 浮窗也不许装键盘钩子/注入
+foreach ($forbidden in 'SetWindowsHookEx', 'WriteProcessMemory', 'CreateRemoteThread') {
+    if ($ovPs -match [regex]::Escape($forbidden)) { Bad "55-Overlay.ps1 出现不该有的 $forbidden" }
+}
+foreach ($key in 'realtime.view.chart', 'realtime.row.maxclock', 'realtime.overlay') {
+    if ($i18nText -notmatch [regex]::Escape("'" + $key + "'")) { Bad "i18n 缺 $key" }
+}
+if ($capPs -notmatch "'overlayToggle'") { Bad '60-Capture.ps1 没登记 overlayToggle 命令' }
 
 
 # ---------- 6. 运行时依赖 ----------

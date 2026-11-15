@@ -1,8 +1,7 @@
-/* 实时监控 · 进度条视图（1.5.0 批次 A）
+/* 实时监控（1.5.0）· 三种视图：进度条 / 曲线 / 混合
    数据来自宿主 35-Metrics.ps1：'metricsCaps'（能力表）+ 'metricSample'（每秒一条）。
-   本批只渲染当前值 + 进度条；环形缓冲先留在前端 history 里，批次 B 用来画折线。
-
-   约定：采不到的字段宿主传 null，这里显示「—」，绝不画成 0。 */
+   采不到的字段宿主传 null，这里显示「—」，绝不画成 0。
+   视图选择存 localStorage，语言切换后由 __refreshRealtime 重画。 */
 (function initRealtime() {
   const cpuBox = document.getElementById('rtCpuRows');
   const gpuBox = document.getElementById('rtGpuRows');
@@ -10,25 +9,36 @@
   if (!cpuBox || !gpuBox || !page) return;
 
   const tx = (key, fallback) => (typeof t === 'function' ? t(key, fallback) : fallback);
+  const fill = (tpl, params) => Object.keys(params).reduce((s, k) => s.split('{' + k + '}').join(params[k]), tpl);
   const clamp = (v) => (v < 0 ? 0 : v > 100 ? 100 : v);
+  const VIEW_KEY = 'perf.realtime.view';
+  const WINDOW = 60;             // 曲线显示最近 60 点（约 1 分钟）
 
   const state = {
     caps: null,
     sample: null,
     paused: false,
     running: false,
+    view: 'bars',
     history: [],
     cells: []
   };
+  try {
+    const v = localStorage.getItem(VIEW_KEY);
+    if (v === 'bars' || v === 'chart' || v === 'mix') state.view = v;
+  } catch (e) { }
 
-  // ---------- 字段表：一条 = 一行 ----------
-  // valueOf 取原始值；maxOf 取进度条上限；caps 是能力表里对应的键（false = 这台机器没有）
+  // ---------- 字段表 ----------
+  // maxOf: 条形/曲线上限；valueOf: 取原始值；caps: 能力表键（false=这台机器没有）；tip: 口径说明
   const FIELDS = [
     { col: 'cpu', key: 'cpu.util', label: 'realtime.row.util', unit: '%', digits: 0,
       maxOf: () => 100, valueOf: (s) => s.cpu, warn: 80, bad: 95, caps: 'cpu' },
     { col: 'cpu', key: 'cpu.clock', label: 'realtime.row.clock', unit: 'GHz', digits: 2,
       scale: 1000, maxOf: (c) => (c && c.cpuBarMax ? c.cpuBarMax : (c && c.cpuBaseMhz ? c.cpuBaseMhz * 1.5 : 5000)),
       valueOf: (s) => s.cpuMhz, caps: 'cpuMhz', tip: 'realtime.tip.cpuClock' },
+    { col: 'cpu', key: 'cpu.maxclock', label: 'realtime.row.maxclock', unit: 'GHz', digits: 2,
+      scale: 1000, maxOf: (c) => (c && c.cpuBarMax ? c.cpuBarMax : (c && c.cpuBaseMhz ? c.cpuBaseMhz * 1.5 : 5000)),
+      valueOf: (s) => s.cpuMhzMax, caps: 'cpuMhzMax', tip: 'realtime.tip.maxClock' },
     { col: 'cpu', key: 'cpu.temp', label: 'realtime.row.temp', unit: '°C', digits: 0,
       maxOf: () => 100, valueOf: () => null, placeholder: 'realtime.naSensor' },
     { col: 'cpu', key: 'cpu.fan', label: 'realtime.row.cpuFan', unit: 'rpm', digits: 0,
@@ -37,9 +47,11 @@
     { col: 'gpu', key: 'gpu.util', label: 'realtime.row.util', unit: '%', digits: 0,
       maxOf: () => 100, valueOf: (s) => s.gpu, warn: 80, bad: 95, caps: 'gpu' },
     { col: 'gpu', key: 'gpu.clock', label: 'realtime.row.clock', unit: 'MHz', digits: 0,
-      maxOf: (c) => (c && c.gpuClockMax ? c.gpuClockMax : 3000), valueOf: (s) => s.gpuClock, caps: 'gpuClock', tip: 'realtime.tip.gpuClock' },
+      maxOf: (c) => (c && c.gpuClockMax ? c.gpuClockMax : 3000), valueOf: (s) => s.gpuClock,
+      caps: 'gpuClock', tip: 'realtime.tip.gpuClock' },
     { col: 'gpu', key: 'gpu.memclock', label: 'realtime.row.memclock', unit: 'MHz', digits: 0,
-      maxOf: (c) => (c && c.gpuMemClockMax ? c.gpuMemClockMax : 10000), valueOf: (s) => s.gpuMemClock, caps: 'gpuMemClock', tip: 'realtime.tip.memClock' },
+      maxOf: (c) => (c && c.gpuMemClockMax ? c.gpuMemClockMax : 10000), valueOf: (s) => s.gpuMemClock,
+      caps: 'gpuMemClock', tip: 'realtime.tip.memClock' },
     { col: 'gpu', key: 'gpu.temp', label: 'realtime.row.temp', unit: '°C', digits: 0,
       maxOf: () => 100, valueOf: (s) => s.gpuTemp, warn: 75, bad: 87, caps: 'gpuTemp' },
     { col: 'gpu', key: 'gpu.fan', label: 'realtime.row.fan', unit: '%', digits: 0,
@@ -58,6 +70,48 @@
     return n;
   }
 
+  // ---------- 悬停读数（曲线/混合视图）----------
+  const tipEl = el('div', 'rt-readout');
+  tipEl.hidden = true;
+  page.appendChild(tipEl);
+
+  function showReadout(f, ev) {
+    const hist = state.history;
+    if (!hist.length) return;
+    const target = ev.currentTarget;
+    const box = target.getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (ev.clientX - box.left) / box.width));
+    const slice = hist.slice(-WINDOW);
+    const idx = Math.min(slice.length - 1, Math.round(ratio * (slice.length - 1)));
+    const s = slice[idx];
+    const v = s && f.valueOf ? f.valueOf(s) : null;
+    if (v == null) return;
+    const shown = f.scale ? v / f.scale : v;
+    const unit = f.unit;
+    tipEl.textContent = fill(tx('realtime.readout', '{time}  {value}'), {
+      time: (s.at || '').slice(11, 19),
+      value: shown.toFixed(f.digits || 0) + ' ' + unit
+    });
+    const rect = page.getBoundingClientRect();
+    tipEl.style.left = Math.round(ev.clientX - rect.left + 10) + 'px';
+    tipEl.style.top = Math.round(ev.clientY - rect.top + 12) + 'px';
+    tipEl.hidden = false;
+  }
+  function hideReadout() { tipEl.hidden = true; }
+
+  // ---------- 渲染 ----------
+  function svgPath(values, max) {
+    if (!values.length) return '';
+    const n = Math.max(1, values.length - 1);
+    let d = '';
+    values.forEach((v, i) => {
+      const x = (i / n) * 100;
+      const y = 28 - clamp((v / max) * 100) / 100 * 26 - 1;
+      d += (i ? ' L' : 'M') + x.toFixed(2) + ' ' + y.toFixed(2);
+    });
+    return d;
+  }
+
   function build() {
     const cpuTitle = document.getElementById('rtCpuName');
     const gpuTitle = document.getElementById('rtGpuName');
@@ -66,19 +120,38 @@
 
     cpuBox.innerHTML = '';
     gpuBox.innerHTML = '';
+    document.querySelectorAll('.rt-views button').forEach((b) => {
+      b.setAttribute('aria-pressed', String(b.dataset.view === state.view));
+    });
+
     state.cells = FIELDS.map((f) => {
       const row = el('div', 'rt-row');
       row.dataset.metric = f.key;
+      row.dataset.view = state.view;
       const label = el('span', 'rt-label', tx(f.label, f.label));
-      const track = el('span', 'rt-track');
-      const fill = el('span', 'rt-fill');
-      track.appendChild(fill);
+      const visual = el('span', 'rt-visual');
+      const bar = el('span', 'rt-track');
+      const barFill = el('span', 'rt-fill');
+      bar.appendChild(barFill);
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('class', 'rt-spark');
+      svg.setAttribute('viewBox', '0 0 100 28');
+      svg.setAttribute('preserveAspectRatio', 'none');
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('class', 'rt-spark-line');
+      svg.appendChild(path);
+      visual.appendChild(bar);
+      visual.appendChild(svg);
       const value = el('span', 'rt-value');
       row.appendChild(label);
-      row.appendChild(track);
+      row.appendChild(visual);
       row.appendChild(value);
+      if (state.view !== 'bars') {
+        visual.addEventListener('mousemove', (ev) => showReadout(f, ev));
+        visual.addEventListener('mouseleave', hideReadout);
+      }
       (f.col === 'cpu' ? cpuBox : gpuBox).appendChild(row);
-      return { f, row, fill, value };
+      return { f, row, barFill, path, value };
     });
     paint();
   }
@@ -94,7 +167,8 @@
   function paint() {
     const caps = state.caps || {};
     const s = state.sample;
-    state.cells.forEach(({ f, row, fill, value }) => {
+    const slice = state.history.slice(-WINDOW);
+    state.cells.forEach(({ f, row, barFill, path, value }) => {
       let v = null;
       if (s && typeof f.valueOf === 'function') {
         try { v = f.valueOf(s); } catch (e) { v = null; }
@@ -104,31 +178,39 @@
 
       row.classList.toggle('is-na', !available);
       if (!available) {
-        fill.style.width = '0%';
-        fill.dataset.level = 'ok';
+        barFill.style.width = '0%';
+        barFill.dataset.level = 'ok';
+        path.setAttribute('d', '');
         value.textContent = '—';
         row.title = tx(f.placeholder || 'realtime.naHint', '');
         return;
       }
       row.title = f.tip ? tx(f.tip, '') : '';
       const max = Math.max(1, Number(f.maxOf(caps, s)) || 1);
-      const pct = clamp((v / max) * 100);
-      fill.style.width = pct.toFixed(1) + '%';
-      fill.dataset.level = levelOf(f, v, max);
+      barFill.style.width = clamp((v / max) * 100).toFixed(1) + '%';
+      barFill.dataset.level = levelOf(f, v, max);
+
+      if (state.view !== 'bars') {
+        const vals = slice
+          .map((sm) => { try { return f.valueOf(sm); } catch (e) { return null; } })
+          .map((x) => (x == null ? null : x))
+          .filter((x) => x !== null);
+        path.setAttribute('d', svgPath(vals, max));
+        path.dataset.level = levelOf(f, v, max);
+      }
+
       const shown = f.scale ? v / f.scale : v;
       let text = shown.toFixed(f.digits || 0) + ' ' + f.unit;
       if (typeof f.pairOf === 'function') {
-        const total = f.pairOf(s);
-        text = Math.round(v) + ' / ' + Math.round(total) + ' ' + f.unit;
+        text = Math.round(v) + ' / ' + Math.round(f.pairOf(s)) + ' ' + f.unit;
       }
       value.textContent = text;
     });
   }
 
-  // ---------- 采样开关（进页面才采，离开就停，别空转） ----------
+  // ---------- 采样开关 ----------
   function isVisible() { return page && !page.hidden; }
 
-  // 徽标三态 + 启动中：只有真收到样本才显示「采样中」
   function setBadge(stateName, text) {
     const badge = document.getElementById('rtState');
     const label = document.getElementById('rtStateText');
@@ -147,7 +229,6 @@
   function startSampling() {
     state.paused = false;
     if (typeof send === 'function') send({ cmd: 'metricsStart' });
-    // 还没收到第一条样本：显示「启动中」，别谎报「采样中」
     setBadge('wait', tx('realtime.stateWait', '启动中'));
   }
   function stopSampling() {
@@ -165,6 +246,17 @@
     });
   }
 
+  // 视图切换
+  document.querySelectorAll('.rt-views button').forEach((b) => {
+    b.addEventListener('click', () => {
+      const v = b.dataset.view;
+      if (v === state.view) return;
+      state.view = v;
+      try { localStorage.setItem(VIEW_KEY, v); } catch (e) { }
+      build();
+    });
+  });
+
   const observer = new MutationObserver(() => {
     if (isVisible()) { if (!state.paused) startSampling(); }
     else if (state.running) stopSampling();
@@ -177,23 +269,30 @@
     if (msg.caps) {
       const first = !state.caps;
       state.caps = msg.caps;
-      if (first) build(); else { paint(); }
+      if (first) build(); else paint();
       if (msg.type === 'metricsCaps') setRunning(!!msg.running);
+    }
+    if (msg.type === 'overlayState') {
+      const b = document.getElementById('btnOverlay');
+      if (b) b.setAttribute('aria-pressed', String(!!msg.visible));
+      return;
     }
     if (msg.type === 'metricSample' && msg.sample) {
       state.sample = msg.sample;
       state.history.push(msg.sample);
-      while (state.history.length > ((state.caps && state.caps.ringSize) || 120)) state.history.shift();
+      const cap = (state.caps && state.caps.ringSize) || 120;
+      while (state.history.length > Math.max(cap, WINDOW)) state.history.shift();
       if (!state.cells.length) build(); else paint();
       setRunning(true);
     }
   }
 
-  window.PerfRealtime = {
-    handle,
-    refresh: () => { build(); },
-    state
-  };
+  const overlayBtn = document.getElementById('btnOverlay');
+  if (overlayBtn) {
+    overlayBtn.addEventListener('click', () => { if (typeof send === 'function') send({ cmd: 'overlayToggle' }); });
+  }
+
+  window.PerfRealtime = { handle, refresh: () => { build(); }, state };
   window.__refreshRealtime = () => { build(); };
 
   build();

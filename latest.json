@@ -2,36 +2,36 @@
     "schema":  1,
     "app":  "PerfCapture",
     "channel":  "stable",
-    "version":  "1.4.0",
-    "date":  "2026-11-16",
-    "serial":  4,
+    "version":  "1.5.0",
+    "date":  "2026-11-17",
+    "serial":  16,
     "notes":  {
-                  "zh":  "检查更新：多源清单 + 验签 + 本地校验",
+                  "zh":  "实时监控：三种视图 + 浮窗 + 实时帧率 + 采集侧扩展",
                   "en":  "See the release notes in the app (What\u0027s new).",
                   "ja":  "アプリ内の更新情報をご覧ください。"
               },
     "assets":  [
                    {
                        "kind":  "setup",
-                       "name":  "PerfCapture-Setup-1.4.0.exe",
-                       "size":  10270720,
-                       "sha256":  "8f7d0ff0ae2b3d60ec7d1a2b5f555328911feebc8bcc945b32a36805283fa63b",
+                       "name":  "PerfCapture-Setup-1.5.0.exe",
+                       "size":  10316288,
+                       "sha256":  "08ba06f0448aa7cb81afe10400682350d85d5313f438d09a8c6946f644c2bb0a",
                        "urls":  [
-                                    "https://raw.githubusercontent.com/yousouyouka/PerfCapture/updates/bin/PerfCapture-Setup-1.4.0.exe",
-                                    "https://ghproxy.net/https://github.com/yousouyouka/PerfCapture/releases/download/v1.4.0/PerfCapture-Setup-1.4.0.exe",
-                                    "https://github.com/yousouyouka/PerfCapture/releases/download/v1.4.0/PerfCapture-Setup-1.4.0.exe"
+                                    "https://raw.githubusercontent.com/yousouyouka/PerfCapture/updates/bin/PerfCapture-Setup-1.5.0.exe",
+                                    "https://ghproxy.net/https://github.com/yousouyouka/PerfCapture/releases/download/v1.5.0/PerfCapture-Setup-1.5.0.exe",
+                                    "https://github.com/yousouyouka/PerfCapture/releases/download/v1.5.0/PerfCapture-Setup-1.5.0.exe"
                                 ]
                    },
                    {
                        "kind":  "zip",
-                       "name":  "PerfCapture-1.4.0.zip",
-                       "size":  10228982,
-                       "sha256":  "57cc56336a05e5abd250273bec8251d3e53b4eeefc4e667ca0a01176c1e039f8",
+                       "name":  "PerfCapture-1.5.0.zip",
+                       "size":  10274226,
+                       "sha256":  "ae7148104d5a7d4d283935c077a4bf58baa7c81f2a4c60d40feb94a7c5d0ad9a",
                        "urls":  [
-                                    "https://cdn.jsdelivr.net/gh/yousouyouka/PerfCapture@updates/bin/PerfCapture-1.4.0.zip",
-                                    "https://raw.githubusercontent.com/yousouyouka/PerfCapture/updates/bin/PerfCapture-1.4.0.zip",
-                                    "https://ghproxy.net/https://github.com/yousouyouka/PerfCapture/releases/download/v1.4.0/PerfCapture-1.4.0.zip",
-                                    "https://github.com/yousouyouka/PerfCapture/releases/download/v1.4.0/PerfCapture-1.4.0.zip"
+                                    "https://cdn.jsdelivr.net/gh/yousouyouka/PerfCapture@updates/bin/PerfCapture-1.5.0.zip",
+                                    "https://raw.githubusercontent.com/yousouyouka/PerfCapture/updates/bin/PerfCapture-1.5.0.zip",
+                                    "https://ghproxy.net/https://github.com/yousouyouka/PerfCapture/releases/download/v1.5.0/PerfCapture-1.5.0.zip",
+                                    "https://github.com/yousouyouka/PerfCapture/releases/download/v1.5.0/PerfCapture-1.5.0.zip"
                                 ]
                    }
                ]

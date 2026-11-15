@@ -166,13 +166,19 @@ if (-not $NoManifest) {
             name = $name
             size = (Get-Item -LiteralPath $file).Length
             sha256 = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
-            urls = @(
-                "https://cdn.jsdelivr.net/gh/$repoSlug@updates/bin/$name"
-                "https://raw.githubusercontent.com/$repoSlug/updates/bin/$name"
-                "https://ghproxy.net/https://github.com/$repoSlug/releases/download/v$Version/$name"
-                "https://github.com/$repoSlug/releases/download/v$Version/$name"
-            )
+            urls = (Get-AssetUrls $name)
         }
+    }
+
+    # 资产下载源：jsDelivr 会回 403 Forbidden 拒绝分发 .exe（实测 2026-11-15），
+    # 所以可执行文件直接从 raw 起排，别把死链放第一位浪费一次超时。
+    function Get-AssetUrls([string]$name) {
+        $raw = "https://raw.githubusercontent.com/$repoSlug/updates/bin/$name"
+        $proxy = "https://ghproxy.net/https://github.com/$repoSlug/releases/download/v$Version/$name"
+        $rel = "https://github.com/$repoSlug/releases/download/v$Version/$name"
+        $jsd = "https://cdn.jsdelivr.net/gh/$repoSlug@updates/bin/$name"
+        if ($name -match '\.exe$') { return @($raw, $proxy, $rel) }
+        return @($jsd, $raw, $proxy, $rel)
     }
 
     # 更新说明：取 CHANGELOG 里该版本标题

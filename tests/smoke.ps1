@@ -591,6 +591,9 @@ if (Test-Path $manPath) {
                     if ($u -notmatch '^https://') { Bad "资产 URL 不是 https：$u" }
                     if ($u -notmatch 'jsdelivr|raw\.githubusercontent|ghproxy|github\.com') { Bad "资产 URL 主机不在白名单：$u" }
                 }
+                # jsDelivr 拒发 .exe（403）：安装包清单里不该出现这个死链
+                if ($a.name -match '\.exe$' -and ($a.urls -join ' ') -match 'jsdelivr') { Bad "资产 $($a.name) 的网址含 jsDelivr（它 403 拒发 exe）" }
+                if ($a.name -match '\.exe$' -and ($a.urls[0] -notmatch '^https://raw\.githubusercontent\.com/')) { Bad "资产 $($a.name) 首选源不是 raw（exe 会被 jsDelivr 403）" }
             }
         }
         $sigPath = $manPath + '.sig'

@@ -355,6 +355,10 @@ function Invoke-MetricsTick {
         [void]$script:MetricsSamples.Add($sample)
         while ($script:MetricsSamples.Count -gt $script:MetricsRingSize) { $script:MetricsSamples.RemoveAt(0) }
         Update-MetricsCapsFromSample $sample
+        if (-not $script:MetricsFirstLogged -and ($null -ne $sample.cpu -or $null -ne $sample.cpuMhz)) {
+            $script:MetricsFirstLogged = $true
+            Write-AppLog (('实时监控已出数据：cpu={0}% 平均={1}MHz 最高={2}MHz gpu={3}%' -f $sample.cpu, $sample.cpuMhz, $sample.cpuMhzMax, $sample.gpu))
+        }
         Send-ToUi @{ type = 'metricSample'; sample = $sample; caps = $script:MetricsCaps }
     }
 }
@@ -383,6 +387,7 @@ function Start-MetricsSampler {
     Get-MetricsCapabilities | Out-Null
     $script:MetricsRunning = $true
     $script:MetricsSamples.Clear()
+    $script:MetricsFirstLogged = $false
     Start-MetricsWorker
     Send-MetricsCaps
     Write-AppLog (("实时监控开始：间隔 {0} ms，环形缓冲 {1} 点，GPU 源 {2}" -f $script:MetricsIntervalMs, $script:MetricsRingSize, $(if ($script:MetricsSmiPath) { 'nvidia-smi' } else { '无' })))

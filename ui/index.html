@@ -66,7 +66,7 @@
           </svg>
           <span class="nav-label" data-i18n="nav.settings">设置</span>
         </button>
-        <div class="sidebar-version" id="sidebarVersion">v1.5.3</div>
+        <div class="sidebar-version" id="sidebarVersion">v1.5.4</div>
       </div>
     </nav>
   </aside>
@@ -224,7 +224,7 @@
           <div class="setting-block">
             <div class="setting-label">
               <strong>PerfCapture</strong>
-              <small>v1.5.3 · PresentMon ETW · 零注入</small>
+              <small>v1.5.4 · PresentMon ETW · 零注入</small>
             </div>
           </div>
 
@@ -279,13 +279,106 @@
           <div class="realtime-actions">
             <div class="rt-views" role="group" aria-label="视图">
               <button type="button" data-view="bars" data-i18n="realtime.view.bars">进度条</button>
-              <button type="button" data-view="chart" data-i18n="realtime.view.chart">曲线</button>
-              <button type="button" data-view="mix" data-i18n="realtime.view.mix">混合</button>
+              <!-- 曲线/混合视图暂时隐藏（代码保留，重做完再放出） -->
+              <button type="button" data-view="chart" data-i18n="realtime.view.chart" hidden>曲线</button>
+              <button type="button" data-view="mix" data-i18n="realtime.view.mix" hidden>混合</button>
             </div>
-            <button type="button" class="btn btn-ghost" id="btnOverlay" data-i18n="realtime.overlay">浮窗</button>
-            <button type="button" class="btn btn-ghost" id="rtToggle" data-i18n="realtime.pause">暂停</button>
           </div>
         </header>
+
+        <!-- 顶部板块：监控设置在前，浮窗设置在后（都可收起，状态存 localStorage） -->
+        <section class="rt-board" id="boardMonitor">
+          <button type="button" class="rt-board-head" data-board="boardMonitor" aria-expanded="true">
+            <span data-i18n="realtime.board.monitor">监控设置</span>
+            <span class="rt-board-caret" aria-hidden="true">▾</span>
+          </button>
+          <div class="rt-board-body">
+            <div class="rt-set-row">
+              <span class="rt-set-label" data-i18n="realtime.set.sample">采样</span>
+              <button type="button" class="btn btn-ghost" id="rtToggle" data-i18n="realtime.pause">暂停</button>
+              <span class="rt-set-hint" data-i18n="realtime.set.sampleHint">进页面自动开始，离开自动停止</span>
+            </div>
+            <div class="rt-set-row">
+              <span class="rt-set-label" data-i18n="realtime.set.view">视图</span>
+              <span class="rt-set-hint" data-i18n="realtime.set.viewHint">进度条（曲线／混合视图重做中，暂时收起）</span>
+            </div>
+            <div class="rt-set-row">
+              <span class="rt-set-label" data-i18n="realtime.set.fpsTarget">FPS 目标</span>
+              <span class="rt-set-hint" id="rtFpsTarget">—</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="rt-board" id="boardOverlay">
+          <button type="button" class="rt-board-head" data-board="boardOverlay" aria-expanded="false">
+            <span data-i18n="realtime.board.overlay">浮窗设置</span>
+            <span class="rt-board-caret" aria-hidden="true">▾</span>
+          </button>
+          <div class="rt-board-body" hidden>
+            <div class="rt-set-row">
+              <span class="rt-set-label" data-i18n="realtime.set.anchor">浮窗位置</span>
+              <span class="rt-stepper">
+                <button type="button" class="rt-step" data-step="anchor" data-dir="-1" aria-label="prev">‹</button>
+                <span class="rt-step-value" id="ovAnchor">右上</span>
+                <button type="button" class="rt-step" data-step="anchor" data-dir="1" aria-label="next">›</button>
+              </span>
+            </div>
+            <div class="rt-set-row">
+              <span class="rt-set-label" data-i18n="realtime.set.hpos">横向位置</span>
+              <input type="range" class="rt-range" id="ovPosX" min="0" max="100" step="1" value="100">
+              <input type="number" class="rt-num" id="ovPosXNum" min="0" max="100" step="1" value="100">
+            </div>
+            <div class="rt-set-row">
+              <span class="rt-set-label" data-i18n="realtime.set.vpos">纵向位置</span>
+              <input type="range" class="rt-range" id="ovPosY" min="0" max="100" step="1" value="0">
+              <input type="number" class="rt-num" id="ovPosYNum" min="0" max="100" step="1" value="0">
+            </div>
+            <div class="rt-set-row">
+              <span class="rt-set-label" data-i18n="realtime.set.pixels">坐标（像素）</span>
+              <input type="number" class="rt-num" id="ovPx" min="0" max="30000" step="1" title="X">
+              <input type="number" class="rt-num" id="ovPy" min="0" max="30000" step="1" title="Y">
+            </div>
+            <div class="rt-set-row">
+              <span class="rt-set-label" data-i18n="realtime.set.layout">布局</span>
+              <span class="rt-stepper">
+                <button type="button" class="rt-step" data-step="layout" data-dir="-1" aria-label="prev">‹</button>
+                <span class="rt-step-value" id="ovLayout">线性</span>
+                <button type="button" class="rt-step" data-step="layout" data-dir="1" aria-label="next">›</button>
+              </span>
+            </div>
+            <div class="rt-set-row">
+              <span class="rt-set-label" data-i18n="realtime.set.opacity">背景不透明度</span>
+              <input type="range" class="rt-range" id="ovOpacity" min="20" max="100" step="5" value="90">
+              <input type="number" class="rt-num" id="ovOpacityNum" min="20" max="100" step="5" value="90">
+            </div>
+            <div class="rt-set-row">
+              <span class="rt-set-label" data-i18n="realtime.set.fontSize">字体大小</span>
+              <span class="rt-stepper">
+                <button type="button" class="rt-step" data-step="fontSize" data-dir="-1" aria-label="prev">‹</button>
+                <span class="rt-step-value" id="ovFontSize">标准</span>
+                <button type="button" class="rt-step" data-step="fontSize" data-dir="1" aria-label="next">›</button>
+              </span>
+            </div>
+            <div class="rt-set-row">
+              <span class="rt-set-label" data-i18n="realtime.set.fontColor">字体颜色</span>
+              <span class="rt-stepper">
+                <button type="button" class="rt-step" data-step="fontColor" data-dir="-1" aria-label="prev">‹</button>
+                <span class="rt-step-value" id="ovFontColor">白色</span>
+                <button type="button" class="rt-step" data-step="fontColor" data-dir="1" aria-label="next">›</button>
+              </span>
+            </div>
+            <div class="rt-set-row">
+              <span class="rt-set-label" data-i18n="realtime.set.hotkey">热键</span>
+              <label class="rt-chk"><input type="checkbox" id="ovHotCtrl" checked><span>Ctrl</span></label>
+              <label class="rt-chk"><input type="checkbox" id="ovHotAlt" checked><span>Alt</span></label>
+              <label class="rt-chk"><input type="checkbox" id="ovHotShift"><span>Shift</span></label>
+              <select class="rt-select" id="ovHotKey"></select>
+            </div>
+            <div class="rt-board-foot">
+              <button type="button" class="btn btn-primary" id="btnOverlay" data-i18n="realtime.overlayOn">开启浮窗</button>
+            </div>
+          </div>
+        </section>
 
         <div class="rt-grid">
           <section class="rt-col">

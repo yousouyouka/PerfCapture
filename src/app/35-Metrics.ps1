@@ -36,18 +36,74 @@ $script:MetricsFpsCsv = ''
 $script:MetricsSampleScript = @'
 param($SmiPath, $Queue, $IntervalMs, $Ctl, $PmExe, $FpsCsv, $FpsPid)
 
-# ---- 实时 FPS：PresentMon 增量 tail（批次 C）----
-# 独立 PresentMon 进程（ETW，零注入）写 CSV；每轮只读「自上次以来新增的整行」，
-# 帧数 / 间隔 = FPS。拿不到（没提权 / 目标进程不出帧）就保持 $null，界面显示「—」。
-$fps = @{ proc = $null; offset = 0; sw = $null; leftover = ''; header = $false; framesSeen = 0; ok = $false }
-if ($PmExe -and $FpsCsv -and $FpsPid -gt 0 -and (Test-Path -LiteralPath $PmExe)) {
+# ---- 实时 FPS：PresentMon 增量 tail ----
+# 目标进程 = 当前前台窗口的进程（排除本程序自己），退回「采集页上次选中的进程」$FpsPid。
+# 前台切换时重建 tail；PresentMon 被杀不会自动移除 ETW 会话，所以每次启动都带
+# --session_name 固定名 + --stop_existing_session，避免「trace session already running」静默失败。
+if (-not ('PerfFg' -as [type])) {
+    Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public static class PerfFg{[DllImport("user32.dll")]public static extern IntPtr GetForegroundWindow();[DllImport("user32.dll")]public static extern int GetWindowThreadProcessId(IntPtr h,out int pid);public static int Pid(){int p=0;GetWindowThreadProcessId(GetForegroundWindow(),out p);return p;}}' -ErrorAction SilentlyContinue
+}
+$hostPid = $PID
+$fps = @{ proc = $null; offset = 0; sw = $null; leftover = ''; header = $false; framesSeen = 0; ok = $false;
+          pid = 0; target = ''; err = ''; errFile = ''; cand = -1; hits = 0; win = @() }
+
+function Resolve-FpsTarget {
+    param([int]$Fallback)
+    $fg = 0
+    try { if ('PerfFg' -as [type]) { $fg = [PerfFg]::Pid() } } catch { $fg = 0 }
+    if ($fg -gt 0 -and $fg -ne $hostPid) { return $fg }
+    if ($Fallback -gt 0) {
+        try { [void](Get-Process -Id $Fallback -ErrorAction Stop); return $Fallback } catch { }
+    }
+    return 0
+}
+
+function Stop-FpsTail {
+    if ($fps.proc) { try { if (-not $fps.proc.HasExited) { Stop-Process -Id $fps.proc.Id -Force } } catch { } }
+    $fps.proc = $null
+    $fps.ok = $false
+    $fps.pid = 0
+    $fps.target = ''
+}
+
+function Start-FpsTail {
+    param([int]$TargetPid)
+    Stop-FpsTail
+    $fps.offset = 0; $fps.leftover = ''; $fps.header = $false; $fps.framesSeen = 0; $fps.err = ''; $fps.win = @()
+    if (-not $PmExe -or -not $FpsCsv -or $TargetPid -le 0) { return }
+    if (-not (Test-Path -LiteralPath $PmExe)) { return }
     try {
         if (Test-Path -LiteralPath $FpsCsv) { Remove-Item -LiteralPath $FpsCsv -Force -ErrorAction SilentlyContinue }
-        $pmArgs = @('--process_id', "$FpsPid", '--output_file', $FpsCsv, '--v2_metrics', '--no_console_stats')
+        # 注意：这里**不能用** -RedirectStandardError —— 在 runspace 里 Start-Process 带重定向会卡住
+        # （实测直接把采样线程挂死）。失败原因改用退出码上报，见 Test-FpsTailDead。
+        $pmArgs = @('--process_id', "$TargetPid", '--output_file', $FpsCsv, '--v2_metrics', '--no_console_stats',
+                    '--session_name', 'PerfCaptureLive', '--stop_existing_session')
         $fps.proc = Start-Process -FilePath $PmExe -ArgumentList $pmArgs -PassThru -WindowStyle Hidden
         $fps.sw = [Diagnostics.Stopwatch]::StartNew()
         $fps.ok = $true
-    } catch { $fps.ok = $false }
+        $fps.pid = $TargetPid
+        try { $fps.target = (Get-Process -Id $TargetPid -ErrorAction Stop).ProcessName } catch { $fps.target = '' }
+    } catch {
+        $fps.ok = $false
+        $fps.err = 'start: ' + $_.Exception.Message
+        $fps.pid = 0
+    }
+}
+
+# PresentMon 起来就退出（未提权 / 会话冲突 / 参数错）时，把原因交给宿主记日志。
+# 不读 stderr（runspace 里带重定向会卡），改用退出码 + 一句可读解释。
+function Test-FpsTailDead {
+    if (-not $fps.proc) { return }
+    $exited = $false
+    try { $fps.proc.Refresh(); $exited = $fps.proc.HasExited } catch { $exited = $false }
+    if (-not $exited) { return }
+    $code = $null
+    try { $code = $fps.proc.ExitCode } catch { }
+    $fps.err = 'presentmon exited early (exit code ' + $code + '); 常见原因：未提权（需要管理员）或 ETW 会话被占用'
+    $fps.ok = $false
+    $fps.proc = $null
+    $fps.pid = 0
+    $fps.target = ''
 }
 function Read-NewFrames {
     if (-not $fps.ok) { return 0 }
@@ -82,6 +138,16 @@ function Read-NewFrames {
 
 while ($true) {
     if ($Ctl -and $Ctl.stop) { break }
+# 目标跟随：前台应用优先，退回「采集页上次选中的进程」；切换要连续 2 次确认，避免 alt-tab 抖动
+$cand = Resolve-FpsTarget -Fallback $FpsPid
+if ($cand -ne $fps.cand) { $fps.cand = $cand; $fps.hits = 0 } else { $fps.hits++ }
+if ($cand -gt 0 -and $cand -ne $fps.pid -and ($fps.hits -ge 2 -or -not $fps.proc)) { Start-FpsTail -TargetPid $cand }
+Test-FpsTailDead
+if ($fps.pid -gt 0) {
+    $alive = $true
+    try { [void](Get-Process -Id $fps.pid -ErrorAction Stop) } catch { $alive = $false }
+    if (-not $alive) { Stop-FpsTail }
+}
 $out = [ordered]@{
     at = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
     cpu = $null; cpuMhz = $null; cpuMhzMax = $null
@@ -89,6 +155,8 @@ $out = [ordered]@{
     vramUsed = $null; vramTotal = $null
     ramUsed = $null; ramTotal = $null
     fps = $null
+    fpsTarget = $fps.target
+    fpsErr = $fps.err
 }
 function ToNum($v) {
     if ($null -eq $v) { return $null }
@@ -282,15 +350,23 @@ if ($fps.ok) {
     if ($fps.sw) {
         $elapsed = $fps.sw.Elapsed.TotalSeconds
         if ($n -gt 0 -and $fps.framesSeen -gt 0 -and $elapsed -gt 0.2) {
-            $out.fps = [math]::Round($n / $elapsed, 1)
+            # 3 窗口滑动平均：PresentMon 是一次批写、采样又是一秒一读，直接 n/elapsed 会周期性冒出
+            # 双倍和半量的尖峰（实测 54 / 7.3 交替）。用最近 3 个窗口合计后相除，读数才稳。
+            $fps.win += (, @([double]$n, [double]$elapsed))
+            while ($fps.win.Count -gt 3) { $fps.win.RemoveAt(0) }
+            $fn = 0.0; $ft = 0.0
+            foreach ($w in $fps.win) { $fn += $w[0]; $ft += $w[1] }
+            if ($ft -gt 0) { $out.fps = [math]::Round($fn / $ft, 1) }
             $fps.sw.Restart()
         } elseif ($elapsed -gt 2.0) {
             if ($fps.framesSeen -gt 0) { $out.fps = 0.0 }
+            $fps.win = @()
             $fps.sw.Restart()
         }
     }
 }
 
+if ($fps.err) { $fps.err = '' }
 $Queue.Enqueue([pscustomobject]$out)
     Start-Sleep -Milliseconds $IntervalMs
 }
@@ -452,6 +528,12 @@ function Invoke-MetricsTick {
         [void]$script:MetricsSamples.Add($sample)
         while ($script:MetricsSamples.Count -gt $script:MetricsRingSize) { $script:MetricsSamples.RemoveAt(0) }
         Update-MetricsCapsFromSample $sample
+        if ($sample.fpsErr) { Write-AppLog ('实时 FPS 不可用：' + $sample.fpsErr) 'WARN' }
+        if ($sample.fpsTarget -and $sample.fpsTarget -ne $script:MetricsFpsName) {
+            $script:MetricsFpsName = $sample.fpsTarget
+            $script:MetricsCaps.fpsTarget = $sample.fpsTarget
+            Write-AppLog ('实时 FPS 目标切换：' + $sample.fpsTarget)
+        }
         if (-not $script:MetricsFirstLogged -and ($null -ne $sample.cpu -or $null -ne $sample.cpuMhz)) {
             $script:MetricsFirstLogged = $true
             Write-AppLog (('实时监控已出数据：cpu={0}% 平均={1}MHz 最高={2}MHz gpu={3}%' -f $sample.cpu, $sample.cpuMhz, $sample.cpuMhzMax, $sample.gpu))
@@ -482,7 +564,7 @@ function Set-MetricsConsumer {
 function Start-MetricsSampler {
     if ($script:MetricsRunning) { return }
     Get-MetricsCapabilities | Out-Null
-    # 实时 FPS 目标：采集页上次选中的进程（还活着才算数）；否则不启用，界面显示「—」
+    # 实时 FPS 的「备选目标」：采集页上次选中的进程（还活着才用）。主目标是当前前台应用，见采样脚本。
     $script:MetricsFpsPid = 0
     $script:MetricsFpsName = ''
     try {
@@ -496,14 +578,18 @@ function Start-MetricsSampler {
     $script:MetricsRunning = $true
     $script:MetricsSamples.Clear()
     $script:MetricsFirstLogged = $false
-    # 能力表如实反映 FPS：没有 PresentMon 或没有目标进程 = false（界面显示「—」并说明原因）
+    # 能力表：只要 PresentMon 与输出路径就绪就算可用；目标进程改成每轮跟随前台，
+    # 不再依赖「上次采集过的进程」——那个 pid 常常早就退出了（FPS 一直不出值的根因之一）。
     if ($script:MetricsCaps) {
-        $script:MetricsCaps.fps = ($script:MetricsFpsPid -gt 0 -and [bool]$script:MetricsPmPath -and [bool]$script:MetricsFpsCsv)
+        $script:MetricsCaps.fps = ([bool]$script:MetricsPmPath -and [bool]$script:MetricsFpsCsv)
         $script:MetricsCaps.fpsTarget = $script:MetricsFpsName
     }
     Start-MetricsWorker
     Send-MetricsCaps
-    $fpsNote = if ($script:MetricsFpsPid -gt 0) { ('FPS 目标 ' + $script:MetricsFpsName + '(' + $script:MetricsFpsPid + ')') } else { 'FPS 未启用（没选中过进程）' }
+    $fpsNote = if ($script:MetricsPmPath -and $script:MetricsFpsCsv) {
+        $fb = if ($script:MetricsFpsPid -gt 0) { ('；无前台时退回 ' + $script:MetricsFpsName + '(' + $script:MetricsFpsPid + ')') } else { '' }
+        'FPS 跟随前台应用' + $fb
+    } else { 'FPS 未启用（缺少 PresentMon）' }
     Write-AppLog (("实时监控开始：间隔 {0} ms，环形缓冲 {1} 点，GPU 源 {2}，{3}" -f $script:MetricsIntervalMs, $script:MetricsRingSize, $(if ($script:MetricsSmiPath) { 'nvidia-smi' } else { '无' }), $fpsNote))
 
     Stop-MetricsTimer

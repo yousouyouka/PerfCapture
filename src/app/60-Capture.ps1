@@ -4,7 +4,7 @@
 # 白名单：只接受约定的命令；未知命令记日志并回传错误，绝不抛异常打断消息泵
 $script:KnownCommands = @('ready', 'refreshProcs', 'saveSettings', 'openReports', 'export', 'exportHtml', 'exportPng', 'exportDiag', 'start', 'stop',
     'checkUpdate', 'downloadUpdate', 'cancelUpdate', 'openUpdatePage', 'runUpdateInstaller', 'applyUpdate', 'openUpdateFolder', 'skipUpdateVersion', 'setUpdateAuto',
-    'metricsStart', 'metricsStop', 'overlayToggle', 'overlayShow', 'overlayHide')
+    'metricsStart', 'metricsStop', 'overlayToggle', 'overlayShow', 'overlayHide', 'overlayConfig')
 
 function Handle-UiMessage($msg) {
     if ($null -eq $msg -or -not $msg.cmd) { return }
@@ -27,7 +27,7 @@ function Handle-UiMessage($msg) {
         return
     }
     # 浮窗命令（宿主侧在 55-Overlay.ps1）
-    if ($msg.cmd -in @('overlayToggle', 'overlayShow', 'overlayHide')) {
+    if ($msg.cmd -in @('overlayToggle', 'overlayShow', 'overlayHide', 'overlayConfig')) {
         try { Invoke-OverlayCommand $msg }
         catch { Write-AppLog ('浮窗命令执行失败: ' + $_.Exception.Message) 'WARN' }
         return

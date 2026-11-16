@@ -261,3 +261,89 @@
   white-space: nowrap;
 }
 .realtime-wrap { position: relative; }
+
+/* ---- 顶部板块（监控设置 / 浮窗设置）：可收起 ---- */
+.rt-board {
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  overflow: hidden;
+}
+.rt-board-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.8rem;
+  background: transparent;
+  border: 0;
+  color: var(--text-strong);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+  text-align: left;
+}
+.rt-board-head:hover { background: var(--tile); }
+.rt-board-caret { color: var(--faint); font-size: 0.7rem; transition: transform 0.15s ease; }
+.rt-board-head[aria-expanded='false'] .rt-board-caret { transform: rotate(-90deg); }
+.rt-board-body {
+  padding: 0.15rem 0.8rem 0.7rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+.rt-board-body[hidden] { display: none; }
+.rt-set-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+  min-height: 1.9rem;
+}
+.rt-set-label { flex: 0 0 6.2rem; font-size: 0.78rem; color: var(--text); }
+.rt-set-hint { font-size: 0.72rem; color: var(--muted); }
+.rt-stepper {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.1rem;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--tile);
+}
+.rt-step {
+  width: 1.6rem;
+  height: 1.5rem;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.rt-step:hover { background: var(--accent-soft); }
+.rt-step-value { min-width: 4.2rem; text-align: center; font-size: 0.78rem; color: var(--text-strong); }
+.rt-range { flex: 1 1 8rem; min-width: 6rem; accent-color: var(--accent); }
+.rt-num {
+  width: 4.4rem;
+  padding: 0.2rem 0.4rem;
+  font-size: 0.76rem;
+  color: var(--text);
+  background: var(--input);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+.rt-select {
+  padding: 0.2rem 0.4rem;
+  font-size: 0.76rem;
+  color: var(--text);
+  background: var(--input);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+.rt-chk { display: inline-flex; align-items: center; gap: 0.25rem; font-size: 0.75rem; color: var(--text); }
+.rt-chk input { accent-color: var(--accent); }
+.rt-board-foot { display: flex; justify-content: flex-end; margin-top: 0.35rem; }

@@ -9,7 +9,7 @@ function New-DefaultConfig {
         lastPid = 0; windowW = 1180; windowH = 780
         # 检查更新：auto 关掉后不再自动查；skippedVersion 是用户点过「跳过此版本」的版本号
         updateCheck = @{ auto = $true; lastCheckAt = ''; skippedVersion = '' }
-        overlay     = @{ visible = $false; x = -1; y = -1; opacity = 0.9; collapsed = $false }
+        overlay     = @{ visible = $false; x = -1; y = -1; opacity = 90; collapsed = $false; anchor = 'tr'; px = 100; py = 0; fontSize = 'normal'; fontColor = 'white'; layout = 'linear'; hotkey = @{ ctrl = $true; alt = $true; shift = $false; key = 'M' } }
     }
 }
 

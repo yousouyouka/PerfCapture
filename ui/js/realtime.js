@@ -25,7 +25,9 @@
   };
   try {
     const v = localStorage.getItem(VIEW_KEY);
-    if (v === 'bars' || v === 'chart' || v === 'mix') state.view = v;
+    // 曲线/混合视图暂时隐藏（代码保留）：存过这两个值也一律回落到进度条
+    if (v === 'bars') state.view = v;
+    else if (v === 'chart' || v === 'mix') { state.view = 'bars'; localStorage.setItem(VIEW_KEY, 'bars'); }
   } catch (e) { }
 
   // ---------- 字段表 ----------
@@ -274,11 +276,24 @@
       const first = !state.caps;
       state.caps = msg.caps;
       if (first) build(); else paint();
+      const tEl = document.getElementById('rtFpsTarget');
+      if (tEl) {
+        const tn = msg.caps.fpsTarget || '';
+        tEl.textContent = tn ? tn : tx('realtime.fpsTargetNone', '未锁定（跟随前台应用）');
+      }
+      if (!msg.caps.fps) {
+        const b2 = document.getElementById('btnOverlay');
+        if (b2) b2.title = tx('realtime.fpsUnavailable', '当前抓不到帧：可在设置页看日志里的失败原因');
+      }
       if (msg.type === 'metricsCaps') setRunning(!!msg.running);
     }
     if (msg.type === 'overlayState') {
       const b = document.getElementById('btnOverlay');
-      if (b) b.setAttribute('aria-pressed', String(!!msg.visible));
+      if (b) {
+        b.setAttribute('aria-pressed', String(!!msg.visible));
+        b.textContent = msg.visible ? tx('realtime.overlayOff', '关闭浮窗') : tx('realtime.overlayOn', '开启浮窗');
+      }
+      if (window.PerfOverlayUi && msg.overlay) window.PerfOverlayUi.sync(msg.overlay);
       return;
     }
     if (msg.type === 'metricSample' && msg.sample) {
@@ -301,4 +316,172 @@
 
   build();
   if (isVisible()) startSampling(); else setRunning(false);
+})();
+
+/* ── 顶部两块板块（可收起）+ 浮窗设置（批次 A）──
+   浮窗参数统一存宿主配置 overlay.*（浮窗本体与界面共用一套）；改一项就下发 overlayConfig，
+   宿主应用后回 overlayState，界面再回填，保证拖窗后坐标也会同步。 */
+(function initRealtimeBoards() {
+  const tx = (k, fb) => (typeof t === 'function' ? t(k, fb) : fb);
+  const byId = (id) => document.getElementById(id);
+
+  /* 1) 折叠：状态存 localStorage，默认「监控设置」展开、「浮窗设置」收起 */
+  document.querySelectorAll('.rt-board-head').forEach((head) => {
+    const body = head.parentElement.querySelector('.rt-board-body');
+    if (!body) return;
+    const key = 'perf.realtime.board.' + head.dataset.board;
+    let open = head.getAttribute('aria-expanded') === 'true';
+    try {
+      const v = localStorage.getItem(key);
+      if (v === '1') open = true; else if (v === '0') open = false;
+    } catch (e) { }
+    const apply = () => { head.setAttribute('aria-expanded', String(open)); body.hidden = !open; };
+    apply();
+    head.addEventListener('click', () => {
+      open = !open; apply();
+      try { localStorage.setItem(key, open ? '1' : '0'); } catch (e) { }
+    });
+  });
+
+  /* 2) 浮窗设置 */
+  const ANCHORS = ['tl', 't', 'tr', 'l', 'c', 'r', 'bl', 'b', 'br'];
+  const SIZES = ['small', 'normal', 'large'];
+  const COLORS = ['white', 'gray', 'green', 'yellow'];
+  const LAYOUTS = ['linear'];
+  const KEYS = [];
+  for (let c = 65; c <= 90; c++) KEYS.push(String.fromCharCode(c));
+  for (let f = 1; f <= 12; f++) KEYS.push('F' + f);
+
+  let cfg = {
+    anchor: 'tr', px: 100, py: 0, x: -1, y: -1,
+    opacity: 90, fontSize: 'normal', fontColor: 'white', layout: 'linear',
+    hotkey: { ctrl: true, alt: true, shift: false, key: 'M' },
+    visible: false
+  };
+  let syncing = false;
+  let timer = 0;
+
+  const lbl = (prefix, v, fb) => tx(prefix + '.' + v, fb);
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  const int = (v, fb) => { const n = parseInt(v, 10); return isNaN(n) ? fb : n; };
+
+  const keySel = byId('ovHotKey');
+  if (keySel) {
+    KEYS.forEach((k) => { const o = document.createElement('option'); o.value = k; o.textContent = k; keySel.appendChild(o); });
+  }
+
+  function paint() {
+    syncing = true;
+    const set = (id, v) => { const el = byId(id); if (el) el.textContent = v; };
+    set('ovAnchor', lbl('realtime.anchor', cfg.anchor, cfg.anchor));
+    set('ovLayout', lbl('realtime.layout', cfg.layout, '线性'));
+    set('ovFontSize', lbl('realtime.size', cfg.fontSize, '标准'));
+    set('ovFontColor', lbl('realtime.color', cfg.fontColor, '白色'));
+    const px = byId('ovPosX'); if (px) px.value = cfg.px;
+    const pxn = byId('ovPosXNum'); if (pxn) pxn.value = cfg.px;
+    const py = byId('ovPosY'); if (py) py.value = cfg.py;
+    const pyn = byId('ovPosYNum'); if (pyn) pyn.value = cfg.py;
+    const op = byId('ovOpacity'); if (op) op.value = cfg.opacity;
+    const opn = byId('ovOpacityNum'); if (opn) opn.value = cfg.opacity;
+    const xEl = byId('ovPx'); if (xEl) xEl.value = cfg.x >= 0 ? cfg.x : '';
+    const yEl = byId('ovPy'); if (yEl) yEl.value = cfg.y >= 0 ? cfg.y : '';
+    const hc = byId('ovHotCtrl'); if (hc) hc.checked = !!cfg.hotkey.ctrl;
+    const ha = byId('ovHotAlt'); if (ha) ha.checked = !!cfg.hotkey.alt;
+    const hs = byId('ovHotShift'); if (hs) hs.checked = !!cfg.hotkey.shift;
+    if (keySel) keySel.value = cfg.hotkey.key || 'M';
+    const btn = byId('btnOverlay');
+    if (btn) btn.textContent = cfg.visible ? tx('realtime.overlayOff', '关闭浮窗') : tx('realtime.overlayOn', '开启浮窗');
+    syncing = false;
+  }
+
+  function push(delay) {
+    if (syncing) return;
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      if (typeof send === 'function') send({ cmd: 'overlayConfig', overlay: cfg });
+    }, delay == null ? 120 : delay);
+  }
+
+  /* 位置/不透明度：滑杆与数字框双向联动 */
+  function bindPair(sliderId, numId, lo, hi, field, after) {
+    const s = byId(sliderId);
+    const n = byId(numId);
+    const commit = (raw) => {
+      cfg[field] = clamp(int(raw, cfg[field]), lo, hi);
+      if (after) after();
+      paint(); push();
+    };
+    if (s) s.addEventListener('input', () => commit(s.value));
+    if (n) n.addEventListener('change', () => commit(n.value));
+  }
+  bindPair('ovPosX', 'ovPosXNum', 0, 100, 'px');
+  bindPair('ovPosY', 'ovPosYNum', 0, 100, 'py');
+  bindPair('ovOpacity', 'ovOpacityNum', 20, 100, 'opacity');
+
+  /* 直接指定坐标（像素）：写进去就等于「自定义」位置 */
+  [['ovPx', 'x'], ['ovPy', 'y']].forEach(([id, field]) => {
+    const el = byId(id);
+    if (!el) return;
+    el.addEventListener('change', () => {
+      const v = int(el.value, -1);
+      cfg[field] = v >= 0 ? v : -1;
+      if (cfg.x >= 0 && cfg.y >= 0) cfg.anchor = 'custom';
+      paint(); push();
+    });
+  });
+
+  /* 步进器：位置预设 / 布局 / 字号 / 颜色 */
+  document.querySelectorAll('.rt-step').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const dir = parseInt(btn.dataset.dir, 10) || 1;
+      const step = btn.dataset.step;
+      const cycle = (arr, cur) => arr[(arr.indexOf(cur) + dir + arr.length) % arr.length];
+      if (step === 'anchor') {
+        cfg.anchor = cycle(ANCHORS, cfg.anchor);
+        if (cfg.anchor !== 'custom') {
+          const a = cfg.anchor;
+          cfg.px = a.indexOf('l') >= 0 ? 0 : a.indexOf('r') >= 0 ? 100 : 50;
+          cfg.py = a.indexOf('t') >= 0 ? 0 : a.indexOf('b') >= 0 ? 100 : 50;
+        }
+      } else if (step === 'layout') cfg.layout = cycle(LAYOUTS, cfg.layout);
+      else if (step === 'fontSize') cfg.fontSize = cycle(SIZES, cfg.fontSize);
+      else if (step === 'fontColor') cfg.fontColor = cycle(COLORS, cfg.fontColor);
+      else return;
+      paint(); push();
+    });
+  });
+
+  /* 热键 */
+  ['ovHotCtrl', 'ovHotAlt', 'ovHotShift'].forEach((id, i) => {
+    const el = byId(id);
+    if (!el) return;
+    el.addEventListener('change', () => {
+      const k = ['ctrl', 'alt', 'shift'][i];
+      cfg.hotkey[k] = el.checked;
+      if (!cfg.hotkey.ctrl && !cfg.hotkey.alt && !cfg.hotkey.shift) cfg.hotkey.ctrl = true;
+      paint(); push();
+    });
+  });
+  if (keySel) keySel.addEventListener('change', () => { cfg.hotkey.key = keySel.value || 'M'; push(); });
+
+  /* 宿主回报后回填（拖动改变 x/y 也会走到这里） */
+  window.PerfOverlayUi = {
+    sync(o) {
+      if (!o) return;
+      cfg = {
+        anchor: o.anchor || 'custom',
+        px: int(o.px, 50), py: int(o.py, 50),
+        x: int(o.x, -1), y: int(o.y, -1),
+        opacity: int(o.opacity, 90),
+        fontSize: o.fontSize || 'normal',
+        fontColor: o.fontColor || 'white',
+        layout: o.layout || 'linear',
+        hotkey: o.hotkey || { ctrl: true, alt: true, shift: false, key: 'M' },
+        visible: !!o.visible
+      };
+      paint();
+    }
+  };
+
+  paint();
 })();

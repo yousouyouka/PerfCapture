@@ -19,6 +19,15 @@ window.PerfUpdateAreas = ['capture', 'realtime', 'other'];
 
 window.PerfUpdates = [
   {
+    date: '2026-11-17', version: '1.5.5',
+    title: '验收修复：拖动回填坐标、FPS 不再乱跳',
+    items: [
+      ['fix', '拖动浮窗后「坐标 X/Y」和位置预设不更新：之前只写了配置没回传界面，现在拖动结束立刻回传一次，四个控件同步刷新。', 'realtime'],
+      ['fix', 'FPS 目标来回乱跳：以前每 2 秒确认一次就切进程，alt-tab 到浏览器/任务管理器都会重开 PresentMon，帧数永远攒不起来。现在只有当前目标连续 6 秒无帧、且新目标稳定 3 秒才切换。', 'realtime'],
+      ['fix', '采不到帧时日志会写明原因（独占全屏 / 反作弊占用 ETW / 该进程不走 DXGI 呈现），界面保持「—」而不误报 0。', 'realtime']
+    ]
+  },
+  {
     date: '2026-11-17', version: '1.5.4',
     title: '实时监控：浮窗设置板块 + FPS 修复',
     items: [

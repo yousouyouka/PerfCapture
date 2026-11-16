@@ -267,6 +267,8 @@ function Save-OverlayPosition {
         $cfg.y = $f.Top
         $cfg.anchor = 'custom'
         Save-Config
+        # 拖动后必须回传一次：界面上的「坐标 X/Y」和预设（自定义）都靠这条消息回填
+        Send-OverlayState
     } catch { }
 }
 
@@ -437,10 +439,12 @@ function Show-Overlay {
         $cfg.visible = $true
         Save-Config
     } catch { }
-    $cfg = Get-OverlayCfg
-    Write-AppLog (('浮窗已显示（{0}+{1} 收起/展开；独占全屏下不可见）' -f
-        $(if ($cfg.hotkey.ctrl) { 'Ctrl+' } else { '' }),
-        $(if ($cfg.hotkey.alt) { 'Alt+' } else { '' })) + $cfg.hotkey.key)
+    $hkText = ''
+    if ($cfg.hotkey.ctrl) { $hkText += 'Ctrl+' }
+    if ($cfg.hotkey.alt) { $hkText += 'Alt+' }
+    if ($cfg.hotkey.shift) { $hkText += 'Shift+' }
+    $hkText += [string]$cfg.hotkey.key
+    Write-AppLog ('浮窗已显示（' + $hkText + ' 收起/展开；独占全屏下不可见）')
     Send-OverlayState
 }
 

@@ -45,7 +45,7 @@ if (-not ('PerfFg' -as [type])) {
 }
 $hostPid = $PID
 $fps = @{ proc = $null; offset = 0; sw = $null; leftover = ''; header = $false; framesSeen = 0; ok = $false;
-          pid = 0; target = ''; err = ''; errFile = ''; cand = -1; hits = 0; win = @() }
+          pid = 0; target = ''; err = ''; errFile = ''; cand = -1; hits = 0; win = @(); starve = 0 }
 
 function Resolve-FpsTarget {
     param([int]$Fallback)
@@ -69,7 +69,7 @@ function Stop-FpsTail {
 function Start-FpsTail {
     param([int]$TargetPid)
     Stop-FpsTail
-    $fps.offset = 0; $fps.leftover = ''; $fps.header = $false; $fps.framesSeen = 0; $fps.err = ''; $fps.win = @()
+    $fps.offset = 0; $fps.leftover = ''; $fps.header = $false; $fps.framesSeen = 0; $fps.err = ''; $fps.win = @(); $fps.starve = 0
     if (-not $PmExe -or -not $FpsCsv -or $TargetPid -le 0) { return }
     if (-not (Test-Path -LiteralPath $PmExe)) { return }
     try {
@@ -138,10 +138,14 @@ function Read-NewFrames {
 
 while ($true) {
     if ($Ctl -and $Ctl.stop) { break }
-# 目标跟随：前台应用优先，退回「采集页上次选中的进程」；切换要连续 2 次确认，避免 alt-tab 抖动
+# 目标选择：优先跟随前台，但**只在当前目标没在出帧时才换** ——
+# 1.5.4 实测：alt-tab 到浏览器/任务管理器就重开 tail，帧数永远攒不起来，FPS 一直空。
 $cand = Resolve-FpsTarget -Fallback $FpsPid
 if ($cand -ne $fps.cand) { $fps.cand = $cand; $fps.hits = 0 } else { $fps.hits++ }
-if ($cand -gt 0 -and $cand -ne $fps.pid -and ($fps.hits -ge 2 -or -not $fps.proc)) { Start-FpsTail -TargetPid $cand }
+if ($cand -gt 0 -and $cand -ne $fps.pid) {
+    if (-not $fps.proc) { Start-FpsTail -TargetPid $cand }
+    elseif ($fps.hits -ge 3 -and $fps.starve -ge 6) { Start-FpsTail -TargetPid $cand }   # 当前 6 秒无帧 + 新目标稳定 3 秒
+}
 Test-FpsTailDead
 if ($fps.pid -gt 0) {
     $alive = $true
@@ -347,9 +351,11 @@ if ($null -eq $out.ramTotal -and -not ('PcMetrics' -as [type])) {
 # 连续 2 秒以上没有新帧，才判定为「游戏不出了」，如实报 0（而不是一直显示上一次的旧值）。
 if ($fps.ok) {
     $n = Read-NewFrames
+    if ($n -le 0) { $fps.starve++ }
     if ($fps.sw) {
         $elapsed = $fps.sw.Elapsed.TotalSeconds
         if ($n -gt 0 -and $fps.framesSeen -gt 0 -and $elapsed -gt 0.2) {
+            $fps.starve = 0
             # 3 窗口滑动平均：PresentMon 是一次批写、采样又是一秒一读，直接 n/elapsed 会周期性冒出
             # 双倍和半量的尖峰（实测 54 / 7.3 交替）。用最近 3 个窗口合计后相除，读数才稳。
             $fps.win += (, @([double]$n, [double]$elapsed))
@@ -363,6 +369,11 @@ if ($fps.ok) {
             $fps.win = @()
             $fps.sw.Restart()
         }
+    }
+    # 6 秒一帧都没有：把原因交回宿主记一次日志，别让界面永远只显示「—」
+    if ($fps.starve -eq 6 -and $fps.framesSeen -eq 0) {
+        $out.fpsErr = ('目标 {0}(pid {1}) 连续 6 秒无帧：PresentMon 没有写出任何数据。' -f $fps.target, $fps.pid) +
+                      '常见原因：独占全屏、反作弊占着 ETW、或该进程不走 DXGI 呈现。'
     }
 }
 

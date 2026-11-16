@@ -1,4 +1,4 @@
-﻿/* 表单控件、复选框、按钮 */
+/* 表单控件、复选框、按钮 */
 
 /* ── 表单 ── */
 .field-label {
@@ -92,6 +92,48 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.55rem 1rem;
+}
+
+/* ── 始终采集项（勾选但不可改）与板块说明 ── */
+.collect-grid .check.is-always { opacity: 0.92; }
+.collect-grid .check.is-always input { cursor: default; }
+.collect-grid .check.is-always input:checked { opacity: 0.55; }
+.cotier.is-always {
+  color: var(--muted);
+  border-color: var(--line-strong);
+  opacity: 1;
+}
+.cogroup-note {
+  grid-column: 1 / -1;
+  margin: 0.1rem 0 0;
+  font-size: 0.68rem;
+  line-height: 1.55;
+  color: var(--faint);
+}
+
+/* ── 采集项按板块分组 + 「始终采集」徽标 ── */
+.collect-grid .cogroup { grid-column: 1 / -1; }
+.collect-grid .cogroup-name {
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin: 0 0 0.34rem;
+  letter-spacing: 0.02em;
+}
+.collect-grid .cogroup-items {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.55rem 1rem;
+}
+.collect-grid .check { flex-wrap: wrap; }
+.cotier {
+  font-size: 0.66rem;
+  line-height: 1.5;
+  color: var(--muted);
+  opacity: 0.72;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0 0.36rem;
+  white-space: nowrap;
 }
 
 /* ── 卡片折叠 ── */
@@ -307,6 +349,66 @@ body.is-col-resizing * { cursor: col-resize !important; user-select: none !impor
   border-color: var(--line-strong);
   color: var(--text);
 }
+
+/* ---- 当前配置状态：紧跟在三档右侧，自定义态用强调色，比原来那行小字明显 ---- */
+.preset-state {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.preset-state.is-custom {
+  color: var(--accent);
+  padding: 0.14rem 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: 999px;
+  background: var(--accent-soft);
+}
+.preset-reset {
+  margin-left: auto;
+  font-family: inherit;
+  font-size: 0.68rem;
+  font-weight: 400;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.24rem 0.55rem;
+  cursor: pointer;
+}
+.preset-reset:hover { color: var(--text); border-color: var(--line-strong); background: var(--accent-soft); }
+.preset-reset[hidden] { display: none; }
+
+/* ---- 采集项三块：核心 / 可选 / 派生 ---- */
+.cosection { grid-column: 1 / -1; margin-top: 0.5rem; }
+.cosection:first-child { margin-top: 0; }
+.cosection-title {
+  font-size: 0.78rem;
+  font-weight: 400;
+  color: var(--text-strong);
+  padding-bottom: 0.24rem;
+  border-bottom: 1px solid var(--line);
+}
+.cosection-note {
+  margin: 0.28rem 0 0.1rem;
+  font-size: 0.68rem;
+  line-height: 1.55;
+  color: var(--faint);
+}
+/* 派生项：没有勾选框，只说明它是算出来的 */
+.collect-grid .check.is-derived {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--muted);
+}
+.cotier.is-derived {
+  color: var(--muted);
+  border-color: var(--line-strong);
+  opacity: 0.9;
+}
 /* ---- 性能采集顶部：标题 + 详细说明（批次 C） ---- */
 .proc-head {
   display: flex;
@@ -319,3 +421,89 @@ body.is-col-resizing * { cursor: col-resize !important; user-select: none !impor
 /* 详细说明弹窗正文（先留空；:empty 时不占高度） */
 .cap-help-body { margin: 0; font-size: 0.78rem; line-height: 1.7; color: var(--text); }
 .cap-help-body:empty { display: none; }
+/* ---- 详细说明弹窗正文（2.0.0 起有内容）---- */
+.cap-help-body h4 { margin: 0.75rem 0 0.3rem; font-size: 0.8rem; font-weight: 400; color: var(--text-strong); }
+.cap-help-lead { margin: 0 0 0.2rem; }
+.cap-help-note { margin: 0.15rem 0 0; color: var(--muted); }
+.cap-help-list { margin: 0.2rem 0 0; padding-left: 1.05rem; }
+.cap-help-list li { margin: 0.15rem 0; }
+.cap-help-na li { margin: 0.35rem 0; }
+.cap-help-badge {
+  display: inline-block; margin-left: 0.35rem; padding: 0 0.35rem;
+  font-size: 0.64rem; line-height: 1.5; border-radius: 6px;
+  color: var(--warn); border: 1px solid var(--warn);
+}
+.cap-help-why { margin: 0.15rem 0 0; font-size: 0.72rem; line-height: 1.6; color: var(--muted); }
+.cap-help-privacy { margin-top: 0.5rem; }
+
+/* ── 详细说明：三档原文 / 各板块指标与统计方式 ── */
+.cap-help-tier-name { font-size: 0.78rem; color: var(--text-strong); }
+.cap-help-tier-goal { margin: 0.2rem 0 0; font-size: 0.74rem; color: var(--muted); }
+.cap-help-tier-list { margin: 0.15rem 0 0; padding-left: 1.05rem; font-size: 0.74rem; color: var(--text); }
+.cap-help-tier-list li { margin: 0.1rem 0; }
+.cap-help-sub {
+  margin: 0.7rem 0 0.3rem;
+  font-size: 0.76rem;
+  color: var(--text-strong);
+}
+.cap-help-stats-block { margin: 0 0 0.55rem; }
+.cap-help-stats-mod {
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin-bottom: 0.16rem;
+}
+.cap-help-stat-list { margin: 0; padding-left: 0; list-style: none; }
+.cap-help-stat-list li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.8rem;
+  padding: 0.13rem 0;
+  font-size: 0.72rem;
+  border-bottom: 1px dashed var(--line);
+}
+.cap-help-stat-list li:last-child { border-bottom: none; }
+.cap-help-stat-list .n { color: var(--text); }
+.cap-help-stat-list .s {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--faint);
+  white-space: nowrap;
+}
+.cap-help-meta { margin-left: 0.4rem; font-size: 0.72rem; color: var(--faint); }
+.cap-help-tiers li { margin: 0.4rem 0; }
+.cap-help-read { list-style: none; padding-left: 0; }
+.cap-help-read li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.8rem;
+  padding: 0.2rem 0;
+  border-bottom: 1px solid var(--line);
+}
+.cap-help-read li:last-child { border-bottom: none; }
+.cap-help-dir { font-size: 0.7rem; white-space: nowrap; }
+.cap-help-dir.high { color: var(--good); }
+.cap-help-dir.low { color: var(--accent); }
+.cap-help-dir.info { color: var(--faint); }
+.cap-help-modules li { margin: 0.3rem 0; }
+
+/* ---- 「详细说明」弹窗：占窗口 1/2 宽 × 70% 高，居中，正文自己滚动 ---- */
+#capHelpModal .upd-modal-box {
+  width: 50vw;
+  min-width: 28rem;                 /* 窗口极窄时不至于挤成一条 */
+  max-width: calc(100vw - 2rem);
+  height: 70vh;
+  max-height: calc(100vh - 2rem);
+  display: flex;
+  flex-direction: column;
+  padding: 1rem 1.15rem 0.9rem;
+}
+#capHelpModal .cap-help-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 0.4rem;
+}
+#capHelpModal .upd-modal-actions { flex: 0 0 auto; margin-top: 0.6rem; }

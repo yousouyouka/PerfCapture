@@ -1,21 +1,41 @@
 {
-  "schemaVersion": 2,
-  "note": "采集项清单的唯一事实来源。宿主读取本文件后随 init 消息下发给界面，界面据此渲染勾选框；引擎按 skip 字符串判断是否采集。新增采集项 = 这里加一条 + 引擎实现对应采集逻辑（共两处）。label 是 i18n 键，不要写具体文案。presets 是高级预设：套用后仍可手工改，改完即视为自定义。warmup = 引擎 -WarmupSec（预热丢弃秒数）。",
-  "always": {
-    "keys": ["fps", "p1low", "frametime"],
-    "label": "capture.itemsHint"
-  },
+  "schemaVersion": 4,
+  "note": "采集项清单 = 唯一事实来源。kind：core（引擎无条件采集，只读，界面不提供开关）/ optional（可开关，skip 字符串决定采不采）/ derived（由已采数据算出来，不单独采集）。group 是板块 id，界面按它分组。presets 是高级预设：套用后仍可手工改，改完即视为自定义。warmup = 引擎 -WarmupSec（预热丢弃秒数）。",
+  "groups": [
+    { "id": "perf", "label": "capture.group.perf", "note": "" },
+    { "id": "cpu", "label": "capture.group.cpu", "note": "" },
+    { "id": "gpu", "label": "capture.group.gpu", "note": "capture.note.gpuShared" },
+    { "id": "memory", "label": "capture.group.memory", "note": "" },
+    { "id": "thermal", "label": "capture.group.thermal", "note": "capture.note.thermal" },
+    { "id": "bottleneck", "label": "capture.group.bottleneck", "note": "capture.note.bottleneck" },
+    { "id": "environment", "label": "capture.group.environment", "note": "" }
+  ],
   "options": [
-    { "skip": "latency",  "label": "capture.item.latency",  "default": true },
-    { "skip": "gputemp",  "label": "capture.item.gputemp",  "default": true },
-    { "skip": "gpuusage", "label": "capture.item.gpuusage", "default": true },
-    { "skip": "vram",     "label": "capture.item.vram",     "default": true },
-    { "skip": "ram",      "label": "capture.item.ram",      "default": true },
-    { "skip": "features", "label": "capture.item.features", "default": true },
-    { "skip": "res",      "label": "capture.item.res",      "default": true }
+    { "skip": "fps",       "module": "perf",        "kind": "core",     "label": "capture.item.fps" },
+    { "skip": "frametime", "module": "perf",        "kind": "core",     "label": "capture.item.frametime" },
+    { "skip": "chart",     "module": "perf",        "kind": "derived",  "label": "capture.item.chart",     "note": "capture.derive.chart" },
+    { "skip": "latency",   "module": "perf",        "kind": "optional", "label": "capture.item.latency",   "tip": "capture.tip.latency", "default": true },
+
+    { "skip": "cpuutil",   "module": "cpu",         "kind": "core",     "label": "capture.item.cpuutil" },
+    { "skip": "proccpu",   "module": "cpu",         "kind": "optional", "label": "capture.item.proccpu",   "default": true },
+
+    { "skip": "gpuusage",  "module": "gpu",         "kind": "optional", "label": "capture.item.gpuusage",  "tip": "capture.tip.gpuusage", "default": true },
+    { "skip": "gputemp",   "module": "gpu",         "kind": "optional", "label": "capture.item.gputemp",   "tip": "capture.tip.gputemp", "default": true },
+
+    { "skip": "vram",      "module": "memory",      "kind": "optional", "label": "capture.item.vram",      "default": true },
+    { "skip": "ram",       "module": "memory",      "kind": "optional", "label": "capture.item.ram",       "default": true },
+    { "skip": "sysmem",    "module": "memory",      "kind": "optional", "label": "capture.item.sysmem",    "tip": "capture.tip.sysmem", "default": true },
+    { "skip": "sharedmem", "module": "memory",      "kind": "optional", "label": "capture.item.sharedmem", "default": true },
+
+    { "skip": "gpubusy",   "module": "bottleneck",  "kind": "core",     "label": "capture.item.gpubusy" },
+    { "skip": "diagnosis", "module": "bottleneck",  "kind": "derived",  "label": "capture.item.diagnosis", "note": "capture.derive.diagnosis" },
+
+    { "skip": "models",    "module": "environment", "kind": "core",     "label": "capture.item.models" },
+    { "skip": "features",  "module": "environment", "kind": "optional", "label": "capture.item.features",  "default": true },
+    { "skip": "res",       "module": "environment", "kind": "optional", "label": "capture.item.res",       "default": true }
   ],
   "presets": [
-    { "id": "quick",    "label": "capture.preset.quick",    "seconds": 60,  "warmup": 0, "skip": ["latency", "features", "res"] },
+    { "id": "quick",    "label": "capture.preset.quick",    "seconds": 60,  "warmup": 0, "skip": ["latency", "proccpu", "sysmem", "sharedmem", "features", "res"] },
     { "id": "standard", "label": "capture.preset.standard", "seconds": 120, "warmup": 3, "skip": ["features"] },
     { "id": "pro",      "label": "capture.preset.pro",      "seconds": 180, "warmup": 5, "skip": [] }
   ]

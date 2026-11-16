@@ -1,0 +1,154 @@
+{
+  "schemaVersion": 1,
+  "note": "指标字典 = 唯一事实来源。modules 是报告板块顺序；metrics 是全部指标（含暂不可用）。status='ok' 表示本版可采；status='na' 表示本版暂不可用，reason 指向 reasons 里的三语原因（报告与详细说明都必须显示原因，绝不填 0）。label 是 i18n 键，nameZh/nameEn/nameJa 是兜底显示名。tiers 是所属档位（quick/standard/pro）。src 说明数据来源：presentmon=逐帧 CSV、nvsmi=nvidia-smi、pdh=Windows 性能计数器、wmi=系统接口、derived=由前述推导。",
+  "modules": [
+    { "id": "perf", "label": "metric.module.perf", "nameZh": "游戏性能表现", "nameEn": "Game performance", "nameJa": "ゲーム性能",
+      "descZh": "帧率水平与稳定性：平均帧率、1% / 0.1% 低帧率、帧时间分布、卡顿次数与时长、上屏延迟。回答「流不流畅、稳不稳、卡不卡」。",
+      "descEn": "Frame rate and steadiness: average FPS, 1% / 0.1% low, frame-time distribution, stutter count and duration, display latency. Answers smooth, steady and stutter-free.",
+      "descJa": "フレームレートの水準と安定性：平均 FPS、1% / 0.1% 低フレームレート、フレーム時間の分布、スタッターの回数と時間、表示遅延。「滑らかか・安定か・カクつくか」に答えます。" },
+    { "id": "cpu", "label": "metric.module.cpu", "nameZh": "CPU 运行状态", "nameEn": "CPU", "nameJa": "CPU 状態",
+      "descZh": "处理器侧的执行情况：总占用与单核峰值、游戏进程自身的 CPU 占用、当前频率。看它会不会在交付帧的时候掉队。",
+      "descEn": "How the processor keeps up: total and per-core usage, the game process CPU share, and current clock. Tells whether the CPU falls behind when delivering frames.",
+      "descJa": "CPU 側の実行状況：全体と単核の使用率、ゲームプロセス自身の CPU 使用率、現在のクロック。フレーム供給で遅れを取っていないかを見ます。" },
+    { "id": "gpu", "label": "metric.module.gpu", "nameZh": "GPU 运行状态", "nameEn": "GPU", "nameJa": "GPU 状態",
+      "descZh": "显卡的实际负载：占用、核心与显存频率、功耗、温度、风扇、PCIe 链路，以及降频原因（功耗墙 / 温度墙 / 硬件降频）。",
+      "descEn": "What the GPU is actually doing: usage, core and memory clocks, power, temperature, fan, PCIe link, plus throttle reasons (power / thermal / hardware).",
+      "descJa": "GPU の実際の負荷：使用率、コアとメモリのクロック、消費電力、温度、ファン、PCIe リンク、そしてスロットリング理由（電力制限・温度制限・ハードウェア制限）。" },
+    { "id": "memory", "label": "metric.module.memory", "nameZh": "内存与显存", "nameEn": "Memory", "nameJa": "メモリ",
+      "descZh": "游戏进程占用的内存与显存、整机内存与显存的使用率、剩余内存与提交量。够不够用、会不会因为换页掉帧。",
+      "descEn": "Memory and VRAM used by the game, machine-wide memory and VRAM utilisation, free memory and commit. Whether there is enough headroom or paging causes drops.",
+      "descJa": "ゲームが使うメモリと VRAM、PC 全体のメモリと VRAM 使用率、空きメモリとコミット量。足りているか、ページングで落ちていないか。" },
+    { "id": "thermal", "label": "metric.module.thermal", "nameZh": "功耗与温控", "nameEn": "Power & thermals", "nameJa": "電力と温度",
+      "descZh": "功耗与温度有没有触到限制：平均 / 峰值功耗、温度限制与功耗限制是否真的触发、温度降频占比。",
+      "descEn": "Whether power and temperature hit their limits: average and peak power, whether thermal or power limits actually triggered, and how much time was spent thermally throttled.",
+      "descJa": "電力と温度が上限に当たっているか：平均・ピーク消費電力、温度制限・電力制限が実際に発動したか、温度によるスロットリングの割合。" },
+    { "id": "bottleneck", "label": "metric.module.bottleneck", "nameZh": "渲染瓶颈分析", "nameEn": "Bottleneck", "nameJa": "ボトルネック",
+      "descZh": "同一份逐帧数据算出的瓶颈依据：GPU 忙碌时间占比、CPU 帧处理时间、GPU 渲染与等待时间、帧生成状态。结论与依据一起给，不单说一句「显卡瓶颈」。",
+      "descEn": "The evidence behind the bottleneck verdict, from the same per-frame data: GPU busy share, CPU frame time, GPU render and wait time, frame generation state. The verdict always ships with its evidence.",
+      "descJa": "同じフレーム単位データから出すボトルネックの根拠：GPU ビジー率、CPU のフレーム処理時間、GPU の描画時間と待ち時間、フレーム生成の状態。結論は必ず根拠とセットで示します。" },
+    { "id": "environment", "label": "metric.module.environment", "nameZh": "测试环境", "nameEn": "Test environment", "nameJa": "テスト環境",
+      "descZh": "这次采集的现场条件：处理器与显卡型号、内存代数、分辨率与窗口模式、呈现后端与模式、超分与帧生成是否加载、前台占比。换环境后这些数不可直接横比。",
+      "descEn": "The conditions of this capture: CPU and GPU model, memory type, resolution and window mode, present API and mode, which upscalers and frame generation were loaded, foreground ratio. Numbers are not directly comparable across environments.",
+      "descJa": "今回の計測条件：CPU と GPU の型番、メモリ規格、解像度とウィンドウモード、提示 API とモード、超解像とフレーム生成の読み込み状況、前面率。環境が変わると数値をそのまま比較できません。" }
+  ],
+  "metrics": [
+    { "id": "perf.avgFps", "module": "perf", "label": "metric.avgFps", "nameZh": "平均帧率", "nameEn": "Average FPS", "nameJa": "平均フレームレート", "unit": "FPS", "stat": "avg", "src": "presentmon", "tiers": ["quick", "standard", "pro"], "status": "ok" },
+    { "id": "perf.p1Low", "module": "perf", "label": "metric.p1low", "nameZh": "1% 低帧率", "nameEn": "1% Low FPS", "nameJa": "1% Low FPS", "unit": "FPS", "stat": "low", "src": "presentmon", "tiers": ["quick", "standard", "pro"], "status": "ok" },
+    { "id": "perf.p01Low", "module": "perf", "label": "metric.p01low", "nameZh": "0.1% 低帧率", "nameEn": "0.1% Low FPS", "nameJa": "0.1% Low FPS", "unit": "FPS", "stat": "low", "src": "presentmon", "tiers": ["standard", "pro"], "status": "ok" },
+    { "id": "perf.minFps", "module": "perf", "label": "metric.minFps", "nameZh": "最低帧率", "nameEn": "Minimum FPS", "nameJa": "最低 FPS", "unit": "FPS", "stat": "min", "src": "presentmon", "tiers": ["standard", "pro"], "status": "ok" },
+    { "id": "perf.maxFps", "module": "perf", "label": "metric.maxFps", "nameZh": "最高帧率", "nameEn": "Maximum FPS", "nameJa": "最高 FPS", "unit": "FPS", "stat": "max", "src": "presentmon", "tiers": ["standard", "pro"], "status": "ok" },
+    { "id": "perf.avgFt", "module": "perf", "label": "metric.avgFrametime", "nameZh": "平均帧时间", "nameEn": "Average frame time", "nameJa": "平均フレーム時間", "unit": "ms", "stat": "avg", "src": "presentmon", "tiers": ["quick", "standard", "pro"], "status": "ok" },
+    { "id": "perf.p95Ft", "module": "perf", "label": "metric.p95Frametime", "nameZh": "P95 帧时间", "nameEn": "P95 frame time", "nameJa": "P95 フレーム時間", "unit": "ms", "stat": "p95", "src": "presentmon", "tiers": ["quick", "standard", "pro"], "status": "ok" },
+    { "id": "perf.p99Ft", "module": "perf", "label": "metric.p99Frametime", "nameZh": "P99 帧时间", "nameEn": "P99 frame time", "nameJa": "P99 フレーム時間", "unit": "ms", "stat": "p99", "src": "presentmon", "tiers": ["standard", "pro"], "status": "ok" },
+    { "id": "perf.stutterCount", "module": "perf", "label": "metric.stutterCount", "nameZh": "卡顿次数", "nameEn": "Stutter count", "nameJa": "スタッター回数", "unit": "次", "stat": "count", "src": "derived", "tiers": ["quick", "standard", "pro"], "status": "ok" },
+    { "id": "perf.stutterDuration", "module": "perf", "label": "metric.stutterDuration", "nameZh": "卡顿累计时长", "nameEn": "Stutter duration", "nameJa": "スタッター合計時間", "unit": "ms", "stat": "sum", "src": "derived", "tiers": ["standard", "pro"], "status": "ok" },
+    { "id": "perf.stutterWorst", "module": "perf", "label": "metric.stutterWorst", "nameZh": "最长一次卡顿", "nameEn": "Longest stutter", "nameJa": "最長スタッター", "unit": "ms", "stat": "max", "src": "derived", "tiers": ["standard", "pro"], "status": "ok" },
+    { "id": "perf.displayLatency", "opt": "latency", "module": "perf", "label": "metric.displayLatency", "nameZh": "上屏延迟", "nameEn": "Display latency", "nameJa": "表示遅延", "unit": "ms", "stat": "avg", "src": "presentmon", "tiers": ["standard", "pro"], "status": "ok" },
+    { "id": "perf.displayLatencyP95", "opt": "latency", "module": "perf", "label": "metric.displayLatencyP95", "nameZh": "上屏延迟 P95", "nameEn": "Display latency P95", "nameJa": "表示遅延 P95", "unit": "ms", "stat": "p95", "src": "presentmon", "tiers": ["standard", "pro"], "status": "ok" },
+    { "id": "perf.pcLatency", "opt": "latency", "module": "perf", "label": "metric.pcLatency", "nameZh": "PC 延迟（估算）", "nameEn": "PC latency (estimated)", "nameJa": "PC レイテンシ（推定）", "unit": "ms", "stat": "est", "src": "derived", "tiers": ["standard", "pro"], "status": "ok" },
+    { "id": "perf.jitter", "module": "perf", "label": "metric.jitter", "nameZh": "帧时间抖动（变异系数）", "nameEn": "Frame-time jitter (CV)", "nameJa": "フレーム時間のばらつき（変動係数）", "unit": "%", "stat": "cv", "src": "derived", "tiers": ["standard", "pro"], "status": "ok" },
+
+    { "id": "cpu.total", "module": "cpu", "label": "metric.cpuTotal", "nameZh": "CPU 总占用", "nameEn": "CPU usage", "nameJa": "CPU 使用率", "unit": "%", "stat": "avg", "src": "pdh", "tiers": ["quick", "standard", "pro"], "status": "ok" },
+    { "id": "cpu.process", "opt": "proccpu", "module": "cpu", "label": "metric.cpuProcess", "nameZh": "游戏进程 CPU 占用", "nameEn": "Process CPU usage", "nameJa": "プロセス CPU 使用率", "unit": "%", "stat": "avg", "src": "pdh", "tiers": ["standard", "pro"], "status": "ok" },
+    { "id": "cpu.coreMax", "module": "cpu", "label": "metric.cpuCoreMax", "nameZh": "单核最高占用", "nameEn": "Per-core peak", "nameJa": "単一コア最大", "unit": "%", "stat": "max", "src": "pdh", "tiers": ["standard", "pro"], "status": "ok" },
+    { "id": "cpu.clock", "module": "cpu", "label": "metric.cpuClock", "nameZh": "CPU 当前频率", "nameEn": "CPU clock", "nameJa": "CPU 周波数", "unit": "MHz", "stat": "avg", "src": "pdh", "tiers": ["standard", "pro"], "status": "ok" },
+    { "id": "cpu.throttle", "module": "cpu", "label": "metric.cpuThrottle", "nameZh": "CPU 降频状态", "nameEn": "CPU throttling", "nameJa": "CPU スロットリング", "unit": "状态", "stat": "state", "src": "derived", "tiers": ["pro"], "status": "na", "reason": "na.cpuThrottle" },
+    { "id": "cpu.temp", "module": "cpu", "label": "metric.cpuTemp", "nameZh": "CPU 温度", "nameEn": "CPU temperature", "nameJa": "CPU 温度", "unit": "°C", "stat": "max", "src": "sensor", "tiers": ["standard", "pro"], "status": "na", "reason": "na.cpuTemp" },
+    { "id": "cpu.power", "module": "cpu", "label": "metric.cpuPower", "nameZh": "CPU 功耗", "nameEn": "CPU power", "nameJa": "CPU 消費電力", "unit": "W", "stat": "avg", "src": "sensor", "tiers": ["pro"], "status": "na", "reason": "na.cpuPower" },
+
+    { "id": "gpu.util", "opt": "gpuusage", "module": "gpu", "label": "metric.gpuUtil", "nameZh": "GPU 平均利用率", "nameEn": "GPU average utilisation", "nameJa": "GPU 平均使用率", "unit": "%", "stat": "avg", "src": "nvsmi", "tiers": ["quick", "standard", "pro"], "status": "ok" },
+    { "id": "gpu.temp", "opt": "gputemp", "module": "gpu", "label": "metric.gpuTemp", "nameZh": "GPU 温度", "nameEn": "GPU temperature", "nameJa": "GPU 温度", "unit": "°C", "stat": "max", "src": "nvsmi", "tiers": ["quick", "standard", "pro"], "status": "ok" },
+    { "id": "gpu.clock", "opt": "gpuusage", "module": "gpu", "label": "metric.gpuClock", "nameZh": "GPU 核心频率", "nameEn": "GPU clock", "nameJa": "GPU コア周波数", "unit": "MHz", "stat": "avg", "src": "nvsmi", "tiers": ["standard", "pro"], "status": "ok" },
+    { "id": "gpu.power", "opt": "gputemp", "module": "gpu", "label": "metric.gpuPower", "nameZh": "GPU 功耗", "nameEn": "GPU power", "nameJa": "GPU 消費電力", "unit": "W", "stat": "avg", "src": "nvsmi", "tiers": ["standard", "pro"], "status": "ok" },
+    { "id": "gpu.vramUsed", "opt": "gpuusage", "module": "gpu", "label": "metric.gpuVramUsed", "nameZh": "GPU 显存占用", "nameEn": "GPU memory in use", "nameJa": "GPU メモリ使用量", "unit": "MB", "stat": "max", "src": "nvsmi", "tiers": ["standard", "pro"], "status": "ok" },
+    { "id": "gpu.memClock", "opt": "gpuusage", "module": "gpu", "label": "metric.gpuMemClock", "nameZh": "GPU 显存频率", "nameEn": "GPU memory clock", "nameJa": "GPU メモリ周波数", "unit": "MHz", "stat": "avg", "src": "nvsmi", "tiers": ["pro"], "status": "ok" },
+    { "id": "gpu.fan", "opt": "gputemp", "module": "gpu", "label": "metric.gpuFan", "nameZh": "GPU 风扇转速", "nameEn": "GPU fan speed", "nameJa": "GPU ファン回転数", "unit": "%", "stat": "avg", "src": "nvsmi", "tiers": ["pro"], "status": "ok" },
+    { "id": "gpu.throttle", "opt": ["gputemp", "gpuusage"], "module": "gpu", "label": "metric.gpuThrottle", "nameZh": "GPU 降频原因", "nameEn": "GPU throttle reasons", "nameJa": "GPU スロットリング理由", "unit": "%", "stat": "dist", "src": "nvsmi", "tiers": ["standard", "pro"], "status": "ok" },
+    { "id": "gpu.hotspot", "module": "gpu", "label": "metric.gpuHotspot", "nameZh": "GPU 热点温度", "nameEn": "GPU hotspot", "nameJa": "GPU ホットスポット温度", "unit": "°C", "stat": "max", "src": "nvapi", "tiers": ["pro"], "status": "na", "reason": "na.gpuHotspot" },
+
+    { "id": "mem.processRam", "opt": "ram", "module": "memory", "label": "metric.procRam", "nameZh": "游戏进程内存", "nameEn": "Process RAM", "nameJa": "プロセスメモリ", "unit": "MB", "stat": "max", "src": "wmi", "tiers": ["standard", "pro"], "status": "ok" },
+    { "id": "mem.systemRam", "opt": "sysmem", "module": "memory", "label": "metric.sysRam", "nameZh": "系统内存占用", "nameEn": "System RAM", "nameJa": "システムメモリ", "unit": "%", "stat": "avg", "src": "wmi", "tiers": ["standard", "pro"], "status": "ok" },
+    { "id": "mem.processVram", "opt": "vram", "module": "memory", "label": "metric.procVram", "nameZh": "游戏进程显存", "nameEn": "Process VRAM", "nameJa": "プロセス VRAM", "unit": "MB", "stat": "max", "src": "pdh", "tiers": ["standard", "pro"], "status": "ok" },
+    { "id": "mem.systemVram", "opt": "gpuusage", "module": "memory", "label": "metric.sysVram", "nameZh": "系统显存占用", "nameEn": "System VRAM", "nameJa": "システム VRAM", "unit": "%", "stat": "max", "src": "nvsmi", "tiers": ["standard", "pro"], "status": "ok" },
+    { "id": "mem.sharedVram", "opt": "sharedmem", "module": "memory", "label": "metric.sharedVram", "nameZh": "共享 GPU 内存", "nameEn": "Shared GPU memory", "nameJa": "共有 GPU メモリ", "unit": "MB", "stat": "max", "src": "pdh", "tiers": ["pro"], "status": "na", "reason": "na.sharedVram" },
+    { "id": "mem.availableRam", "opt": "sysmem", "module": "memory", "label": "metric.availableRam", "nameZh": "系统剩余内存", "nameEn": "Available RAM", "nameJa": "空きメモリ", "unit": "MB", "stat": "min", "src": "wmi", "tiers": ["standard", "pro"], "status": "ok" },
+    { "id": "mem.commit", "opt": "sysmem", "module": "memory", "label": "metric.commit", "nameZh": "内存提交量", "nameEn": "Committed memory", "nameJa": "コミット済みメモリ", "unit": "MB", "stat": "max", "src": "pdh", "tiers": ["pro"], "status": "ok" },
+
+    { "id": "thermal.gpuPowerAvg", "opt": "gputemp", "module": "thermal", "label": "metric.gpuPowerAvg", "nameZh": "GPU 平均功耗", "nameEn": "Average GPU power", "nameJa": "GPU 平均消費電力", "unit": "W", "stat": "avg", "src": "nvsmi", "tiers": ["standard", "pro"], "status": "ok" },
+    { "id": "thermal.gpuPowerPeak", "opt": "gputemp", "module": "thermal", "label": "metric.gpuPowerPeak", "nameZh": "GPU 峰值功耗", "nameEn": "Peak GPU power", "nameJa": "GPU 最大消費電力", "unit": "W", "stat": "max", "src": "nvsmi", "tiers": ["standard", "pro"], "status": "ok" },
+    { "id": "thermal.gpuThermalLimit", "opt": "gputemp", "module": "thermal", "label": "metric.gpuThermalLimit", "nameZh": "GPU 温度限制", "nameEn": "GPU thermal limit", "nameJa": "GPU 温度制限", "unit": "状态", "stat": "state", "src": "nvsmi", "tiers": ["standard", "pro"], "status": "ok" },
+    { "id": "thermal.gpuPowerLimit", "opt": "gputemp", "module": "thermal", "label": "metric.gpuPowerLimit", "nameZh": "GPU 功耗限制", "nameEn": "GPU power limit", "nameJa": "GPU 電力制限", "unit": "状态", "stat": "state", "src": "nvsmi", "tiers": ["standard", "pro"], "status": "ok" },
+    { "id": "thermal.gpuThermalThrottle", "opt": "gputemp", "module": "thermal", "label": "metric.gpuThermalThrottle", "nameZh": "GPU 温度降频", "nameEn": "GPU thermal throttling", "nameJa": "GPU 温度スロットリング", "unit": "状态", "stat": "state", "src": "nvsmi", "tiers": ["standard", "pro"], "status": "ok" },
+    { "id": "thermal.cpuPowerAvg", "module": "thermal", "label": "metric.cpuPowerAvg", "nameZh": "CPU 平均功耗", "nameEn": "Average CPU power", "nameJa": "CPU 平均消費電力", "unit": "W", "stat": "avg", "src": "sensor", "tiers": ["pro"], "status": "na", "reason": "na.cpuPower" },
+    { "id": "thermal.cpuThermalThrottle", "module": "thermal", "label": "metric.cpuThermalThrottle", "nameZh": "CPU 温度降频", "nameEn": "CPU thermal throttling", "nameJa": "CPU 温度スロットリング", "unit": "状态", "stat": "state", "src": "sensor", "tiers": ["pro"], "status": "na", "reason": "na.cpuThrottle" },
+
+    { "id": "bottleneck.gpuBusy", "module": "bottleneck", "label": "metric.gpuBusy", "nameZh": "GPU Busy（忙时占比）", "nameEn": "GPU Busy (busy-time share)", "nameJa": "GPU ビジー率（稼働時間の割合）", "unit": "%", "stat": "avg", "src": "presentmon", "tiers": ["standard", "pro"], "status": "ok" },
+    { "id": "bottleneck.cpuFrameTime", "module": "bottleneck", "label": "metric.cpuFrameTime", "nameZh": "CPU 帧处理时间", "nameEn": "CPU frame time", "nameJa": "CPU フレーム処理時間", "unit": "ms", "stat": "avg", "src": "presentmon", "tiers": ["standard", "pro"], "status": "ok" },
+    { "id": "bottleneck.gpuRenderTime", "module": "bottleneck", "label": "metric.gpuRenderTime", "nameZh": "GPU 渲染时间", "nameEn": "GPU render time", "nameJa": "GPU レンダリング時間", "unit": "ms", "stat": "avg", "src": "presentmon", "tiers": ["standard", "pro"], "status": "ok" },
+    { "id": "bottleneck.gpuWait", "module": "bottleneck", "label": "metric.gpuWait", "nameZh": "GPU 等待时间", "nameEn": "GPU wait time", "nameJa": "GPU 待ち時間", "unit": "ms", "stat": "avg", "src": "presentmon", "tiers": ["pro"], "status": "ok" },
+    { "id": "bottleneck.renderQueue", "module": "bottleneck", "label": "metric.renderQueue", "nameZh": "渲染队列深度", "nameEn": "Render queue depth", "nameJa": "レンダーキューの深さ", "unit": "帧", "stat": "avg", "src": "driver", "tiers": ["pro"], "status": "na", "reason": "na.renderQueue" },
+    { "id": "bottleneck.frameGen", "module": "bottleneck", "label": "metric.frameGen", "nameZh": "帧生成（运行时检测）", "nameEn": "Frame generation (runtime check)", "nameJa": "フレーム生成（実行時検出）", "unit": "状态", "stat": "state", "src": "derived", "tiers": ["standard", "pro"], "status": "ok" },
+
+    { "id": "env.cpuModel", "module": "environment", "label": "metric.cpuModel", "nameZh": "处理器型号", "nameEn": "CPU model", "nameJa": "CPU モデル", "unit": "", "stat": "text", "src": "wmi", "tiers": ["quick", "standard", "pro"], "status": "ok" },
+    { "id": "env.gpuModel", "module": "environment", "label": "metric.gpuModel", "nameZh": "图形处理器型号", "nameEn": "GPU model", "nameJa": "GPU モデル", "unit": "", "stat": "text", "src": "nvsmi", "tiers": ["quick", "standard", "pro"], "status": "ok" },
+    { "id": "env.ramType", "module": "environment", "label": "metric.ramType", "nameZh": "内存代数", "nameEn": "Memory type", "nameJa": "メモリ規格", "unit": "", "stat": "text", "src": "wmi", "tiers": ["standard", "pro"], "status": "ok" },
+    { "id": "env.vramType", "module": "environment", "label": "metric.vramType", "nameZh": "显存代数", "nameEn": "VRAM type", "nameJa": "VRAM 規格", "unit": "", "stat": "text", "src": "lookup", "tiers": ["standard", "pro"], "status": "na", "reason": "na.vramType" },
+    { "id": "env.resolution", "opt": "res", "module": "environment", "label": "metric.resolution", "nameZh": "分辨率 / 窗口模式", "nameEn": "Resolution / window mode", "nameJa": "解像度 / ウィンドウモード", "unit": "", "stat": "text", "src": "win32", "tiers": ["quick", "standard", "pro"], "status": "ok" },
+    { "id": "env.foreground", "module": "environment", "label": "metric.foreground", "nameZh": "游戏前台占比", "nameEn": "Foreground share", "nameJa": "前面にあった割合", "unit": "%", "stat": "pct", "src": "win32", "tiers": ["quick", "standard", "pro"], "status": "ok" },
+    { "id": "env.presentApi", "module": "environment", "label": "metric.presentApi", "nameZh": "呈现后端", "nameEn": "Present backend", "nameJa": "プレゼント API", "unit": "", "stat": "text", "src": "presentmon", "tiers": ["standard", "pro"], "status": "ok" },
+    { "id": "env.presentMode", "module": "environment", "label": "metric.presentMode", "nameZh": "呈现模式", "nameEn": "Present mode", "nameJa": "プレゼントモード", "unit": "", "stat": "text", "src": "presentmon", "tiers": ["standard", "pro"], "status": "ok" },
+    { "id": "env.upscaler", "opt": "features", "module": "environment", "label": "metric.upscaler", "nameZh": "超分技术", "nameEn": "Super resolution", "nameJa": "超解像技術", "unit": "", "stat": "state", "src": "module", "tiers": ["standard", "pro"], "status": "ok" },
+    { "id": "env.dlss", "opt": "features", "module": "environment", "label": "metric.dlss", "nameZh": "DLSS 超分", "nameEn": "DLSS upscaling", "nameJa": "DLSS 超解像", "unit": "", "stat": "state", "src": "module", "tiers": ["standard", "pro"], "status": "ok" },
+    { "id": "env.dlssFg", "opt": "features", "module": "environment", "label": "metric.dlssFg", "nameZh": "DLSS 帧生成（运行时检测）", "nameEn": "DLSS frame gen (runtime check)", "nameJa": "DLSS フレーム生成（実行時検出）", "unit": "", "stat": "state", "src": "module", "tiers": ["standard", "pro"], "status": "ok" },
+    { "id": "env.dlssRayRecon", "opt": "features", "module": "environment", "label": "metric.dlssRayRecon", "nameZh": "DLSS-D 光线重建", "nameEn": "Ray reconstruction (DLSS-D)", "nameJa": "レイ再構成 (DLSS-D)", "unit": "", "stat": "state", "src": "module", "tiers": ["standard", "pro"], "status": "ok" },
+    { "id": "env.fsr", "opt": "features", "module": "environment", "label": "metric.fsr", "nameZh": "FSR", "nameEn": "FSR", "nameJa": "FSR", "unit": "", "stat": "state", "src": "module", "tiers": ["standard", "pro"], "status": "ok" },
+    { "id": "env.xess", "opt": "features", "module": "environment", "label": "metric.xess", "nameZh": "XeSS", "nameEn": "XeSS", "nameJa": "XeSS", "unit": "", "stat": "state", "src": "module", "tiers": ["standard", "pro"], "status": "ok" },
+    { "id": "env.reflex", "opt": "features", "module": "environment", "label": "metric.reflex", "nameZh": "Reflex", "nameEn": "Reflex", "nameJa": "Reflex", "unit": "", "stat": "state", "src": "module", "tiers": ["standard", "pro"], "status": "ok" },
+    { "id": "env.upscalerPreset", "opt": "features", "module": "environment", "label": "metric.upscalerPreset", "nameZh": "超分档位（游戏内）", "nameEn": "Upscaler preset (in-game)", "nameJa": "超解像プリセット（ゲーム内）", "unit": "", "stat": "text", "src": "gameconfig", "tiers": ["pro"], "status": "ok" },
+    { "id": "env.dlssPreset", "opt": "features", "module": "environment", "label": "metric.dlssPreset", "nameZh": "DLSS 档位（游戏内）", "nameEn": "DLSS preset (in-game)", "nameJa": "DLSS プリセット（ゲーム内）", "unit": "", "stat": "text", "src": "gameconfig", "tiers": ["pro"], "status": "ok" },
+    { "id": "env.fgPreset", "opt": "features", "module": "environment", "label": "metric.fgPreset", "nameZh": "帧生成档位（游戏内）", "nameEn": "Frame-gen preset (in-game)", "nameJa": "フレーム生成プリセット（ゲーム内）", "unit": "", "stat": "text", "src": "gameconfig", "tiers": ["pro"], "status": "ok" },
+    { "id": "env.frameGenInGame", "opt": "features", "module": "environment", "label": "metric.frameGenInGame", "nameZh": "帧生成设置（游戏内）", "nameEn": "Frame gen setting (in-game)", "nameJa": "フレーム生成設定（ゲーム内）", "unit": "", "stat": "state", "src": "module", "tiers": ["standard", "pro"], "status": "ok" }
+  ],
+  "reasons": {
+    "na.cpuTemp": {
+      "zh": "CPU 温度需要内核级传感器驱动（LibreHardwareMonitor 那一类）才能读。本项目坚持零注入、不捆绑驱动，避免触发反作弊与蓝屏风险，所以本版不提供；不是采不到帧，而是我们不引入这类组件。",
+      "en": "CPU temperature needs a kernel-mode sensor driver (the LibreHardwareMonitor class of tools). This project deliberately ships no drivers and no injection, to avoid anti-cheat and stability risks, so it is not provided in this version.",
+      "ja": "CPU 温度はカーネルモードのセンサードライバ（LibreHardwareMonitor 系）が必要です。本プロジェクトは非注入・ドライバ非同梱の方針（アンチチートと安定性のリスク回避）のため、本版では提供しません。"
+    },
+    "na.cpuPower": {
+      "zh": "CPU 功耗同样来自传感器驱动（RAPL／主板 EC）。不捆绑驱动就读不到，因此标为暂不可用，绝不用估算值冒充。",
+      "en": "CPU power also comes from a sensor driver (RAPL / board EC). Without bundling a driver it cannot be read, so it stays unavailable instead of being estimated.",
+      "ja": "CPU 消費電力もセンサードライバ（RAPL／マザーボード EC）由来です。ドライバを同梱しないため取得できず、推定値で代用はしません。"
+    },
+    "na.cpuThrottle": {
+      "zh": "CPU 降频状态要靠温度与功耗数据判断，而这两项本版拿不到；只看频率与占用推算会误报，所以不猜，标为暂不可用。",
+      "en": "CPU throttling can only be judged from temperature and power, which this version cannot read. Inferring from clock and usage alone would produce false positives, so it is left unavailable rather than guessed.",
+      "ja": "CPU スロットリングは温度と消費電力から判断しますが、本版では取得できません。周波数と使用率だけからの推測は誤判定になるため、推測せず未対応としています。"
+    },
+    "na.gpuHotspot": {
+      "zh": "GPU 热点温度要 NVAPI 的逐传感器读取，nvidia-smi 只给整体温度。本版不引入 NVAPI 组件，所以标为暂不可用。",
+      "en": "GPU hotspot temperature requires per-sensor reads through NVAPI; nvidia-smi only exposes the overall temperature. NVAPI is not bundled in this version.",
+      "ja": "GPU ホットスポット温度は NVAPI のセンサー単位取得が必要で、nvidia-smi は全体温度のみです。本版は NVAPI を同梱しないため未対応です。"
+    },
+    "na.sharedVram": {
+      "zh": "共享 GPU 内存要看 Windows 的 GPU Adapter Memory 计数器，部分驱动／系统版本不提供该实例。取不到时按「暂不可用」处理，不用 0 或估算替代。",
+      "en": "Shared GPU memory relies on the Windows GPU Adapter Memory counters, which some driver/OS versions do not expose. When unavailable it is reported as such, never as zero or an estimate.",
+      "ja": "共有 GPU メモリは Windows の GPU Adapter Memory カウンターに依存し、ドライバ／OS によっては公開されません。取得できない場合は未対応として扱い、0 や推定値では置き換えません。"
+    },
+    "na.renderQueue": {
+      "zh": "渲染队列深度属于引擎／驱动内部状态，PresentMon 不对外报告。要做只能在游戏侧插桩，那违反零注入原则，所以暂不可用。",
+      "en": "Render queue depth is internal engine/driver state and is not reported by PresentMon. Measuring it would require instrumenting the game, which breaks the zero-injection rule.",
+      "ja": "レンダーキューの深さはエンジン／ドライバ内部の状態で、PresentMon は報告しません。計測にはゲーム側の計装が必要で、非注入の原則に反します。"
+    },
+    "na.gamePreset": {
+      "zh": "游戏内的画质档位只存在于游戏自己的配置文件里，格式随厂商与版本变化，第三方无法可靠读取。所以只做「这项技术是否启用」（看 DLL 是否加载），档位请以游戏内显示为准。",
+      "en": "In-game presets live only in the game's own config files, whose format changes per vendor and version. We therefore report only whether a technique is active (by checking loaded DLLs); read the actual preset from the game's menu.",
+      "ja": "ゲーム内プリセットは各ゲームの設定ファイルにのみ存在し、形式はベンダーとバージョンで変わります。そのため「その技術が有効か（DLL のロード有無）」のみを扱い、プリセットはゲーム内表示を正とします。"
+    },
+    "na.vramType": {
+      "zh": "显存代数（GDDR6/6X/7）无法从 nvidia-smi 或 WMI 可靠读取。按型号查表并不可靠（同名不同版本会用不同显存），所以标为暂不可用，不用猜测值。",
+      "en": "The VRAM generation (GDDR6/6X/7) cannot be read reliably from nvidia-smi or WMI, and model-name lookup is unreliable (same name, different memory revisions). It stays unavailable rather than guessed.",
+      "ja": "VRAM 規格（GDDR6/6X/7）は nvidia-smi や WMI から確実に取得できず、型番からの推定も不確実（同名でも改版あり）です。推測せず未対応としています。"
+    }
+  }
+}

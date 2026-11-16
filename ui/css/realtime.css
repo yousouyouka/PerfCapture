@@ -2,12 +2,21 @@
    版式参照 Legion Toolkit 的 CPU/GPU 双栏：标签 / 进度条 / 数值。
    颜色只用 tokens：accent 正常、warn/bad 阈值，— 用 faint。 */
 
+/* 整页按内容高度排布，页面容器自己滚动（见 .page[data-page="realtime"]）；
+   这样 CPU / GPU 两块的高度只由自己的行数决定，不会因为上面两块收起展开而变。 */
+/* 本页内容比一屏高时让页面自己滚动（其他页仍由内部区域各自滚动） */
+.page[data-page="realtime"] {
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 0.25rem;   /* 给滚动条留位置，避免内容被压住 */
+}
 .realtime-wrap {
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-  height: 100%;
-  min-height: 0;
+  height: auto;
+  min-height: 100%;
+  min-width: 0;
 }
 
 .realtime-header {
@@ -69,12 +78,13 @@
 
 .realtime-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 0.4rem; }
 
+/* 不参与 flex 伸缩：高度只由自己的内容决定，上面两块收起/展开也不跟着动 */
 .rt-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
   gap: 0.8rem;
-  flex: 1 1 auto;
-  min-height: 0;
+  flex: 0 0 auto;
 }
 
 .rt-col {
@@ -114,7 +124,6 @@
   flex-direction: column;
   gap: 0.36rem;
   min-height: 0;
-  overflow-y: auto;
   padding-right: 0.15rem;
 }
 

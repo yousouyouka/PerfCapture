@@ -109,15 +109,25 @@ if (Test-Path $optFile) {
         $i18nText = Get-Content (Join-Path $root 'ui\js\i18n.js') -Raw -Encoding UTF8
         $engText = Get-Content (Join-Path $root 'src\engine\Measure-GamePerf.ps1') -Raw -Encoding UTF8
         $bad = 0
+        $nAlways = 0
         foreach ($o in $opts) {
             if (-not $o.skip -or -not $o.label) { Bad '采集项缺少 skip 或 label'; $bad++; continue }
             $n = ([regex]::Matches($i18nText, [regex]::Escape("'" + $o.label + "':"))).Count
             if ($n -lt 3) { Bad ("i18n 中 $($o.label) 只有 $n 种语言（需 3）"); $bad++ }
-            if ($engText -notmatch ('-contains ''' + [regex]::Escape($o.skip) + '''')) {
-                Bad ("引擎没有 skip=$($o.skip) 的采集分支"); $bad++
+            $hasBranch = ($engText -match ('-contains ''' + [regex]::Escape($o.skip) + ''''))
+            # kind：core（无条件采集）/ optional（可开关）/ derived（算出来的）。旧清单只有 always
+            $kind = if ($o.kind) { [string]$o.kind } elseif ($o.always) { 'core' } else { 'optional' }
+            if (@('core', 'optional', 'derived') -notcontains $kind) { Bad "采集项 $($o.skip) 的 kind=$kind 非法"; $bad++; $kind = 'optional' }
+            if ($kind -eq 'core') { $nAlways++ }
+            if ($kind -eq 'optional') {
+                # 可选开关必须真的有引擎分支，否则那个可勾可取消的框就是假的
+                if (-not $hasBranch) { Bad ("引擎没有 skip=$($o.skip) 的采集分支"); $bad++ }
+            } else {
+                # 核心项与派生项：引擎里必须**没有**对应 skip 分支，否则界面上「关不掉」就是假的
+                if ($hasBranch) { Bad ("$($o.skip) 是 $kind，但引擎仍有 skip 分支"); $bad++ }
             }
         }
-        if ($bad -eq 0) { Ok "采集项清单一致（$($opts.Count) 项 · 文案三语齐全 · 引擎分支齐全）" }
+        if ($bad -eq 0) { Ok "采集项清单一致（$($opts.Count) 项 · 文案三语齐全 · 可选 $($opts.Count - $nAlways - @($opts | Where-Object { $_.kind -eq 'derived' }).Count) 项引擎分支齐全 · 始终采集 $nAlways 项 · 派生 $(@($opts | Where-Object { $_.kind -eq 'derived' }).Count) 项）" }
         # 界面不能再写死勾选框，否则清单驱动就失去意义
         if ($idx -match 'data-skip=') { Bad 'index.html 仍在写死采集项勾选框（应交给 capture-options.js 渲染）' }
         if ($idx -notmatch 'data-collapse=') { Bad 'index.html 缺少 data-collapse（卡片折叠）' }
@@ -290,16 +300,28 @@ foreach ($ek in 'capture.exportPng') {
 # 判定改看「帧率落回 1% Low 的频率」，占平均的百分比只做展示。
 $engPs = Get-Content (Join-Path $root 'src\engine\Measure-GamePerf.ps1') -Raw -Encoding UTF8
 if ($engPs -notmatch '\$sorted\s*=\s*@\(\$frameTimes \| Sort-Object -Descending\)') { Bad '引擎 1% Low 前提变了：$sorted 必须是降序（最差在前）' }
-if ($engPs -notmatch 'Select-Object -Skip 1') { Bad '引擎 1% Low 未丢掉最差的一帧' }
+# B1（2.0.1）起 1% Low 统一口径：**不再丢最差那一帧**，直接用全部帧算；
+# 同时必须有 0.1% Low、卡顿合并统计、GPU Busy 与逐帧列解析。
+if ($engPs -match 'Select-Object -Skip 1') { Bad '引擎仍在丢弃最差帧（1% Low 口径应已统一）' }
+foreach ($need in @('fps_01pct_low', 'Get-LowFps', 'stutterSegments', 'gpu_busy_pct', 'cpu_frame_ms', 'gpu_render_ms', "'CPUBusy'", "'GPUBusy'")) {
+    if ($engPs -notmatch [regex]::Escape($need)) { Bad "引擎缺 B1 数据层要素：$need" }
+}
+if ($i18nText -notmatch 'metric\.lowPerSec') { Bad 'i18n 缺「逐秒最低帧率」词条（口径已改名）' }
 if ($engPs -notmatch 'lowHitsPct') { Bad '引擎缺落回频率统计（lowHitsPct）' }
 foreach ($jk in 'fps_1pct_low_pct', 'low_hits_pct') {
     if ($engPs -notmatch $jk) { Bad "JSON 契约缺 $jk" }
 }
-foreach ($vk in 'verdict.low.smooth', 'verdict.low.occasional', 'verdict.low.frequent') {
+# 2.0.6：旧的「落回 1% Low 附近」判定已从引擎移除（评审 §3），改断言新的两句事实陈述
+foreach ($vk in 'verdict.low.ratio', 'verdict.ft.maxframe') {
     if ($engPs -notmatch [regex]::Escape("'" + $vk + "'")) { Bad "引擎未发出 $vk" }
     $n = ([regex]::Matches($i18nText, [regex]::Escape("'" + $vk + "':"))).Count
     if ($n -lt 3) { Bad "i18n 中 $vk 只有 $n 种语言（需 3）" }
 }
+foreach ($vk in 'verdict.low.smooth', 'verdict.low.occasional', 'verdict.low.frequent') {
+    if ($engPs -match [regex]::Escape("'" + $vk + "'")) { Bad "引擎仍在使用旧的 $vk（会误导用户）" }
+}
+# 曲线纵轴必须容得下最慢一帧，不能出现「0.1% Low 很低但曲线看着平」
+if ($engPs -notmatch 'frametime_max_ms') { Bad '引擎缺 frametime_max_ms（纵轴/卡顿说明要用）' }
 # 旧判定键保留只为旧报告查表，引擎不能再发出（否则新报告会查不到文案）
 if ($engPs -match 'verdict\.low\.(unstable|stutter|stable)') { Bad '引擎仍发出旧的 1% Low 判定键' }
 # 判定说明是「落回 1% Low **附近**」：附近 10%（$lowNearPct）纳入统计

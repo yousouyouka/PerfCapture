@@ -4,7 +4,8 @@ function New-DefaultConfig {
     [pscustomobject]@{
         theme = 'system'; seconds = 120; minimize = $true; sound = $true; skip = ''
         # 采集预设：standard 是默认档；warmup = 预热丢弃秒数（引擎 -WarmupSec）
-        preset = 'standard'; warmup = 3
+        # customBase = 自定义是从哪一档改出来的（界面显示「自定义 · 基于标准」用）
+        preset = 'standard'; customBase = 'standard'; warmup = 3
         language = 'zh-CN'
         lastPid = 0; windowW = 1180; windowH = 780
         # 检查更新：auto 关掉后不再自动查；skippedVersion 是用户点过「跳过此版本」的版本号
@@ -46,6 +47,10 @@ function Set-ConfigValue {
             # 只接受清单里存在的档位；空串 = 自定义
             if ($Value -is [string] -and ($Value -eq '' -or $Value -in @('quick', 'standard', 'pro'))) { $script:Cfg.preset = [string]$Value }
             else { Write-AppLog ("配置 preset=$Value 非法，已忽略") 'WARN' }
+        }
+        'customBase' {
+            # 自定义是从哪一档改出来的：只接受三档 id，非法值退回 standard
+            if ($Value -is [string] -and ($Value -in @('quick', 'standard', 'pro'))) { $script:Cfg.customBase = [string]$Value }
         }
         'warmup'   {
             $n = ConvertTo-ConfigInt $Value

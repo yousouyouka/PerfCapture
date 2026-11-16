@@ -40,6 +40,9 @@ function Handle-UiMessage($msg) {
                 $init = @{ type = 'init'; settings = $script:Cfg; procs = $procs }
                 $opts = Get-CaptureOptions
                 if ($opts) { $init.options = $opts }
+                # 指标字典（含「暂不可用」与原因）随 init 下发：报告与详细说明都据此渲染
+                $mdoc = Get-MetricsDoc
+                if ($mdoc) { $init.metrics = $mdoc }
                 Send-ToUi $init
                 # 上次退出时浮窗是开着的就恢复（位置/透明度都从配置读）
                 if (Get-Command Restore-OverlayIfNeeded -ErrorAction SilentlyContinue) { Restore-OverlayIfNeeded }
@@ -66,7 +69,7 @@ function Handle-UiMessage($msg) {
             }
             'saveSettings' {
                 if ($msg.settings) {
-                    foreach ($k in 'theme', 'language', 'seconds', 'minimize', 'sound', 'skip', 'preset', 'warmup') {
+                    foreach ($k in 'theme', 'language', 'seconds', 'minimize', 'sound', 'skip', 'preset', 'customBase', 'warmup') {
                         Set-ConfigValue $k $msg.settings.$k
                     }
                     Save-Config

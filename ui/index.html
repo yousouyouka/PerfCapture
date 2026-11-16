@@ -66,7 +66,7 @@
           </svg>
           <span class="nav-label" data-i18n="nav.settings">设置</span>
         </button>
-        <div class="sidebar-version" id="sidebarVersion">v1.5.11</div>
+        <div class="sidebar-version" id="sidebarVersion">v2.0.10</div>
       </div>
     </nav>
   </aside>
@@ -132,7 +132,9 @@
                   <button type="button" data-preset="standard" data-i18n="capture.preset.standard">标准</button>
                   <button type="button" data-preset="pro" data-i18n="capture.preset.pro">专业</button>
                 </div>
-                <span class="hint hint-right" id="presetHint"></span>
+                <!-- 当前配置状态紧跟在三个档右侧：预设名 / 「自定义 · 基于标准」 -->
+                <span class="preset-state" id="presetHint"></span>
+                <button type="button" class="preset-reset" id="btnPresetReset" hidden></button>
               </div>
               <div class="collect-grid"></div>
             </div></div>
@@ -227,7 +229,7 @@
           <div class="setting-block">
             <div class="setting-label">
               <strong>PerfCapture</strong>
-              <small>v1.5.11 · PresentMon ETW · 零注入</small>
+              <small>v2.0.10 · PresentMon ETW · 零注入</small>
             </div>
           </div>
 

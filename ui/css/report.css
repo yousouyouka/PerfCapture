@@ -99,7 +99,109 @@
 .rp-rows .row .k { color: var(--muted); }
 .rp-rows .row .v { color: var(--text-strong); font-variant-numeric: tabular-nums; text-align: right; }
 
+/* ── 指标字典驱动的板块：na 行（暂不可用）与 off 行（用户关掉）分开着色 ── */
+.rp-module .row.is-na { background: transparent; }
+.rp-module .row.is-na .k { color: var(--muted); opacity: 0.85; display: flex; align-items: center; gap: 0.4rem; }
+.rp-module .row.is-na .v.na { color: var(--muted); opacity: 0.7; }
+.rp-na-badge {
+  display: inline-block;
+  padding: 0.02rem 0.34rem;
+  border: 1px solid color-mix(in srgb, var(--warn) 55%, transparent);
+  border-radius: 999px;
+  font-size: 0.64rem;
+  line-height: 1.5;
+  color: var(--warn);
+  white-space: nowrap;
+}
+.rp-module .row.is-off { background: transparent; }
+.rp-module .row.is-off .k { color: var(--muted); opacity: 0.85; display: flex; align-items: center; gap: 0.4rem; }
+.rp-module .row.is-off .v.na { color: var(--muted); opacity: 0.7; }
+/* 「未采集」是用户的选择，不是能力限制：用中性灰，别和黄色「暂不可用」混在一起 */
+.rp-off-badge {
+  display: inline-block;
+  padding: 0.02rem 0.34rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  font-size: 0.64rem;
+  line-height: 1.5;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.rp-na-why {
+  padding: 0 0.65rem 0.42rem;
+  font-size: 0.68rem;
+  line-height: 1.5;
+  color: var(--muted);
+  opacity: 0.78;
+  background: var(--tile);
+  border-bottom: 1px solid var(--line);
+  /* 只出短句，完整原因在 title 里：光标提示「可悬停看细节」 */
+  cursor: help;
+}
+.rp-rows .rp-na-why:last-child { border-bottom: none; }
 
+
+.rp-note {
+  margin: 0.5rem 0 0;
+  font-size: 0.72rem;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+/* ── B3：01–07 章节标题 / 一句话总评 / 诊断块 ── */
+.rp-s {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin: 1.35rem 0 0.6rem;
+  padding-bottom: 0.34rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.86rem;
+  font-weight: 400;
+  color: var(--text-strong);
+}
+.rp-s .n {
+  font-size: 0.72rem;
+  color: var(--accent);
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+}
+.rp-summary {
+  margin: 0.7rem 0 0.2rem;
+  padding: 0.5rem 0.7rem;
+  border-radius: 9px;
+  border-left: 3px solid var(--good);
+  background: var(--tile);
+  font-size: 0.8rem;
+  color: var(--text-strong);
+}
+.rp-summary.warn { border-left-color: var(--warn); }
+.rp-diag {
+  margin: 0 0 0.2rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--good);
+  background: var(--tile);
+}
+.rp-diag.warn { border-left-color: var(--warn); }
+.rp-diag .h { font-size: 0.86rem; color: var(--text-strong); }
+.rp-diag .w { margin-top: 0.26rem; font-size: 0.74rem; line-height: 1.6; color: var(--muted); }
+/* 诊断补充说明（note）：比判定句更轻，靠左侧细条表明是「解释」而非「结论」 */
+.rp-diag .w.note {
+  margin-top: 0.34rem;
+  padding: 0.28rem 0 0.28rem 0.5rem;
+  border-left: 2px solid var(--line);
+  font-size: 0.72rem;
+  line-height: 1.62;
+  color: var(--muted);
+  opacity: 0.92;
+}
+.rp-diag.warn .w.note { border-left-color: color-mix(in srgb, var(--warn) 50%, transparent); }
+.rp-diag.good .w.note { border-left-color: color-mix(in srgb, var(--good) 50%, transparent); }
+
+.rp-chart-title .u { margin-left: 0.35rem; font-style: normal; font-size: 0.66rem; color: var(--faint); }
+.rp-rows .row.is-finding .k { color: var(--warn); }
 /* ── 图表块：标题 + 画布 + 说明，两张图平铺 ── */
 .rp-chart-block { margin-bottom: 0.9rem; }
 .rp-chart-block:last-child { margin-bottom: 0; }

@@ -31,14 +31,16 @@ function handleMessage(msg) {
       /* 顺序不能反：先按 capture-options.json 渲染出勾选框，再套用配置里保存的 skip。
          反过来的话，新增或改名的采集项会拿到错误状态。 */
       const cap = msg.options || null;
+      /* 指标字典（含「暂不可用」与原因）：报告与详细说明都从这里取，缺了也能跑 */
+      if (msg.metrics) window.PerfMetricsDoc = msg.metrics;
       const note = $('.card-note');
       if (cap && cap.hint && note) note.dataset.i18n = cap.hint;
-      renderCaptureOptions(cap ? cap.options : null, cap ? cap.presets : null);
+      renderCaptureOptions(cap ? cap.options : null, cap ? cap.presets : null, cap ? cap.groups : null);
       if (typeof s.skip === 'string') {
         const skip = expandSkip(s.skip);   // 旧配置的 gpu / mem 会展开成拆后的四个
-        $$('.collect-grid input').forEach(el => { el.checked = !skip.includes(el.dataset.skip); });
+        $$('.collect-grid input').forEach(el => { if (!el.disabled) el.checked = !skip.includes(el.dataset.skip); });
       }
-      restorePresetState(s.preset || '', Number(s.warmup));
+      restorePresetState(s.preset || '', Number(s.warmup), s.customBase || 'standard');
       applyTheme(s.theme || 'system');
       if (s.language) { state.language = s.language; setLanguage(s.language); }
       if (window.PerfUpdate) window.PerfUpdate.init(s.updateCheck);

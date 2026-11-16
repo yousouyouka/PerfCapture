@@ -93,6 +93,7 @@ function saveSettings() {
       sound: $('#chkSound').checked,
       skip,
       preset: (typeof activePreset !== 'undefined' && activePreset) ? activePreset : '',
+      customBase: (typeof currentCustomBase === 'function') ? currentCustomBase() : 'standard',
       warmup: (typeof currentWarmup === 'function') ? currentWarmup() : 0,
       theme: state.themeMode,
       language: state.language || LANG,

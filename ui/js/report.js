@@ -27,13 +27,16 @@ function renderReport(r) {
   let html = `<div class="rp-title">${escapeHtml(t('report.heading', '性能报告'))}</div>`;
   html += `<div class="rp-meta">${escapeHtml(meta.join('  ·  '))}</div>`;
 
+  /* ── 01 概览：卡片 + 一句话总评 + 评估 ---- */
+  html += rpSec('01', 'report.s1', '概览');
   html += '<div class="rp-grid">';
   html += tile(t('metric.avgFps', '平均帧率'), r.avg_fps, 'FPS', 1);
   // 1% Low 右侧直接显示它占平均帧率的百分比（同字号同颜色）；判定改由引擎按"落回频率"给
   html += tile(t('metric.p1low', '1% Low'), r.fps_1pct_low, 'FPS', 1,
     r.fps_1pct_low_pct != null ? r.fps_1pct_low_pct + '%' : '');
   if (r.display_latency_avg_ms != null) html += tile(t('metric.displayLatency', '上屏延迟'), r.display_latency_avg_ms, 'ms', 1);
-  if (r.pc_latency_avg_ms != null) html += tile(t('metric.pcLatency', 'PC 延迟'), r.pc_latency_avg_ms, 'ms', 1);
+  // PC 延迟 = 平均帧时间 + 上屏延迟（估算值，不是独立测量）→ 放回概览，名字里就带「估算」
+  if (r.pc_latency_avg_ms != null) html += tile(t('metric.pcLatency', 'PC 延迟（估算）'), r.pc_latency_avg_ms, 'ms', 1);
   if (r.avg_frametime_ms != null) html += tile(t('metric.avgFrametime', '平均帧时间'), r.avg_frametime_ms, 'ms', 2);
   if (r.frametime_p95_ms != null) html += tile(t('metric.p95Frametime', 'P95 帧时间'), r.frametime_p95_ms, 'ms', 2);
   if (r.gpu_util_avg_pct != null) html += tile(t('metric.gpuUtil', 'GPU 占用'), r.gpu_util_avg_pct, '%', 0);
@@ -41,6 +44,13 @@ function renderReport(r) {
   if (r.vram_max_mb != null) html += tile(t('metric.vramPeak', '显存峰值'), r.vram_max_mb, 'MB', 0);
   if (r.ram_max_mb != null) html += tile(t('metric.ramPeak', '内存峰值'), r.ram_max_mb, 'MB', 0);
   html += '</div>';
+
+  /* 一句话总评：只用引擎给的诊断结论，没有诊断就不写（不硬猜） */
+  const sum = rpSummary(r);
+  if (sum) html += `<div class="rp-summary ${sum.level}">${escapeHtml(sum.text)}</div>`;
+
+  /* 口径说明：帧率含生成帧 —— 放在概览里，避免高 FPS 被误读成原生渲染 */
+  html += `<div class="rp-note">${escapeHtml(t('report.fpsNote', ''))}</div>`;
 
   if (r.verdicts && r.verdicts.length) {
     html += `<div class="rp-section">${escapeHtml(t('report.section.eval', '评估'))}</div>`;
@@ -50,26 +60,34 @@ function renderReport(r) {
     }
   }
 
-  // 平铺两张图：帧率用「每桶平均帧时间」换算，每帧毫秒用「每桶最慢帧」
-  // 旧报告没有 avg 字段，只画每帧毫秒图（避免把"最差帧率"当成帧率曲线误导人）
-  if (r.chart && r.chart.ms && r.chart.ms.length > 2) {
-    const hasAvg = r.chart.avg && r.chart.avg.length > 2;
-
+  /* ── 02 性能曲线：帧率/帧时间 + 负载 + 温度/功耗 ---- */
+  const chart = r.chart, trend = r.trend;
+  const hasMs = !!(chart && Array.isArray(chart.ms) && chart.ms.length > 2);
+  const hasAvg = !!(hasMs && Array.isArray(chart.avg) && chart.avg.length > 2);
+  const trendBlocks = [];
+  if (trend) {
+    if (Array.isArray(trend.cpu)) trendBlocks.push(['chartCpu', 'report.chart.titleCpu', 'CPU 负载（%）', trend.cpu, 'pct', 100, '%']);
+    if (Array.isArray(trend.gpu)) trendBlocks.push(['chartGpu', 'report.chart.titleGpu', 'GPU 负载（%）', trend.gpu, 'pct', 100, '%']);
+    if (Array.isArray(trend.temp)) trendBlocks.push(['chartTemp', 'report.chart.titleTemp', 'GPU 温度（°C）', trend.temp, 'abs', null, '°C']);
+    if (Array.isArray(trend.power)) trendBlocks.push(['chartPower', 'report.chart.titlePower', 'GPU 功耗（W）', trend.power, 'abs', null, 'W']);
+  }
+  const live = trendBlocks.filter((b) => b[3].filter((v) => v != null).length > 1);
+  if (hasMs || live.length) {
+    html += rpSec('02', 'report.s2', '性能曲线');
     if (hasAvg) {
-      html += `<div class="rp-chart-block">` +
-              `<div class="rp-chart-title">${escapeHtml(t('report.chart.titleFps', '帧率（FPS）'))}</div>` +
-              `<div class="rp-chart"><canvas id="chartFps"></canvas>` +
-              `<div class="cap">${escapeHtml(chartCaption(r.chart, 'fps'))}</div></div></div>`;
+      html += chartBlock('chartFps', t('report.chart.titleFps', '帧率（FPS）'), chartCaption(chart, 'fps'));
     }
-
-    html += `<div class="rp-chart-block">` +
-            `<div class="rp-chart-title">${escapeHtml(t('report.chart.titleMs', '每帧毫秒（ms）'))}</div>` +
-            `<div class="rp-chart"><canvas id="chartMs"></canvas>` +
-            `<div class="cap">${escapeHtml(chartCaption(r.chart, 'ms'))}</div></div></div>`;
-
-    if (!hasAvg) {
-      html += `<div class="rp-chart-note">${escapeHtml(t('report.chart.noAvg', '这份报告由旧版本采集，缺少平均帧时间曲线，只显示每帧毫秒。'))}</div>`;
+    if (hasMs) {
+      html += chartBlock('chartMs', t('report.chart.titleMs', '每帧毫秒（ms）'), chartCaption(chart, 'ms'));
+      if (!hasAvg) {
+        html += `<div class="rp-chart-note">${escapeHtml(t('report.chart.noAvg', '这份报告由旧版本采集，缺少平均帧时间曲线，只显示每帧毫秒。'))}</div>`;
+      }
     }
+    const capTrend = fillParams(t('report.chart.capTrend',
+      '按时间等分 {n} 段，段内取平均；某段没有样本就断开（不补值、不插值）'), { n: (trend && trend.bins) || '—' });
+    live.forEach(([id, key, dflt, , , , unit]) => {
+      html += chartBlock(id, t(key, dflt), capTrend, unit);
+    });
   }
 
   const rows = [];
@@ -81,7 +99,13 @@ function renderReport(r) {
     rows.push([t('metric.longRow', '长帧 >2× / >4× 中位 · >50 / >100 ms'),
       `${lf.over2x} / ${lf.over4x} · ${lf.over50} / ${lf.over100} 帧（${lf.pct_over2x} %）`]);
   }
-  if (r.fps_1pct_low_time != null) rows.push([t('metric.lowSecRow', '1% Low（按秒口径）'), `${r.fps_1pct_low_time} FPS（占平均 ${r.fps_1pct_low_time_pct} %）`]);
+  // 逐秒口径不再叫「1% Low」：它只是参考序列，不参与判定，也不与上面的 1% Low 并列
+  if (r.fps_01pct_low != null) rows.push([t('metric.p01low', '0.1% 低帧率'), `${r.fps_01pct_low} FPS`]);
+  if (r.stutter && r.stutter.count != null) {
+    rows.push([t('metric.stutterRow', '卡顿（>50ms 合并计段）'),
+      `${r.stutter.count} 段 / 累计 ${r.stutter.total_ms} ms / 最长 ${r.stutter.worst_ms} ms / 严重 ${r.stutter.severe} 帧`]);
+  }
+  if (r.fps_1pct_low_time != null) rows.push([t('metric.lowPerSec', '逐秒最低帧率（最差 1% 的秒）'), `${r.fps_1pct_low_time} FPS（占平均 ${r.fps_1pct_low_time_pct} %）`]);
   if (r.displayed_fps != null) rows.push([t('metric.displayedRow', '上屏节奏 / 重复帧'), `${r.displayed_fps} FPS / ${r.repeat_frames} 帧（${r.repeat_pct} %）`]);
   if (r.sync_interval != null || r.present_flags != null) {
     rows.push([t('metric.syncRow', '同步间隔 / 呈现标志'),
@@ -115,19 +139,351 @@ function renderReport(r) {
     }
   }
 
-  if (rows.length) {
-    html += `<div class="rp-section">${escapeHtml(t('report.section.details', '详细数据'))}</div><div class="rp-rows">`;
+  /* ---- 03–07：按指标字典分板块（每块只出一次，不重复） ---- */
+  const doc = window.PerfMetricsDoc;
+  const haveDict = !!(doc && Array.isArray(doc.modules) && Array.isArray(doc.metrics));
+
+  const sec03 = haveDict ? renderMetricModules(r, ['cpu', 'gpu']) : '';
+  if (sec03) html += rpSec('03', 'report.s3', 'CPU / GPU 状态') + sec03;
+
+  const sec04 = haveDict ? renderMetricModules(r, ['memory']) : '';
+  if (sec04) html += rpSec('04', 'report.s4', '内存资源') + sec04;
+
+  const diagHtml = renderDiagnosis(r);
+  const sec05 = haveDict ? renderMetricModules(r, ['bottleneck']) : '';
+  if (diagHtml || sec05) html += rpSec('05', 'report.s5', '瓶颈诊断') + diagHtml + sec05;
+
+  const sec06 = haveDict ? renderMetricModules(r, ['perf', 'thermal']) : '';
+  if (sec06) html += rpSec('06', 'report.s6', '完整明细') + sec06;
+  if (!haveDict && rows.length) {
+    /* 没有字典（上一代的报告 / 字典文件没打包进去）时，06 退回原来的平铺明细 */
+    html += rpSec('06', 'report.s6', '完整明细');
+    html += `<div class="rp-rows">`;
     html += rows.map(([k, v]) => `<div class="row"><span class="k">${escapeHtml(k)}</span><span class="v">${escapeHtml(v)}</span></div>`).join('');
     html += '</div>';
   }
 
+  const sec07 = haveDict ? renderMetricModules(r, ['environment']) : '';
+  if (sec07) html += rpSec('07', 'report.s7', '测试环境') + sec07;
+
+  /* 帧生成：设置状态和运行时检测是两件事，这里明说，避免「开着又未加载」的矛盾观感 */
+  if (featureRaw(r, 'feature.dlss.framegen') != null || featureRaw(r, 'feature.framegenMode') != null) {
+    html += `<div class="rp-note">${escapeHtml(t('report.fgNote', ''))}</div>`;
+  }
+
   box.innerHTML = html;
 
-  if (r.chart && r.chart.ms && r.chart.ms.length > 2) {
-    const meta = chartMetaFrom(r);           // 悬浮提示算时间轴要用
-    if (r.chart.avg && r.chart.avg.length > 2) drawChart('chartFps', r.chart.avg, 'fps', null, meta);
-    drawChart('chartMs', r.chart.ms, 'ms', r.chart.limit, meta);
+  /* 图表要在 DOM 就位之后再画 */
+  const cm = chartMetaFrom(r);           // 悬浮提示算时间轴要用
+  if (hasAvg) drawChart('chartFps', chart.avg, 'fps', null, cm);
+  if (hasMs) drawChart('chartMs', chart.ms, 'ms', chart.limit, cm);
+  /* 趋势图也要能悬浮：时间轴按「第几段 / 总段数 × 采集秒数」换算 */
+  const trendMeta = { trend: true, bins: Number(trend && trend.bins) || 0, secs: Number(r.captured_seconds) || 0 };
+  live.forEach(([id, , , series, mode, lim, unit]) => {
+    drawChart(id, series, mode, lim, trendMeta, unit);
+  });
+}
+/* ─────────── B3：01–07 章节骨架用的小工具 ─────────── */
+/** 章节标题：编号 + 名称（名称走 i18n，缺键回退中文） */
+function rpSec(num, key, dflt) {
+  return `<div class="rp-s"><span class="n">${escapeHtml(num)}</span>${escapeHtml(t(key, dflt))}</div>`;
+}
+/** 一张图的壳子：标题 + 画布 + 说明（结构沿用旧报告的 rp-chart-block） */
+function chartBlock(id, title, cap, unit) {
+  // 标题里已经带单位（如「GPU 温度（°C）」），不再重复挂一个单位标签
+  return `<div class="rp-chart-block">` +
+         `<div class="rp-chart-title">${escapeHtml(title)}</div>` +
+         `<div class="rp-chart"><canvas id="${id}"></canvas>` +
+         `<div class="cap">${escapeHtml(cap)}</div></div></div>`;
+}
+/** 一句话总评：只用引擎给的诊断结论，没有诊断就不写（不硬猜） */
+function rpSummary(r) {
+  const d = r.diagnosis;
+  if (!d || !d.primary) return null;
+  const text = t('diag.primary.' + d.primary, '');
+  if (!text) return null;
+  return { level: d.level === 'warn' ? 'warn' : 'good', text };
+}
+/** 诊断项的中文名：优先按指标 id 从字典取，字典缺了就用引擎给的 name */
+function diagLabel(item) {
+  const doc = window.PerfMetricsDoc;
+  const id = item && item.metric;
+  if (doc && Array.isArray(doc.metrics)) {
+    const m = doc.metrics.find((x) => x && x.id === id);
+    if (m) return docLabel(m);
   }
+  return (item && item.name) || id || '';
+}
+/** 05 瓶颈诊断：结论 + 依据指标 + 同时值得注意的项（全部来自引擎实测） */
+function renderDiagnosis(r) {
+  const d = r.diagnosis;
+  if (!d || !d.primary) return '';
+  const level = d.level === 'warn' ? 'warn' : 'good';
+  const title = t('diag.primary.' + d.primary, d.primary);
+  const why = t('diag.why.' + d.primary, '');
+  // 补充说明：解释「整机 CPU 不忙怎么会是瓶颈」这类反直觉数字，模板与参数都由引擎给
+  const noteKey = d.note_key ? String(d.note_key) : '';
+  const diagNote = noteKey ? fillParams(t('diag.note.' + noteKey, ''), d.note_params || {}) : '';
+  let h = `<div class="rp-diag ${level}"><div class="h">${escapeHtml(title)}</div>` +
+          (why ? `<div class="w">${escapeHtml(why)}</div>` : '') +
+          (diagNote ? `<div class="w note">${escapeHtml(diagNote)}</div>` : '') + '</div>';
+  const ev = Array.isArray(d.evidence) ? d.evidence : [];
+  if (ev.length) {
+    h += `<div class="rp-section">${escapeHtml(t('diag.evidence', '依据指标（全部来自本次采集）'))}</div>` +
+         '<div class="rp-rows rp-diagrows">' +
+         ev.map((e) => `<div class="row" data-metric="${escapeHtml(String((e && e.metric) || ''))}">` +
+           `<span class="k">${escapeHtml(diagLabel(e))}</span>` +
+           `<span class="v">${escapeHtml(String((e && e.value) || ''))}</span></div>`).join('') +
+         '</div>';
+  }
+  const fd = Array.isArray(d.findings) ? d.findings : [];
+  if (fd.length) {
+    h += `<div class="rp-section">${escapeHtml(t('diag.findings', '同时值得注意'))}</div>` +
+         '<div class="rp-rows rp-diagrows">' +
+         fd.map((f) => `<div class="row is-finding" data-finding="${escapeHtml(String((f && f.id) || ''))}">` +
+           `<span class="k">${escapeHtml(t('diag.finding.' + ((f && f.id) || ''), (f && f.name) || ''))}</span>` +
+           `<span class="v">${escapeHtml(String((f && f.value) || ''))}</span></div>`).join('') +
+         '</div>';
+  }
+  return h;
+}
+/* ─────────── B2：指标字典驱动的 7 个板块 ───────────
+   doc = window.PerfMetricsDoc（宿主随 init 下发，源自 capture-metrics.json）。
+   status=na 的指标显示「—」+「暂不可用」徽标，并在下一行写出原因：
+   规则是采不到就说采不到，绝不用 0 或估算值冒充。 */
+function docLang() {
+  const l = (typeof LANG === 'string' && LANG) || 'zh-CN';
+  if (l.indexOf('en') === 0) return { name: 'nameEn', reason: 'en' };
+  if (l.indexOf('ja') === 0) return { name: 'nameJa', reason: 'ja' };
+  return { name: 'nameZh', reason: 'zh' };
+}
+function docLabel(o) {
+  const lg = docLang();
+  return o[lg.name] || o.nameZh || o.id || '';
+}
+function docReason(doc, key) {
+  const lg = docLang();
+  const o = doc && doc.reasons ? doc.reasons[key] : null;
+  if (!o) return '';
+  return o[lg.reason] || o.zh || '';
+}
+function numText(v, unit, digits) {
+  if (v == null || v === '') return null;
+  const num = Number(v);
+  if (!isFinite(num)) return null;
+  return num.toFixed(digits == null ? 1 : digits) + (unit ? ' ' + unit : '');
+}
+/** 取引擎给的原始特征值（'value.loaded' / 'value.notLoaded' …），不做翻译 */
+function featureRaw(r, key) {
+  const f = (r.features || []).find((x) => x && x[0] === key);
+  return f ? String(f[1]) : null;
+}
+/** 运行时检测状态：已检测到 / 未检测到 —— 与「游戏内设置」是两回事，别混着写 */
+function runtimeState(r, key) {
+  const raw = featureRaw(r, key);
+  if (raw == null) return null;
+  if (raw === 'value.loaded') return t('value.detected', '已检测到');
+  if (raw === 'value.notLoaded') return t('value.notDetected', '未检测到');
+  if (raw === 'value.notEnabled') return t('value.notEnabled', '未检测到启用');
+  if (raw === 'value.notSelected') return t('value.notSelected', '未选择');
+  return trKey(raw);
+}
+/** 当前选中的超分模式（引擎按游戏配置判定，四种互斥）：'dlss'|'fsr'|'xess'|'tsr'|'' */
+function upscalerMode(r) {
+  const f = (r.features || []).find((x) => x && x[0] === 'feature.upscalerActive');
+  const v = f ? String(f[1]) : '';
+  const k = v.toLowerCase();
+  return (k === 'dlss' || k === 'fsr' || k === 'xess' || k === 'tsr') ? k : '';
+}
+/** 只显示「当前选中模式」那一行：其余模式不占位，避免又变成「三个都勾上」的错觉 */
+function modeRow(r, mode) {
+  if (upscalerMode(r) !== mode) return null;
+  return featureText(r, 'feature.upscale.' + mode);
+}
+function featureText(r, key) {
+  const f = (r.features || []).find((x) => x && x[0] === key);
+  return f ? trKey(f[1]) : null;
+}
+/** 游戏内档位：直接给原始编码（不猜含义），读不到就说「无法确认档位」而不是「暂不可用」 */
+function presetCode(r, key) {
+  const raw = featureRaw(r, key);
+  if (raw != null && /^\d+$/.test(String(raw))) {
+    return fillParams(t('report.presetCode', '编码 {code}（含义未确认）'), { code: raw });
+  }
+  return t('report.presetUnknown', '无法确认档位');
+}
+/** nvidia-smi 这一路是否真的采到了（否则不能说「未触发」，只能说没有数据） */
+function nvsmiOk(r) {
+  return r.gpu_temp_max_c != null || r.gpu_clock_avg_mhz != null ||
+         r.gpu_power_avg_w != null || r.gpu_fan_avg_pct != null;
+}
+/** 降频原因按「状态」读：采样里出现过就报占比，没出现明确说未触发 */
+function throttleState(r, key) {
+  if (!nvsmiOk(r)) return null;
+  const v = r.throttle ? r.throttle[key] : null;
+  if (v != null && Number(v) > 0) {
+    return fillParams(t('report.throttleOn', '触发 · 采样中 {p}% 时间'), { p: Number(v) });
+  }
+  return t('report.throttleOff', '未触发');
+}
+const METRIC_TEXT = {
+  'perf.avgFps': (r) => numText(r.avg_fps, 'FPS', 1),
+  'perf.p1Low': (r) => {
+    const s = numText(r.fps_1pct_low, 'FPS', 1);
+    return s && r.fps_1pct_low_pct != null ? s + '（' + r.fps_1pct_low_pct + '%）' : s;
+  },
+  'perf.p01Low': (r) => numText(r.fps_01pct_low, 'FPS', 1),
+  'perf.minFps': (r) => numText(r.fps_min, 'FPS', 1),
+  'perf.maxFps': (r) => numText(r.max_fps, 'FPS', 1),
+  'perf.avgFt': (r) => numText(r.avg_frametime_ms, 'ms', 2),
+  'perf.p95Ft': (r) => numText(r.frametime_p95_ms, 'ms', 2),
+  'perf.p99Ft': (r) => numText(r.frametime_p99_ms, 'ms', 2),
+  'perf.stutterCount': (r) => (r.stutter ? r.stutter.count + ' 段' : null),
+  'perf.stutterDuration': (r) => (r.stutter ? numText(r.stutter.total_ms, 'ms', 1) : null),
+  'perf.stutterWorst': (r) => (r.stutter ? numText(r.stutter.worst_ms, 'ms', 1) : null),
+  'perf.displayLatency': (r) => numText(r.display_latency_avg_ms, 'ms', 2),
+  'perf.displayLatencyP95': (r) => numText(r.display_latency_p95_ms, 'ms', 2),
+  'perf.pcLatency': (r) => numText(r.pc_latency_avg_ms, 'ms', 2),
+  'perf.jitter': (r) => numText(r.frametime_jitter_pct, '%', 1),
+  'cpu.total': (r) => numText(r.cpu_util_avg_pct, '%', 1),
+  'cpu.process': (r) => numText(r.cpu_extra && r.cpu_extra.proc_cpu_avg_pct, '%', 1),
+  'cpu.coreMax': (r) => numText(r.cpu_max_core_peak_pct, '%', 1),
+  'cpu.clock': (r) => numText(r.cpu_clock_avg_mhz, 'MHz', 0),
+  'gpu.util': (r) => numText(r.gpu_util_avg_pct, '%', 0),
+  'gpu.temp': (r) => numText(r.gpu_temp_max_c, '°C', 0),
+  'gpu.clock': (r) => numText(r.gpu_clock_avg_mhz, 'MHz', 0),
+  'gpu.power': (r) => numText(r.gpu_power_avg_w, 'W', 1),
+  'gpu.vramUsed': (r) => numText(r.gpu_mem_total_avg_mb, 'MB', 0),
+  'gpu.memClock': (r) => numText(r.gpu_mem_clock_avg_mhz, 'MHz', 0),
+  'gpu.fan': (r) => numText(r.gpu_fan_avg_pct, '%', 0),
+  'gpu.throttle': (r) => {
+    if (!r.throttle) return null;
+    const ks = Object.keys(r.throttle);
+    if (!ks.length) return null;
+    return ks.map((k) => t('metric.throttle.' + k, k) + ' ' + r.throttle[k] + '%').join(' · ');
+  },
+  'mem.processRam': (r) => numText(r.ram_max_mb, 'MB', 0),
+  'mem.systemRam': (r) => numText(r.memory && r.memory.sys_ram_avg_pct, '%', 1),
+  'mem.processVram': (r) => numText(r.vram_max_mb, 'MB', 0),
+  'mem.systemVram': (r) => {
+    const used = r.gpu_mem_total_avg_mb, total = r.vram_total_mb;
+    if (used == null) return null;
+    if (total) return numText(used, 'MB', 0) + '（' + Math.round((used / total) * 100) + '%）';
+    return numText(used, 'MB', 0);
+  },
+  'mem.availableRam': (r) => numText(r.memory && r.memory.sys_ram_min_avail_mb, 'MB', 0),
+  'mem.commit': (r) => numText(r.memory && r.memory.sys_commit_max_mb, 'MB', 0),
+  'thermal.gpuPowerAvg': (r) => numText(r.gpu_power_avg_w, 'W', 1),
+  'thermal.gpuPowerPeak': (r) => numText(r.gpu_power_max_w, 'W', 1),
+  'thermal.gpuThermalLimit': (r) => throttleState(r, 'sw_thermal'),
+  'thermal.gpuPowerLimit': (r) => throttleState(r, 'sw_power_cap'),
+  'thermal.gpuThermalThrottle': (r) => throttleState(r, 'hw_thermal'),
+  'bottleneck.gpuBusy': (r) => numText(r.bottleneck && r.bottleneck.gpu_busy_pct, '%', 1),
+  'bottleneck.cpuFrameTime': (r) => numText(r.bottleneck && r.bottleneck.cpu_frame_ms, 'ms', 2),
+  'bottleneck.gpuRenderTime': (r) => numText(r.bottleneck && r.bottleneck.gpu_render_ms, 'ms', 2),
+  'bottleneck.gpuWait': (r) => numText(r.bottleneck && r.bottleneck.gpu_wait_ms, 'ms', 2),
+  'bottleneck.frameGen': (r) => runtimeState(r, 'feature.dlss.framegen'),
+  'env.cpuModel': (r) => (r.environment && r.environment.cpu_model) || null,
+  'env.gpuModel': (r) => (r.environment && r.environment.gpu_model) || null,
+  'env.ramType': (r) => (r.environment && r.environment.ram_type) || null,
+  'env.resolution': (r) => {
+    const res = r.resolution ? String(r.resolution).replace('x', '×') : null;
+    const wm = r.window_mode || null;
+    if (!res && !wm) return null;
+    return [res, wm].filter(Boolean).join(' / ');
+  },
+  /* 游戏内档位：直接给原始编码（不猜含义），读不到就说「无法确认档位」而不是「暂不可用」 */
+  'env.upscalerPreset': (r) => presetCode(r, 'feature.upscalerLevel'),
+  'env.dlssPreset': (r) => presetCode(r, 'feature.dlssMode'),
+  'env.fgPreset': (r) => presetCode(r, 'feature.framegenModeLevel'),
+  'env.foreground': (r) => numText(r.foreground_pct, '%', 0),
+  'env.presentApi': (r) => (r.environment && r.environment.present_api) || r.api || null,
+  'env.presentMode': (r) => (r.environment && r.environment.present_mode) || r.present_mode || null,
+  'env.upscaler': (r) => {
+    // 模块枚举失败（反作弊挡住）且没读到配置 → 只说这次没拿到，不硬猜
+    if (featureText(r, 'feature.upscalers') != null && !upscalerMode(r)) return null;
+    // 引擎按游戏配置判定「当前选中的是哪一种」——四种模式互斥，不是「加载了哪些库」
+    const code = featureRaw(r, 'feature.upscalerCode') || featureRaw(r, 'feature.upscalerLevel');
+    const mode = upscalerMode(r);
+    const name = mode === 'dlss' ? 'DLSS' : mode === 'fsr' ? 'FSR' : mode === 'xess' ? 'XeSS' : mode === 'tsr' ? 'TSR' : '';
+    if (name) return code ? `${name}（编码 ${code}）` : name;
+    if (code) return fillParams(t('report.upscalerUnknown', '无法确认档位（编码 {code}）'), { code });
+    return null;
+  },
+  /* 以下四种模式行：只有「当前选中」的那一行才出现。
+     以前不看模式、只看 dll 是否加载，结果 DLSS / FSR / XeSS 全部显示已加载 —— 那是错的。 */
+  'env.dlss': (r) => modeRow(r, 'dlss'),
+  'env.dlssFg': (r) => (upscalerMode(r) === 'dlss' ? runtimeState(r, 'feature.dlss.framegen') : null),
+  'env.dlssRayRecon': (r) => (upscalerMode(r) === 'dlss' ? featureText(r, 'feature.dlss.rayReconstruction') : null),
+  'env.fsr': (r) => modeRow(r, 'fsr'),
+  'env.xess': (r) => modeRow(r, 'xess'),
+  'env.reflex': (r) => {
+    // 引擎给的是游戏配置里的原始编码；本版不确定编码含义 → 报「已启用（编码 X，含义未确认）」，不裸给数字
+    const raw = featureRaw(r, 'feature.reflex');
+    if (raw == null) return null;
+    if (/^\d+$/.test(raw)) {
+      if (raw === '0') return t('value.off', '关');
+      return fillParams(t('value.reflexSet', '已启用（编码 {code}，含义未确认）'), { code: raw });
+    }
+    return trKey(raw);
+  },
+  'env.frameGenInGame': (r) => featureText(r, 'feature.framegenMode')
+};
+
+/** 这个指标是不是「用户把开关关掉了」：opt 里列出的开关**全部关闭**才算未采集；
+    任一开着就交给数据本身决定（可能采到，也可能运行时失败 → 走暂不可用/不显示）。 */
+function metricOff(r, x) {
+  const c = r && r.collected;
+  if (!c || !x || !x.opt) return false;
+  const opts = Array.isArray(x.opt) ? x.opt : [x.opt];
+  const keys = opts.filter(Boolean);
+  return keys.length > 0 && keys.every((k) => c[k] === false);
+}
+
+/** 按字典顺序渲染 7 个板块；字典缺失时返回 ''，交给调用方回退平铺明细 */
+function renderMetricModules(r, only) {
+  const doc = window.PerfMetricsDoc;
+  if (!doc || !Array.isArray(doc.modules) || !Array.isArray(doc.metrics)) return '';
+  // only：只渲染这些板块（03/04/05/06/07 各取自己那几块，同一指标不会出现两次）
+  const want = Array.isArray(only) && only.length ? new Set(only) : null;
+  let html = '';
+  doc.modules.forEach((m) => {
+    if (want && !want.has(m.id)) return;
+    const list = doc.metrics.filter((x) => x && x.module === m.id);
+    if (!list.length) return;
+    let body = '';
+    list.forEach((x) => {
+      const label = escapeHtml(docLabel(x));
+      /* 三态：未采集（用户关掉了开关）/ 暂不可用（采不到）/ 有值。
+         「未采集」必须和「暂不可用」分开——前者是用户的选择，后者是能力限制。 */
+      if (metricOff(r, x)) {
+        body += `<div class="row is-off" data-metric="${escapeHtml(x.id)}">` +
+                `<span class="k">${label}<span class="rp-off-badge">${escapeHtml(t('report.off', '未采集'))}</span></span>` +
+                `<span class="v na">—</span></div>`;
+        body += `<div class="rp-na-why">` + escapeHtml(t('report.offShort', '对应的采集项已关闭，本次没有采')) + '</div>';
+        return;
+      }
+      if (x.status === 'na') {
+        const why = docReason(doc, x.reason);
+        body += `<div class="row is-na" data-metric="${escapeHtml(x.id)}"` +
+                (why ? ` title="${escapeHtml(why)}"` : '') + `>` +
+                `<span class="k">${label}<span class="rp-na-badge">${escapeHtml(t('report.na', '暂不可用'))}</span></span>` +
+                `<span class="v na">—</span></div>`;
+        // 默认只出短句，底层原因放进 title 提示（普通玩家不需要每个字段旁边都写一遍实现细节）
+        body += `<div class="rp-na-why"` + (why ? ` title="${escapeHtml(why)}"` : '') + `>` +
+                escapeHtml(t('report.naShort', '当前采集方式无法可靠读取')) + '</div>';
+        return;
+      }
+      const fn = METRIC_TEXT[x.id];
+      const val = fn ? fn(r) : null;
+      if (val == null) return;   // 开关开着但没采到：不占位（na 才有原因可说）
+      body += `<div class="row" data-metric="${escapeHtml(x.id)}"><span class="k">${label}</span><span class="v">${escapeHtml(val)}</span></div>`;
+    });
+    if (!body) return;
+    html += `<div class="rp-section">${escapeHtml(docLabel(m))}</div>` +
+            `<div class="rp-rows rp-module" data-module="${escapeHtml(m.id)}">${body}</div>`;
+  });
+  return html;
 }
 
 /** 把上限抬到好读的整数（帧率图用） */
@@ -135,6 +491,18 @@ function niceCeil(v) {
   if (!isFinite(v) || v <= 0) return 60;
   const step = v > 400 ? 100 : v > 200 ? 50 : v > 100 ? 20 : v > 60 ? 10 : 5;
   return Math.ceil(v / step) * step;
+}
+
+/** 趋势图的纵轴：
+    · 百分比（cpu/gpu 负载）从 0 起 —— 百分比本身有绝对含义；
+    · 绝对值（温度/功耗）用数据窗口 —— 45→46 °C 的波动放在 0–60 轴上就是一条平线，
+      看着像「没画」。窗口上下界都标在图上，读者能看出量程，不会把平线读成大起伏。 */
+function trendAxis(finite, isPct) {
+  const mx = Math.max(...finite), mn = Math.min(...finite);
+  if (isPct) return { base: 0, limit: Math.min(100, Math.max(10, niceCeil(Math.max(mx * 1.25, mx + 5)))) };
+  const pad = Math.max((mx - mn) * 0.3, 0.5);
+  const base = Math.max(0, mn - pad);
+  return { base, limit: Math.max(base + 1, mx + pad) };
 }
 
 /** 图表下方说明：采样方式 + 纵轴上限（每帧毫秒图额外说明它不是延迟） */
@@ -157,8 +525,8 @@ function chartCaption(chart, mode) {
    鼠标移动时先把底图贴回来，再画十字线、标记点与提示框 —— 不用每次 mousemove 重绘整条曲线。 */
 const chartStore = new Map();      // canvasId -> { series, mode, limitHint, meta, base, geom, colors }
 
-function drawChart(canvasId, series, mode, limitHint, meta) {
-  chartStore.set(canvasId, { series, mode, limitHint, meta: meta || {} });
+function drawChart(canvasId, series, mode, limitHint, meta, unit) {
+  chartStore.set(canvasId, { series, mode, limitHint, meta: meta || {}, unit: unit || '' });
   renderChart(canvasId);
 }
 
@@ -202,18 +570,42 @@ function renderChart(id) {
   const dpr = (window.devicePixelRatio || 1) * exportBoost;
   cv.width = Math.max(1, Math.round(w * dpr));
   cv.height = Math.max(1, Math.round(h * dpr));
-
+  /* mode：fps（帧率，数据是每桶平均帧时间）/ ms（帧时间）/ pct（0–100 百分比）/ abs（带单位绝对值）。
+     序列里允许 null（该时间桶没有样本）—— 图上断开，不当成 0。 */
   const isFps = st.mode === 'fps';
-  const raw = st.series.map(Number);
+  const isFrame = isFps || st.mode === 'ms';        // 帧率/帧时间：有 60 FPS · 16.7 ms 基准线
+  const isTrend = st.mode === 'pct' || st.mode === 'abs';
+  // 负载/温度/功耗这类趋势图也吃悬浮（和帧率图一样会出十字线 + 数值），只是提示内容不同
+  const isHoverable = isFrame || isTrend;
+  const raw = st.series.map((x) => (x == null || x === '' ? null : Number(x)));
   // 帧率图传入的是「每桶平均帧时间」，换算 1000/ms 才是真实帧率水平；
   // 每帧毫秒图传入的是「每桶最慢帧」，用引擎给的统一上限
-  const vals = isFps ? raw.map((v) => (v > 0 ? 1000 / v : 0)) : raw;
-  const limit = isFps
-    ? niceCeil(Math.max(...vals) * 1.1)
-    : (Number(st.limitHint) || Math.max(...vals) || 16.7);
+  const vals = raw.map((v) => (v == null || !isFinite(v) ? null : (isFps ? (v > 0 ? 1000 / v : 0) : v)));
+  const finite = vals.filter((v) => v != null);
+  if (!finite.length) return;
+  /* 纵轴：帧率/帧时间用引擎给的统一上限（要能容下最慢一帧）；
+     负载/温度/功耗按数据取轴 —— 固定 0–100 会把 13% 的 CPU 曲线压成贴底一条线，
+     固定 0–60 会把 45→46 °C 压成一条平线，用户看到的就是「这张图没画」。 */
+  let axisBase = 0, limit;
+  if (isTrend) {
+    const ax = trendAxis(finite, st.mode === 'pct');
+    axisBase = ax.base; limit = ax.limit;
+  } else {
+    limit = st.limitHint != null ? Number(st.limitHint) : niceCeil(Math.max(...finite) * 1.1);
+  }
+  const axisSpan = Math.max(1e-6, limit - axisBase);
   const pad = 6;
   const plotW = w - pad * 2, plotH = h - pad * 2;
-  const pt = (i, v) => [pad + (plotW * i) / Math.max(1, vals.length - 1), pad + plotH * (1 - Math.min(v, limit) / limit)];
+  const pt = (i, v) => [pad + (plotW * i) / Math.max(1, vals.length - 1),
+    pad + plotH * (1 - (Math.min(v, limit) - axisBase) / axisSpan)];
+  // 连续段：null 把曲线切成若干段，每段单独画（单点段画一个圆点，免得看不见）
+  const runs = [];
+  let curRun = null;
+  vals.forEach((v, i) => {
+    if (v == null) { curRun = null; return; }
+    if (!curRun) { curRun = []; runs.push(curRun); }
+    curRun.push(i);
+  });
 
   const css = getComputedStyle(document.documentElement);
   const colors = {
@@ -246,52 +638,75 @@ function renderChart(id) {
     g.stroke();
   }
 
-  // 基准线：帧率模式 60 FPS，帧时间模式 16.7 ms（等价）
-  const refVal = isFps ? 60 : 16.7;
-  if (limit >= refVal) {
-    const y = pad + plotH * (1 - refVal / limit);
-    g.save();
-    g.strokeStyle = colors.good;
-    g.setLineDash([5, 5]);
-    g.globalAlpha = 0.7;
-    g.beginPath();
-    g.moveTo(pad, y);
-    g.lineTo(pad + plotW, y);
-    g.stroke();
-    g.restore();
+  // 基准线只对帧率/帧时间有意义（60 FPS 与 16.7 ms 等价）；百分比与绝对值图不画
+  if (isFrame) {
+    const refVal = isFps ? 60 : 16.7;
+    if (limit >= refVal) {
+      const y = pad + plotH * (1 - refVal / limit);
+      g.save();
+      g.strokeStyle = colors.good;
+      g.setLineDash([5, 5]);
+      g.globalAlpha = 0.7;
+      g.beginPath();
+      g.moveTo(pad, y);
+      g.lineTo(pad + plotW, y);
+      g.stroke();
+      g.restore();
+    }
   }
 
-  // 面积
-  g.beginPath();
-  vals.forEach((v, i) => { const [x, y] = pt(i, v); i ? g.lineTo(x, y) : g.moveTo(x, y); });
-  g.lineTo(pad + plotW, pad + plotH);
-  g.lineTo(pad, pad + plotH);
-  g.closePath();
+  // 面积：每段单独闭合到基线（null 处断开，不跨缺口连线）
   const grad = g.createLinearGradient(0, pad, 0, pad + plotH);
   grad.addColorStop(0, hexA(colors.accent, 0.30));
   grad.addColorStop(1, hexA(colors.accent, 0));
   g.fillStyle = grad;
-  g.fill();
+  runs.forEach((run) => {
+    if (run.length < 2) return;
+    g.beginPath();
+    run.forEach((i, k) => { const [x, y] = pt(i, vals[i]); k ? g.lineTo(x, y) : g.moveTo(x, y); });
+    const [xl] = pt(run[run.length - 1], 0), [xf] = pt(run[0], 0);
+    g.lineTo(xl, pad + plotH);
+    g.lineTo(xf, pad + plotH);
+    g.closePath();
+    g.fill();
+  });
 
   // 折线
-  g.beginPath();
   g.strokeStyle = colors.accent;
   g.lineWidth = 1.4;
   g.lineJoin = 'round';
-  vals.forEach((v, i) => { const [x, y] = pt(i, v); i ? g.lineTo(x, y) : g.moveTo(x, y); });
-  g.stroke();
+  runs.forEach((run) => {
+    if (run.length === 1) {
+      const [x, y] = pt(run[0], vals[run[0]]);
+      g.beginPath();
+      g.arc(x, y, 1.6, 0, Math.PI * 2);
+      g.fillStyle = colors.accent;
+      g.fill();
+      return;
+    }
+    g.beginPath();
+    run.forEach((i, k) => { const [x, y] = pt(i, vals[i]); k ? g.lineTo(x, y) : g.moveTo(x, y); });
+    g.stroke();
+  });
 
-  // 右上角纵轴上限
+  // 纵轴上下界都标出来：趋势图量程可能不是从 0 起（温度/功耗按数据取窗口），不标会误导
+  const axisNum = (v) => (isTrend && Math.abs(v) < 100 ? v.toFixed(1) : `${Math.round(v)}`);
+  const uTxt = st.unit ? ' ' + st.unit : '';
+  const topLabel = isFps ? `${Math.round(limit)} FPS`
+    : (st.mode === 'ms' ? `${limit.toFixed(1)} ms`
+      : `${axisNum(limit)}${uTxt}`);
   g.fillStyle = colors.faint;
   g.font = `${Math.round(10 * dpr) / dpr}px 'PerfFont', sans-serif`;
   g.textAlign = 'right';
-  g.fillText(isFps ? `${Math.round(limit)} FPS` : `${limit.toFixed(1)} ms`, w - 2, pad + 9);
+  g.fillText(topLabel, w - 2, pad + 9);
+  if (isTrend && axisBase > 0) g.fillText(`${axisNum(axisBase)}${uTxt}`, w - 2, pad + plotH - 2);
 
-  st.base = base;
+  st.base = base;               // 底图缓存（离屏 canvas），悬浮时贴回来
+
   st.colors = colors;
-  st.geom = { w, h, dpr, pad, plotW, plotH, vals, limit, isFps, pt };
+  st.geom = { w, h, dpr, pad, plotW, plotH, vals, limit, axisBase, isFps, pt };
   paintChartBase(cv, st);
-  bindChartHover(cv, id);
+  if (isHoverable) bindChartHover(cv, id);   // 帧率/帧时间/负载/温度/功耗都能悬浮
 }
 
 /** 把缓存的底图贴回可见 canvas（悬浮时反复调用，只有一次 drawImage） */
@@ -380,9 +795,16 @@ function drawChartHover(cv, st, i) {
   ctx.strokeStyle = c.cardSolid;
   ctx.stroke();
 
-  // 提示框：时间 / 帧率 / 帧时间
-  const secs = meta.per && meta.avgFps ? (i * meta.per) / meta.avgFps : 0;
-  const lines = [
+  // 提示框：帧率/帧时间图给时间 + 帧率 + 帧时间；负载/温度/功耗图给时间 + 该段平均值
+  const isTrend = !geo.isFps && !(st.mode === 'ms');
+  const secs = isTrend
+    ? (meta.secs && meta.bins ? (i * meta.secs) / Math.max(1, meta.bins) : 0)
+    : (meta.per && meta.avgFps ? (i * meta.per) / meta.avgFps : 0);
+  const unitTxt = st.unit ? ' ' + st.unit : '';
+  const lines = isTrend ? [
+    [t('chart.hover.time', '时间'), `${secs.toFixed(1)} s`],
+    [t('chart.hover.segAvg', '这一段平均'), `${v.toFixed(1)}${unitTxt}`],
+  ] : [
     [t('chart.hover.time', '时间'), `${secs.toFixed(1)} s`],
     [geo.isFps ? t('chart.hover.fps', '帧率') : t('chart.hover.eqFps', '等效帧率'), `${fps.toFixed(1)} FPS`],
     [geo.isFps ? t('chart.hover.avgFt', '平均帧时间') : t('chart.hover.slowFt', '最慢帧'), `${ms.toFixed(2)} ms`],

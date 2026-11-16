@@ -1,0 +1,38 @@
+{
+    "schema":  1,
+    "app":  "PerfCapture",
+    "channel":  "stable",
+    "version":  "2.0.7",
+    "date":  "2026-11-16",
+    "serial":  52,
+    "notes":  {
+                  "zh":  "第二轮评审：GPU 两种口径 / CPU 轻度倾向 / PC 延迟标估算 / 界面去噪",
+                  "en":  "See the release notes in the app (What\u0027s new).",
+                  "ja":  "アプリ内の更新情報をご覧ください。"
+              },
+    "assets":  [
+                   {
+                       "kind":  "setup",
+                       "name":  "PerfCapture-Setup-2.0.7.exe",
+                       "size":  10403840,
+                       "sha256":  "c9290dc895591121ea677f203afe3a96c36e9ea999cf86c1b2da5734c326043b",
+                       "urls":  [
+                                    "https://raw.githubusercontent.com/yousouyouka/PerfCapture/updates/bin/PerfCapture-Setup-2.0.7.exe",
+                                    "https://ghproxy.net/https://github.com/yousouyouka/PerfCapture/releases/download/v2.0.7/PerfCapture-Setup-2.0.7.exe",
+                                    "https://github.com/yousouyouka/PerfCapture/releases/download/v2.0.7/PerfCapture-Setup-2.0.7.exe"
+                                ]
+                   },
+                   {
+                       "kind":  "zip",
+                       "name":  "PerfCapture-2.0.7.zip",
+                       "size":  10357061,
+                       "sha256":  "777e66ebb2e7f8db2a944f84d107393dcdb59609d1eb0fb1074e2f6b79533cb9",
+                       "urls":  [
+                                    "https://cdn.jsdelivr.net/gh/yousouyouka/PerfCapture@updates/bin/PerfCapture-2.0.7.zip",
+                                    "https://raw.githubusercontent.com/yousouyouka/PerfCapture/updates/bin/PerfCapture-2.0.7.zip",
+                                    "https://ghproxy.net/https://github.com/yousouyouka/PerfCapture/releases/download/v2.0.7/PerfCapture-2.0.7.zip",
+                                    "https://github.com/yousouyouka/PerfCapture/releases/download/v2.0.7/PerfCapture-2.0.7.zip"
+                                ]
+                   }
+               ]
+}

@@ -19,6 +19,15 @@ window.PerfUpdateAreas = ['capture', 'realtime', 'other'];
 
 window.PerfUpdates = [
   {
+    date: '2026-11-17', version: '1.5.8',
+    title: '实时监控：指标可勾选 + 内存占用 + 浮窗跟随',
+    items: [
+      ['feature', '「监控设置」新增显示指标勾选：按帧率／CPU／GPU／内存四族列出全部细项，勾哪个页面就显示哪个，选择会记住（重开、切语言都保留）。', 'realtime'],
+      ['feature', '新增内存占用（物理内存已用／总量），归在 CPU 列末尾。', 'realtime'],
+      ['ux', '浮窗只显示你勾选的指标族（FPS／CPU／GPU／内存），页面与浮窗共用一份选择，勾完立即生效。', 'realtime']
+    ]
+  },
+  {
     date: '2026-11-17', version: '1.5.7',
     title: '实时 FPS：定位真因 + 提权/清场（传输层下版改）',
     items: [

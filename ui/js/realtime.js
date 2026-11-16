@@ -66,8 +66,109 @@
       maxOf: (c) => (c && c.gpuPowerMax ? c.gpuPowerMax : 150), valueOf: (s) => s.gpuPower, caps: 'gpuPower' },
     { col: 'gpu', key: 'gpu.vram', label: 'realtime.row.vram', unit: 'MB', digits: 0,
       maxOf: (c, s) => (s && s.vramTotal ? s.vramTotal : (c && c.vramTotal ? c.vramTotal : 1)),
-      valueOf: (s) => s.vramUsed, pairOf: (s) => s.vramTotal, caps: 'vram' }
+      valueOf: (s) => s.vramUsed, pairOf: (s) => s.vramTotal, caps: 'vram' },
+    // 内存占用：宿主采样里一直有 ramUsed/ramTotal，之前没上屏
+    { col: 'mem', key: 'ram', label: 'realtime.row.ram', unit: '%', digits: 0,
+      maxOf: () => 100, tip: 'realtime.tip.ram', caps: 'ram',
+      valueOf: (s) => (s && s.ramTotal ? Math.round((s.ramUsed / s.ramTotal) * 1000) / 10 : null) }
   ];
+
+  /* 指标勾选（批次 B）：按组渲染勾选框，选择存 localStorage，页面与浮窗共用同一份 */
+  const METRICS_KEY = 'perf.realtime.metrics';
+  const GROUP_ORDER = ['fps', 'cpu', 'gpu', 'mem'];
+  const groupOf = (f) => (f.key === 'fps' ? 'fps' : f.col === 'cpu' ? 'cpu' : f.col === 'gpu' ? 'gpu' : 'mem');
+  const allKeys = FIELDS.map((f) => f.key);
+  const readSelection = () => {
+    try {
+      const raw = localStorage.getItem(METRICS_KEY);
+      if (!raw) return allKeys.slice();
+      const arr = JSON.parse(raw);
+      if (!Array.isArray(arr)) return allKeys.slice();
+      const keep = arr.filter((k) => allKeys.indexOf(k) >= 0);
+      return keep.length ? keep : allKeys.slice();
+    } catch (e) { return allKeys.slice(); }
+  };
+  const selected = { keys: readSelection() };
+  const saveSelection = () => {
+    try { localStorage.setItem(METRICS_KEY, JSON.stringify(selected.keys)); } catch (e) { }
+  };
+  /* 浮窗只按「指标族」显示（FPS / CPU / GPU / 内存），这里把细项折算成族 */
+  const familiesForOverlay = () => {
+    const set = {};
+    FIELDS.forEach((f) => { if (selected.keys.indexOf(f.key) >= 0) set[groupOf(f)] = true; });
+    return GROUP_ORDER.filter((g) => set[g]);
+  };
+
+  /* ---------- 指标勾选（批次 B）----------
+     按「帧率 / CPU / GPU / 内存」四族分组渲染勾选框：
+       · 页面按细项过滤（取消勾选就少一行）
+       · 浮窗按族跟随（这一族里任意一项勾着那族就显示），这里 dispatch 给下面的浮窗设置板块
+       · 选择存 localStorage，页面与浮窗共用同一份 */
+  const GROUP_NAME = {
+    fps: ['realtime.group.fps', '帧率'],
+    cpu: ['realtime.group.cpu', 'CPU'],
+    gpu: ['realtime.group.gpu', 'GPU'],
+    mem: ['realtime.group.mem', '内存']
+  };
+  let hintTimer = 0;
+
+  /* 至少留一项：全取消时还原勾选并短提示 */
+  function flashMetricsHint() {
+    const hint = document.getElementById('rtMetricsHint');
+    if (!hint) return;
+    if (hint.getAttribute('data-orig') == null) hint.setAttribute('data-orig', hint.textContent);
+    hint.textContent = tx('realtime.metrics.last', '至少要保留一项指标');
+    hint.dataset.warn = '1';
+    clearTimeout(hintTimer);
+    hintTimer = setTimeout(() => {
+      hint.dataset.warn = '';
+      hint.textContent = hint.getAttribute('data-orig') || '';
+    }, 1800);
+  }
+
+  function announceMetrics() {
+    try {
+      document.dispatchEvent(new CustomEvent('perf:metrics', { detail: { metrics: familiesForOverlay() } }));
+    } catch (e) { }
+  }
+
+  function renderMetricsChoices() {
+    const box = document.getElementById('rtMetrics');
+    if (!box) return;
+    box.innerHTML = '';
+    GROUP_ORDER.forEach((g) => {
+      const list = FIELDS.filter((f) => groupOf(f) === g);
+      if (!list.length) return;
+      const group = el('div', 'rt-metric-group');
+      const name = GROUP_NAME[g] || [g, g];
+      group.appendChild(el('span', 'rt-metric-name', tx(name[0], name[1])));
+      const items = el('span', 'rt-metric-items');
+      list.forEach((f) => {
+        const lab = el('label', 'rt-chk');
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.value = f.key;
+        cb.checked = selected.keys.indexOf(f.key) >= 0;
+        cb.addEventListener('change', () => {
+          if (cb.checked) {
+            if (selected.keys.indexOf(f.key) < 0) selected.keys.push(f.key);
+          } else {
+            const next = selected.keys.filter((k) => k !== f.key);
+            if (!next.length) { cb.checked = true; flashMetricsHint(); return; }
+            selected.keys = next;
+          }
+          saveSelection();
+          build();
+          announceMetrics();
+        });
+        lab.appendChild(cb);
+        lab.appendChild(el('span', null, tx(f.label, f.label)));
+        items.appendChild(lab);
+      });
+      group.appendChild(items);
+      box.appendChild(group);
+    });
+  }
 
   function el(tag, cls, text) {
     const n = document.createElement(tag);
@@ -130,7 +231,7 @@
       b.setAttribute('aria-pressed', String(b.dataset.view === state.view));
     });
 
-    state.cells = FIELDS.map((f) => {
+    state.cells = FIELDS.filter((f) => selected.keys.indexOf(f.key) >= 0).map((f) => {
       const row = el('div', 'rt-row');
       row.dataset.metric = f.key;
       row.dataset.view = state.view;
@@ -156,7 +257,8 @@
         visual.addEventListener('mousemove', (ev) => showReadout(f, ev));
         visual.addEventListener('mouseleave', hideReadout);
       }
-      (f.col === 'cpu' ? cpuBox : gpuBox).appendChild(row);
+      // 内存行归到 CPU 列（系统类指标），避免再加一列
+      (f.col === 'gpu' ? gpuBox : cpuBox).appendChild(row);
       return { f, row, barFill, path, value };
     });
     paint();
@@ -311,10 +413,10 @@
     overlayBtn.addEventListener('click', () => { if (typeof send === 'function') send({ cmd: 'overlayToggle' }); });
   }
 
-  window.PerfRealtime = { handle, refresh: () => { build(); }, state };
-  window.__refreshRealtime = () => { build(); };
+  window.PerfRealtime = { handle, refresh: () => { build(); }, families: familiesForOverlay, metrics: selected, state };
+  window.__refreshRealtime = () => { renderMetricsChoices(); build(); };
 
-  build();
+  renderMetricsChoices();
   if (isVisible()) startSampling(); else setRunning(false);
 })();
 
@@ -352,14 +454,29 @@
   for (let c = 65; c <= 90; c++) KEYS.push(String.fromCharCode(c));
   for (let f = 1; f <= 12; f++) KEYS.push('F' + f);
 
+  /* 浮窗显示的指标族跟随「监控设置」里的勾选（页面与浮窗共用同一份选择） */
+  const localFamilies = () => (window.PerfRealtime && typeof window.PerfRealtime.families === 'function')
+    ? window.PerfRealtime.families().slice()
+    : ['fps', 'cpu', 'gpu', 'mem'];
+
   let cfg = {
     anchor: 'tr', px: 100, py: 0, x: -1, y: -1,
     opacity: 90, fontSize: 'normal', fontColor: 'white', layout: 'linear',
     hotkey: { ctrl: true, alt: true, shift: false, key: 'M' },
+    metrics: localFamilies(),
     visible: false
   };
   let syncing = false;
   let timer = 0;
+  let firstSyncDone = false;
+
+  /* 勾选变了：直接改 cfg 并立刻下发（勾完就该看到浮窗变，不等防抖） */
+  document.addEventListener('perf:metrics', (e) => {
+    const m = e && e.detail && e.detail.metrics;
+    if (!m || !m.length) return;
+    cfg.metrics = m.slice();
+    push(0);
+  });
 
   const lbl = (prefix, v, fb) => tx(prefix + '.' + v, fb);
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -477,9 +594,16 @@
         fontColor: o.fontColor || 'white',
         layout: o.layout || 'linear',
         hotkey: o.hotkey || { ctrl: true, alt: true, shift: false, key: 'M' },
+        metrics: (o.metrics && o.metrics.length) ? o.metrics.slice() : localFamilies(),
         visible: !!o.visible
       };
       paint();
+      /* 首次回填：宿主的指标族和本地勾选不一致时补推一次，之后不再自动改（避免来回打架） */
+      if (!firstSyncDone) {
+        firstSyncDone = true;
+        const local = localFamilies();
+        if (cfg.metrics.join(',') !== local.join(',')) { cfg.metrics = local; push(0); }
+      }
     }
   };
 

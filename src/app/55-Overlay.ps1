@@ -23,7 +23,21 @@ $script:OverlayRowDefs = @(
     @{ key = 'fps'; label = 'FPS'; max = 0 }
     @{ key = 'cpu'; label = 'CPU'; max = 100 }
     @{ key = 'gpu'; label = 'GPU'; max = 100 }
+    @{ key = 'mem'; label = 'MEM'; max = 100 }
 )
+
+$script:OverlayMetricKeys = @('fps', 'cpu', 'gpu', 'mem')
+
+# 只显示用户勾选的指标族；空集合兜底 FPS，避免浮窗变空白
+function Get-OverlayRowSet {
+    param($Cfg)
+    $keys = @()
+    if ($null -ne $Cfg.metrics) { $keys = @($Cfg.metrics) }
+    if (-not $keys.Count) { $keys = @('fps') }
+    $rows = @($script:OverlayRowDefs | Where-Object { $keys -contains $_.key })
+    if (-not $rows.Count) { $rows = @($script:OverlayRowDefs[0]) }
+    return $rows
+}
 
 $script:OverlayAnchors = @('tl', 't', 'tr', 'l', 'c', 'r', 'bl', 'b', 'br')
 
@@ -39,6 +53,11 @@ function Get-OverlayCfg {
     foreach ($k in $def.Keys) { if ($null -eq $o.$k) { $o.$k = $def[$k] } }
     if (-not $o.hotkey) { $o.hotkey = @{ ctrl = $true; alt = $true; shift = $false; key = 'M' } }
     if (-not $o.hotkey.key) { $o.hotkey.key = 'M' }
+    # 浮窗显示哪些指标族（界面「显示指标」勾选后按族折算，页面与浮窗共用一份）
+    $mk = @()
+    if ($null -ne $o.metrics) { $mk = @(@($o.metrics) | ForEach-Object { ([string]$_).ToLower() } | Where-Object { $script:OverlayMetricKeys -contains $_ } | Select-Object -Unique) }
+    if (-not $mk.Count) { $mk = @('fps', 'cpu', 'gpu', 'mem') }
+    $o.metrics = $mk
     # 老配置里 opacity 是 0..1，迁移到百分比
     $op = 90.0
     try { $op = [double]$o.opacity } catch { }
@@ -134,7 +153,8 @@ function Build-OverlayForm {
     $controls = @{}
     $rows = @()
     $y = 10
-    foreach ($def in $script:OverlayRowDefs) {
+    $defs = @(Get-OverlayRowSet $cfg)
+    foreach ($def in $defs) {
         $lbl = New-Object System.Windows.Forms.Label
         $lbl.Text = $def.label
         $lbl.Font = $font
@@ -308,6 +328,16 @@ function Update-OverlayReadout {
                     $row.fill.Width = 0
                 }
             }
+            'mem' {
+                if ($s -and $null -ne $s.ramUsed -and $null -ne $s.ramTotal -and [double]$s.ramTotal -gt 0) {
+                    $pct = [double]$s.ramUsed / [double]$s.ramTotal * 100.0
+                    $row.value.Text = ('{0} %' -f [int][math]::Round($pct))
+                    $row.fill.Width = [int]([math]::Min(1.0, ($pct / 100.0)) * $row.track.Width)
+                } else {
+                    $row.value.Text = '—'
+                    $row.fill.Width = 0
+                }
+            }
         }
     }
 }
@@ -378,6 +408,7 @@ function Send-OverlayState {
             fontSize = [string]$cfg.fontSize
             fontColor = [string]$cfg.fontColor
             layout = [string]$cfg.layout
+            metrics = @($cfg.metrics)
             hotkey = @{
                 ctrl = [bool]$cfg.hotkey.ctrl
                 alt = [bool]$cfg.hotkey.alt
@@ -408,6 +439,10 @@ function Apply-OverlayConfig {
     if ($In.fontSize -in @('small', 'normal', 'large')) { $cfg.fontSize = [string]$In.fontSize }
     if ($In.fontColor -in @('white', 'gray', 'green', 'yellow')) { $cfg.fontColor = [string]$In.fontColor }
     if ($In.layout) { $cfg.layout = 'linear' }
+    if ($null -ne $In.metrics) {
+        $mk = @(@($In.metrics) | ForEach-Object { ([string]$_).ToLower() } | Where-Object { $script:OverlayMetricKeys -contains $_ } | Select-Object -Unique)
+        if ($mk.Count) { $cfg.metrics = $mk }
+    }
     if ($In.hotkey) {
         $hk = $cfg.hotkey
         if ($null -ne $In.hotkey.ctrl) { $hk.ctrl = [bool]$In.hotkey.ctrl }

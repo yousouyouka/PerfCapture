@@ -347,3 +347,19 @@
 .rt-chk { display: inline-flex; align-items: center; gap: 0.25rem; font-size: 0.75rem; color: var(--text); }
 .rt-chk input { accent-color: var(--accent); }
 .rt-board-foot { display: flex; justify-content: flex-end; margin-top: 0.35rem; }
+
+/* 指标勾选（批次 B）：一组一行，勾选框自动换行 */
+.rt-set-row-stack { align-items: flex-start; }
+.rt-set-row-stack > .rt-set-label { padding-top: 0.1rem; }
+.rt-metrics {
+  flex: 1 1 16rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+  min-width: 0;
+}
+.rt-metric-group { display: flex; align-items: baseline; gap: 0.5rem; min-width: 0; }
+.rt-metric-name { flex: 0 0 3.2rem; font-size: 0.72rem; color: var(--muted); }
+.rt-metric-items { display: flex; flex-wrap: wrap; gap: 0.15rem 0.85rem; min-width: 0; }
+.rt-metric-items .rt-chk { cursor: pointer; }
+.rt-set-hint[data-warn="1"] { color: var(--warn); }

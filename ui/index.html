@@ -66,7 +66,7 @@
           </svg>
           <span class="nav-label" data-i18n="nav.settings">设置</span>
         </button>
-        <div class="sidebar-version" id="sidebarVersion">v1.5.7</div>
+        <div class="sidebar-version" id="sidebarVersion">v1.5.8</div>
       </div>
     </nav>
   </aside>
@@ -224,7 +224,7 @@
           <div class="setting-block">
             <div class="setting-label">
               <strong>PerfCapture</strong>
-              <small>v1.5.7 · PresentMon ETW · 零注入</small>
+              <small>v1.5.8 · PresentMon ETW · 零注入</small>
             </div>
           </div>
 
@@ -301,6 +301,11 @@
             <div class="rt-set-row">
               <span class="rt-set-label" data-i18n="realtime.set.view">视图</span>
               <span class="rt-set-hint" data-i18n="realtime.set.viewHint">进度条（曲线／混合视图重做中，暂时收起）</span>
+            </div>
+            <div class="rt-set-row rt-set-row-stack">
+              <span class="rt-set-label" data-i18n="realtime.set.metrics">显示指标</span>
+              <div class="rt-metrics" id="rtMetrics"></div>
+              <span class="rt-set-hint" id="rtMetricsHint" data-i18n="realtime.set.metricsHint">勾选的指标显示在页面上；浮窗按「帧率／CPU／GPU／内存」四族跟随</span>
             </div>
             <div class="rt-set-row">
               <span class="rt-set-label" data-i18n="realtime.set.fpsTarget">FPS 目标</span>

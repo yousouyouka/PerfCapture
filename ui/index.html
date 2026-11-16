@@ -66,7 +66,7 @@
           </svg>
           <span class="nav-label" data-i18n="nav.settings">设置</span>
         </button>
-        <div class="sidebar-version" id="sidebarVersion">v1.5.8</div>
+        <div class="sidebar-version" id="sidebarVersion">v1.5.9</div>
       </div>
     </nav>
   </aside>
@@ -77,6 +77,10 @@
     <section class="page" data-page="capture">
 
       <section class="card card-proc">
+        <div class="proc-head">
+          <h2 class="proc-title" data-i18n="capture.title">性能采集</h2>
+          <button id="btnCapHelp" class="btn btn-ghost" type="button" data-i18n="capture.help">详细说明</button>
+        </div>
         <label class="field-label" data-i18n="capture.targetProcess">目标进程</label>
         <div class="proc-row">
           <button id="btnProc" class="btn btn-select" type="button">
@@ -128,9 +132,8 @@
                   <button type="button" data-preset="standard" data-i18n="capture.preset.standard">标准</button>
                   <button type="button" data-preset="pro" data-i18n="capture.preset.pro">专业</button>
                 </div>
-                <span class="hint hint-right" id="presetHint" data-i18n="capture.preset.hint">预设只调勾选项、时长与预热丢弃，套用后仍可手工改</span>
+                <span class="hint hint-right" id="presetHint"></span>
               </div>
-              <p class="card-note" data-i18n="capture.itemsHint">帧率 / 1% Low / 帧时间 始终采集</p>
               <div class="collect-grid"></div>
             </div></div>
           </section>
@@ -224,7 +227,7 @@
           <div class="setting-block">
             <div class="setting-label">
               <strong>PerfCapture</strong>
-              <small>v1.5.8 · PresentMon ETW · 零注入</small>
+              <small>v1.5.9 · PresentMon ETW · 零注入</small>
             </div>
           </div>
 
@@ -485,12 +488,24 @@
   </div>
 </div>
 
+<!-- ── 性能采集「详细说明」弹窗：样式与「发现更新」一致，正文先留空，后续补充 ── -->
+<div class="upd-modal" id="capHelpModal" hidden>
+  <div class="upd-modal-box" role="dialog" aria-modal="true" aria-labelledby="capHelpTitle">
+    <h3 class="upd-modal-title" id="capHelpTitle" data-i18n="capture.helpTitle">详细说明</h3>
+    <div class="cap-help-body" id="capHelpBody"></div>
+    <div class="upd-modal-actions">
+      <button type="button" class="btn btn-primary" id="capHelpClose" data-i18n="capture.helpClose">关闭</button>
+    </div>
+  </div>
+</div>
+
 <script src="js/util.js"></script>
 <script src="js/i18n.js"></script>
 <script src="js/capture-options.js"></script>
 <script src="js/bridge.js"></script>
 <script src="js/theme.js"></script>
 <script src="js/popup.js"></script>
+<script src="js/capture-help.js"></script>
 <script src="js/terminal.js"></script>
 <script src="js/ui-state.js"></script>
 <script src="js/report.js"></script>

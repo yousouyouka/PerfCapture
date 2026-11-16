@@ -139,13 +139,16 @@ function updatePresetPressed() {
   $$('#presetViews button').forEach((b) => {
     b.setAttribute('aria-pressed', String(b.dataset.preset === activePreset));
   });
+  /* 预设说明文案已按要求删掉：只在「当前为自定义设置」时出提示，套用预设时留空 */
   const hint = $('#presetHint');
   if (hint) {
-    const key = activePreset ? 'capture.preset.hint' : 'capture.preset.custom';
-    hint.dataset.i18n = key;
-    hint.textContent = t(key, key === 'capture.preset.custom'
-      ? '当前为自定义设置'
-      : '预设只调勾选项、时长与预热丢弃，套用后仍可手工改');
+    if (activePreset) {
+      delete hint.dataset.i18n;
+      hint.textContent = '';
+    } else {
+      hint.dataset.i18n = 'capture.preset.custom';
+      hint.textContent = t('capture.preset.custom', '当前为自定义设置');
+    }
   }
 }
 

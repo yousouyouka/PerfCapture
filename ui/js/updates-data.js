@@ -19,6 +19,16 @@ window.PerfUpdateAreas = ['capture', 'realtime', 'other'];
 
 window.PerfUpdates = [
   {
+    date: '2026-11-17', version: '1.5.9',
+    title: '批次 C：安装路径 / 实时监控瘦身 / 采集页说明入口',
+    items: [
+      ['install', '安装向导选择自定义目录后，会自动在其下建 PerfCapture 子目录（选中某个文件夹就装进它的 PerfCapture 文件夹）；目录名已经是 PerfCapture 时不再叠加，静默更新仍沿用原目录。', 'other'],
+      ['ui', '实时监控去掉排在 CPU 列第一条的「游戏帧率」行：归类不对，且 FPS 采集仍在改造，改完再决定放哪。', 'realtime'],
+      ['feature', '性能采集页加上「性能采集」标题，右侧新增「详细说明」按钮，点开是与「发现更新」同款弹窗（正文后续补充）。', 'capture'],
+      ['ux', '删掉「帧率 / 1% Low / 帧时间 始终采集」与「预设只调勾选项、时长与预热丢弃」两处说明文案。', 'capture']
+    ]
+  },
+  {
     date: '2026-11-17', version: '1.5.8',
     title: '实时监控：指标可勾选 + 内存占用 + 浮窗跟随',
     items: [

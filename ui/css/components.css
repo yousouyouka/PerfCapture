@@ -307,3 +307,15 @@ body.is-col-resizing * { cursor: col-resize !important; user-select: none !impor
   border-color: var(--line-strong);
   color: var(--text);
 }
+/* ---- 性能采集顶部：标题 + 详细说明（批次 C） ---- */
+.proc-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.55rem;
+}
+.proc-title { margin: 0; font-size: 0.95rem; font-weight: 400; color: var(--text-strong); }
+/* 详细说明弹窗正文（先留空；:empty 时不占高度） */
+.cap-help-body { margin: 0; font-size: 0.78rem; line-height: 1.7; color: var(--text); }
+.cap-help-body:empty { display: none; }

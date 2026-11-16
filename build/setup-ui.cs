@@ -180,6 +180,28 @@ namespace PerfCaptureSetup
             AddPara(p, 0, y, ContentW, "默认安装位置：" + Program.DefaultDir(), 8.5F, C_Hint, 0);
         }
 
+        // 自定义路径后面自动补一级 PerfCapture（已经是 ...\PerfCapture 就不再叠加）：
+        // 「浏览…」选 D:\Games 会装到 D:\Games\PerfCapture，而不是把程序文件散进 D:\Games。
+        // 只在向导里生效，静默安装（更新走的 /S /D=…）原样使用传入目录，不会改变老用户的安装位置。
+        private static string WithAppFolder(string raw)
+        {
+            string dir = (raw ?? "").Trim().Trim('"');
+            if (dir.Length == 0) return dir;
+            string full;
+            try { full = Path.GetFullPath(dir); }
+            catch { return dir; }
+            string root = "";
+            try { root = Path.GetPathRoot(full) ?? ""; }
+            catch { root = ""; }
+            string trimmed = full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            string rootTrimmed = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            // 盘符根（C:\）或 UNC 根：直接在根下建 PerfCapture
+            if (trimmed.Length <= rootTrimmed.Length) return Path.Combine(full, Program.AppName);
+            string leaf = Path.GetFileName(trimmed);
+            if (string.Equals(leaf, Program.AppName, StringComparison.OrdinalIgnoreCase)) return trimmed;
+            return Path.Combine(trimmed, Program.AppName);
+        }
+
         private void BuildPath()
         {
             Panel p = panels[1];
@@ -215,7 +237,7 @@ namespace PerfCaptureSetup
                 {
                     d.Description = "选择 " + Program.AppName + " 的安装目录";
                     d.SelectedPath = pathBox.Text;
-                    if (d.ShowDialog(this) == DialogResult.OK) pathBox.Text = d.SelectedPath;
+                    if (d.ShowDialog(this) == DialogResult.OK) pathBox.Text = WithAppFolder(d.SelectedPath);
                 }
             };
             p.Controls.Add(browse);
@@ -437,6 +459,7 @@ namespace PerfCaptureSetup
                             MessageBox.Show(this, "安装目录不合法：" + ex.Message, Program.AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                             return;
                         }
+                        dir = WithAppFolder(dir);
                         pathBox.Text = dir;
                         opts.Dir = dir;
                         ShowPage(2);

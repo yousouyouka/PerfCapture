@@ -33,10 +33,8 @@
   // ---------- 字段表 ----------
   // maxOf: 条形/曲线上限；valueOf: 取原始值；caps: 能力表键（false=这台机器没有）；tip: 口径说明
   const FIELDS = [
-    // 游戏帧率来自 PresentMon 增量统计（ETW 零注入），目标是采集页选中的进程；
-    // 没选中进程 / 没提权 / 游戏不出帧时为 null → 显示「—」。
-    { col: 'cpu', key: 'fps', label: 'realtime.row.fps', unit: 'FPS', digits: 1,
-      maxOf: () => 240, valueOf: (s) => s.fps, caps: 'fps', tip: 'realtime.tip.fps' },
+    // 游戏帧率（PresentMon）暂时不显示：FPS 采集还在改造中，这里先不占 CPU 列的位置，
+    // 后续补上时再决定放哪。（宿主侧的 fps / fpsTarget 采样代码保留不动。）
     { col: 'cpu', key: 'cpu.util', label: 'realtime.row.util', unit: '%', digits: 0,
       maxOf: () => 100, valueOf: (s) => s.cpu, warn: 80, bad: 95, caps: 'cpu' },
     { col: 'cpu', key: 'cpu.clock', label: 'realtime.row.clock', unit: 'GHz', digits: 2,

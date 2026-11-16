@@ -92,7 +92,9 @@ if (-not (Test-Path $csc)) { throw '找不到 csc.exe（.NET Framework 4.x 缺�
 $exeOut = Join-Path $stage 'PerfCapture.exe'
 $ico    = Join-Path $root 'assets\app-icon.ico'
 $cs     = Join-Path $buildDir 'launcher.cs'
-& $csc /nologo /target:winexe /platform:anycpu "/win32icon:$ico" "/out:$exeOut" /r:System.Windows.Forms.dll $cs 2>&1 | ForEach-Object { "     $_" }
+$appManifest = Join-Path $buildDir 'app.manifest'
+# 主程序清单：requireAdministrator（PresentMon 建 ETW 会话必须要管理员，否则 FPS 永远采不到）
+& $csc /nologo /target:winexe /platform:anycpu "/win32icon:$ico" "/win32manifest:$appManifest" "/out:$exeOut" /r:System.Windows.Forms.dll $cs 2>&1 | ForEach-Object { "     $_" }
 if (-not (Test-Path $exeOut)) { throw 'PerfCapture.exe 编译失败' }
 Write-Host "  ✅ 启动器已编译: $([math]::Round((Get-Item $exeOut).Length/1KB)) KB"
 

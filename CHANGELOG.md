@@ -1,5 +1,43 @@
 ﻿# 更新记录
 
+## 1.5.7 — 2026-11-17（实时 FPS：定位真因 + 提权/清场，传输层待改造）
+
+### 已修
+- **程序没有管理员权限**：PresentMon 建 ETW 会话要管理员，未提权时直接以退出码 6 退出
+  （你的日志里就是 `presentmon exited early (exit code 6)`）。现在启动器带 `build\app.manifest`
+  （`requireAdministrator` + `PerMonitorV2`），启动即提权。
+- **残留 ETW 会话堵死 DxgKrnl**：PresentMon 被杀不会移除会话，卡死的会话会让后续采集恒为 0 帧。
+  现在开采集前先杀残留 `presentmon` 进程，并用绝对路径的 `logman` 停掉 `PerfCaptureLive*` / `PresentMon*` 会话。
+- **拖动浮窗不回填坐标**（1.5.5 遗留的验收项）：`Save-OverlayPosition` 补 `Send-OverlayState`。
+- 诊断日志补全现场：`csv=`、`提权=`、`ok=`、`framesSeen=`、`读错=`。
+
+### 仍未解决（已定位，下个版本改）
+实时 FPS 的**传输方式**根本行不通，实测两条路都堵：
+1. `--output_file`：PresentMon 用**独占**方式（FileShare.None）持有 CSV，采样器读同一文件必然报
+   「文件正由另一进程使用」→ 行数永远 0（诊断日志里能看到 `读错=read: …`）；
+2. `--output_stdout`：管道是**块缓冲**，重定向到文件 8 秒只落 2 字节，同样拿不到逐帧数据。
+
+→ 正确做法是「**短窗口采集 + 进程退出后解析**」：每 ~3 秒起一次 `--timed 3 --terminate_after_timed`，
+等它自己退出、读文件算 FPS（此时锁已释放）。这样既绕开独占锁，也不会残留会话。**下个版本实现**。
+
+> 注：本轮排查反复启停 PresentMon，机器上的 ETW 会话已被搞脏；**建议重启一次**再复测。
+
+
+## 1.5.6 — 2026-11-17（实时 FPS：提权 + 唯一 ETW 会话名）
+
+### 修复（FPS 一直显示「—」的真正原因）
+- **程序没有管理员权限**：实时 FPS 靠 PresentMon 建 ETW 会话，未提权时 PresentMon **直接以退出码 6 退出**
+  （日志实测：`presentmon exited early (exit code 6)`），前面所有目标都只能显示「—」。
+  现在启动器带 `app.manifest`（`requireAdministrator`）+ `PerMonitorV2`，程序一开始就提权；
+  采集引擎本来也需要管理员，反而省掉每次采集弹一次 UAC。
+- **ETW 会话名撞车**：之前固定用 `PerfCaptureLive`，一旦上一轮 PresentMon 被强杀留下卡死的同名会话，
+  下一轮就报 `failed to start trace session: error code 4201`（提权后实测）。
+  现在每次 tail 用**唯一会话名**（`PerfCaptureLive_xxxxxxxx`），并在停止时 `logman stop` 掉自己那一个；
+  同时去掉 `--stop_existing_session`（它会误停别人的会话）。
+- 提权实测结果：唯一会话名下 PresentMon 6 秒写出 **86–220 KB** 帧数据（Endfield），FPS 通路正常。
+- 日志更直白：未提权时启动监控就记一条
+  「实时 FPS 需要管理员权限：当前进程未提权…」；退出码 6 也会翻译成中文原因。
+
 ## 1.5.5 — 2026-11-17（验收修复：拖动回填坐标、FPS 目标不再乱跳）
 
 ### 修复

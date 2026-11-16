@@ -19,6 +19,25 @@ window.PerfUpdateAreas = ['capture', 'realtime', 'other'];
 
 window.PerfUpdates = [
   {
+    date: '2026-11-17', version: '1.5.7',
+    title: '实时 FPS：定位真因 + 提权/清场（传输层下版改）',
+    items: [
+      ['fix', 'PresentMon 建 ETW 会话需要管理员权限，未提权会直接退出（退出码 6）。主程序清单改为 requireAdministrator，启动即提权。', 'realtime'],
+      ['fix', '被杀掉的 PresentMon 会留下卡死的 ETW 会话，堵住 DxgKrnl 后所有采集都是 0 帧。现在开采集前先清残留进程与会话。', 'realtime'],
+      ['fix', '拖动浮窗后坐标不回填（1.5.5 遗留验收项）已修：拖动结束立即回传状态。', 'realtime'],
+      ['fix', '实时 FPS 仍不显示的根因已查清：PresentMon 对 --output_file 独占打开、--output_stdout 又是块缓冲，边采边读拿不到数据。下版改为「短窗口采集 + 退出后解析」。', 'realtime']
+    ]
+  },
+  {
+    date: '2026-11-17', version: '1.5.6',
+    title: '实时 FPS 修复：提权 + 唯一 ETW 会话名',
+    items: [
+      ['fix', 'FPS 一直不显示的真因：程序没有管理员权限，PresentMon 建不了 ETW 会话（退出码 6）。现在主程序清单要求管理员权限，启动即提权。', 'realtime'],
+      ['fix', 'ETW 会话名撞车：固定用 PerfCaptureLive 时，上一次被强杀留下的卡死会话会让下一轮报 error code 4201。现在每次采集用唯一会话名，并在停止时清掉自己那一个。', 'realtime'],
+      ['fix', '未提权或创建会话失败时，日志会直接写明原因，不再只留一个「—」。', 'realtime']
+    ]
+  },
+  {
     date: '2026-11-17', version: '1.5.5',
     title: '验收修复：拖动回填坐标、FPS 不再乱跳',
     items: [

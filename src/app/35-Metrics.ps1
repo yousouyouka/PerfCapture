@@ -45,7 +45,7 @@ if (-not ('PerfFg' -as [type])) {
 }
 $hostPid = $PID
 $fps = @{ proc = $null; offset = 0; sw = $null; leftover = ''; header = $false; framesSeen = 0; ok = $false;
-          pid = 0; target = ''; err = ''; errFile = ''; cand = -1; hits = 0; win = @(); starve = 0 }
+          pid = 0; target = ''; err = ''; errFile = ''; cand = -1; hits = 0; win = @(); starve = 0; session = '' }
 
 function Resolve-FpsTarget {
     param([int]$Fallback)
@@ -60,10 +60,31 @@ function Resolve-FpsTarget {
 
 function Stop-FpsTail {
     if ($fps.proc) { try { if (-not $fps.proc.HasExited) { Stop-Process -Id $fps.proc.Id -Force } } catch { } }
+    # 杀掉 PresentMon 不会自动移除它的 ETW 会话，顺手 stop 掉自己那一个（唯一名，不会误伤别人）
+    if ($fps.session) {
+        try { & (Join-Path $env:SystemRoot 'System32\logman.exe') stop $fps.session -ets 2>&1 | Out-Null } catch { }
+        $fps.session = ''
+    }
     $fps.proc = $null
     $fps.ok = $false
     $fps.pid = 0
     $fps.target = ''
+}
+
+# 开采集前清场：上一轮 PresentMon 被强杀会留下**卡死的 ETW 会话**，它占着 DxgKrnl 之后
+# 新会话一帧也收不到（实测：清掉 PerfCaptureLive_*/PresentMon 后，同一目标 8 秒立刻出 1661 帧）。
+function Clear-FpsSessions {
+    # 先杀掉上次没被收掉的 presentmon：它们还占着同一个 CSV 与 ETW 会话，
+    # 新实例会因为会话/文件抢占拿不到数据（实测 csv 一直在长但行数计 0）
+    try { Get-Process -Name presentmon -ErrorAction SilentlyContinue | ForEach-Object { try { Stop-Process -Id $_.Id -Force } catch { } } } catch { }
+    try {
+        $logman = Join-Path $env:SystemRoot 'System32\logman.exe'
+        $q = (& $logman query -ets 2>&1 | Out-String)
+        foreach ($m in [regex]::Matches($q, '(?m)^(PerfCaptureLive\S*|PresentMon\S*)\s+')) {
+            $n = $m.Groups[1].Value
+            if ($n) { & $logman stop $n -ets 2>&1 | Out-Null }
+        }
+    } catch { }
 }
 
 function Start-FpsTail {
@@ -74,10 +95,13 @@ function Start-FpsTail {
     if (-not (Test-Path -LiteralPath $PmExe)) { return }
     try {
         if (Test-Path -LiteralPath $FpsCsv) { Remove-Item -LiteralPath $FpsCsv -Force -ErrorAction SilentlyContinue }
-        # 注意：这里**不能用** -RedirectStandardError —— 在 runspace 里 Start-Process 带重定向会卡住
-        # （实测直接把采样线程挂死）。失败原因改用退出码上报，见 Test-FpsTailDead。
+        # 实测结论：PresentMon 对 --output_file 是独占打开（FileShare.None），采样器跨进程读不到，
+        # 行数永远 0 —— 这是实时 FPS 一直不显示的**直接原因**；而 --output_stdout 走管道是块缓冲
+        # （重定向后 8 秒只有 2 字节），同样拿不到。所以「边采边读」这条路在当前版本上不成立，
+        # 需改成「短窗口采集 + 退出后解析」（burst 模式），见 CHANGELOG 1.5.7 的说明。
+        $fps.session = 'PerfCaptureLive_' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
         $pmArgs = @('--process_id', "$TargetPid", '--output_file', $FpsCsv, '--v2_metrics', '--no_console_stats',
-                    '--session_name', 'PerfCaptureLive', '--stop_existing_session')
+                    '--session_name', $fps.session)
         $fps.proc = Start-Process -FilePath $PmExe -ArgumentList $pmArgs -PassThru -WindowStyle Hidden
         $fps.sw = [Diagnostics.Stopwatch]::StartNew()
         $fps.ok = $true
@@ -99,7 +123,12 @@ function Test-FpsTailDead {
     if (-not $exited) { return }
     $code = $null
     try { $code = $fps.proc.ExitCode } catch { }
-    $fps.err = 'presentmon exited early (exit code ' + $code + '); 常见原因：未提权（需要管理员）或 ETW 会话被占用'
+    # 退出码 6 = PresentMon 建不了 ETW 会话（最常见就是没提权）；4201 那条已经用唯一会话名规避
+    if ($code -eq 6) {
+        $fps.err = 'PresentMon 无法创建 ETW 会话（退出码 6）：需要以管理员身份运行 PerfCapture'
+    } else {
+        $fps.err = 'presentmon exited early (exit code ' + $code + '); 常见原因：未提权或 ETW 会话被占用'
+    }
     $fps.ok = $false
     $fps.proc = $null
     $fps.pid = 0
@@ -108,18 +137,27 @@ function Test-FpsTailDead {
 function Read-NewFrames {
     if (-not $fps.ok) { return 0 }
     if (-not (Test-Path -LiteralPath $FpsCsv)) { return 0 }
+    # PresentMon 用独占方式持有输出文件，若这里抛「文件正由另一进程使用」，说明读取方拿不到数据 ——
+    # 把异常原文留在 $fps.err 里（宿主会写进日志），不要再静默成 0。
+    $fs = $null
+    foreach ($sh in @([IO.FileShare]::ReadWrite, ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete), [IO.FileShare]::Read)) {
+        try { $fs = [IO.File]::Open($FpsCsv, [IO.FileMode]::Open, [IO.FileAccess]::Read, $sh); break }
+        catch { $fps.err = 'read: ' + $_.Exception.Message; $fs = $null }
+    }
+    if (-not $fs) { return 0 }
     $txt = ''
     try {
-        $fs = [IO.File]::Open($FpsCsv, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
-        try {
-            if ($fs.Length -le $fps.offset) { return 0 }
-            [void]$fs.Seek($fps.offset, [IO.SeekOrigin]::Begin)
-            $sr = New-Object IO.StreamReader($fs)
-            $txt = $sr.ReadToEnd()
-            $fps.offset = $fs.Position
-            $sr.Dispose()
-        } finally { $fs.Dispose() }
-    } catch { return 0 }
+        $fps.err = ''
+        if ($fs.Length -le $fps.offset) { return 0 }
+        [void]$fs.Seek($fps.offset, [IO.SeekOrigin]::Begin)
+        $sr = New-Object IO.StreamReader($fs)
+        $txt = $sr.ReadToEnd()
+        $fps.offset = $fs.Position
+        $sr.Dispose()
+    } catch {
+        $fps.err = 'read: ' + $_.Exception.Message
+        return 0
+    } finally { $fs.Dispose() }
     if (-not $txt) { return 0 }
     $all = [string]$fps.leftover + $txt
     $nl = $all.LastIndexOf("`n")
@@ -136,6 +174,8 @@ function Read-NewFrames {
     return $n
 }
 
+# 采样循环启动前先清一次残留 ETW 会话（卡死的会话会让后面所有 tail 收不到帧）
+Clear-FpsSessions
 while ($true) {
     if ($Ctl -and $Ctl.stop) { break }
 # 目标选择：优先跟随前台，但**只在当前目标没在出帧时才换** ——
@@ -372,8 +412,12 @@ if ($fps.ok) {
     }
     # 6 秒一帧都没有：把原因交回宿主记一次日志，别让界面永远只显示「—」
     if ($fps.starve -eq 6 -and $fps.framesSeen -eq 0) {
-        $out.fpsErr = ('目标 {0}(pid {1}) 连续 6 秒无帧：PresentMon 没有写出任何数据。' -f $fps.target, $fps.pid) +
-                      '常见原因：独占全屏、反作弊占着 ETW、或该进程不走 DXGI 呈现。'
+        # 把现场信息一起写进日志：下次出问题时不用猜是「没起」「起错参数」还是「起了但没数据」
+        $csvInfo = if (Test-Path -LiteralPath $FpsCsv) { (Get-Item -LiteralPath $FpsCsv).Length } else { 'no-file' }
+        $isAdm = $false
+        try { $isAdm = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) } catch { }
+        $out.fpsErr = ('目标 {0}(pid {1}) 连续 6 秒无帧（csv={2}，提权={3}，ok={4}，framesSeen={5}，读错={6}）。' -f
+                       $fps.target, $fps.pid, $csvInfo, $isAdm, $fps.ok, $fps.framesSeen, $(if ($fps.err) { $fps.err } else { '无' }))
     }
 }
 
@@ -593,6 +637,10 @@ function Start-MetricsSampler {
     # 不再依赖「上次采集过的进程」——那个 pid 常常早就退出了（FPS 一直不出值的根因之一）。
     if ($script:MetricsCaps) {
         $script:MetricsCaps.fps = ([bool]$script:MetricsPmPath -and [bool]$script:MetricsFpsCsv)
+        $adm = $false
+        try { $adm = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) } catch { }
+        $script:MetricsCaps.fpsAdmin = $adm
+        if (-not $adm) { Write-AppLog '实时 FPS 需要管理员权限：当前进程未提权，PresentMon 无法建立 ETW 会话（FPS 只会显示「—」）' 'WARN' }
         $script:MetricsCaps.fpsTarget = $script:MetricsFpsName
     }
     Start-MetricsWorker

@@ -137,3 +137,42 @@ logman query -ets | findstr /i "PerfCapture PresentMon"
 - `0a00f96` 1.5.4 顶部板块 + 浮窗设置 + FPS 跟随前台
 - `ae91369` 1.5.5 拖动回填、目标不再乱跳、无帧诊断
 - `23da87f` 1.5.7 提权（app.manifest）、ETW 清场、诊断字段补全
+
+---
+
+## 9. 结论落地：改用 burst 模式（1.5.10）
+
+### 9.1 做法
+每轮起一个短窗口，**等 PresentMon 自己退出、文件锁释放后再整份解析**：
+
+```
+presentmon --process_id <pid> --output_file <burst.csv> \
+           --timed 2 --terminate_after_timed \
+           --v2_metrics --no_console_stats \
+           --session_name PerfCaptureLive_<8位> --stop_existing_session
+```
+
+- `FPS = 帧数 ÷ (末帧起点 − 首帧起点 + 末帧自身时长)`
+  —— 少算末帧会系统性抬高一档（60 帧 @16.67ms 会算成 61），已校正。
+- 读数 = 最近 3 个窗口按帧数加权；窗口间歇期沿用上一次值，连续 4 个空窗口才清空。
+- 失败退避：退出码 6（未提权）15 s、其它非 0 退出 10 s、连续空窗口 3 s。
+- 日志去重：同一错误只记一次，未恢复每 2 分钟提醒，恢复时记「已恢复」。
+
+### 9.2 本机实测（2026-11-16，重启后，提权）
+| 项 | 值 |
+|---|---|
+| 目标 | WebView2 的 GPU 进程（Chromium，走 D3D11 present），240 Hz 窗口动画 |
+| burst 退出码 | 0 |
+| CSV 大小 | 34,946 字节 |
+| 帧数 | **239** |
+| 窗口时长 | 0.998 s |
+| **FPS** | **239.49**（与 240 Hz 刷新率一致） |
+| P95 帧时间 | 4.45 ms |
+| 对照组（不指定进程） | 906 帧；帧最多的应用：PI-Desktop.exe 475 / msedgewebview2.exe 431 |
+
+> 说明：`--timed 2` 里实际落盘约 1 s 的帧（ETW 会话建立要占掉开头一段），所以窗口有效期按
+> 实际 `CPUStartTime` 跨度算，不按请求时长算。
+
+### 9.3 仍然成立的两条铁律
+1. **不要边采边读**：`--output_file` 独占、`--output_stdout` 块缓冲，两条路都不通。
+2. **ETW 会话要清场**：被杀掉的 PresentMon 会留下卡死会话，第一次启动前 `logman stop` 自家前缀。

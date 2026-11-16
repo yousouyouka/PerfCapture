@@ -1,0 +1,38 @@
+{
+    "schema":  1,
+    "app":  "PerfCapture",
+    "channel":  "stable",
+    "version":  "1.5.10",
+    "date":  "2026-11-16",
+    "serial":  42,
+    "notes":  {
+                  "zh":  "实时 FPS：改用短窗口 burst，真正出数",
+                  "en":  "See the release notes in the app (What\u0027s new).",
+                  "ja":  "アプリ内の更新情報をご覧ください。"
+              },
+    "assets":  [
+                   {
+                       "kind":  "setup",
+                       "name":  "PerfCapture-Setup-1.5.10.exe",
+                       "size":  10349568,
+                       "sha256":  "264bc4d3256e258c7531bb0f7adf77e06ded1fd5dc817c1b4036d818f451583b",
+                       "urls":  [
+                                    "https://raw.githubusercontent.com/yousouyouka/PerfCapture/updates/bin/PerfCapture-Setup-1.5.10.exe",
+                                    "https://ghproxy.net/https://github.com/yousouyouka/PerfCapture/releases/download/v1.5.10/PerfCapture-Setup-1.5.10.exe",
+                                    "https://github.com/yousouyouka/PerfCapture/releases/download/v1.5.10/PerfCapture-Setup-1.5.10.exe"
+                                ]
+                   },
+                   {
+                       "kind":  "zip",
+                       "name":  "PerfCapture-1.5.10.zip",
+                       "size":  10302768,
+                       "sha256":  "568d61ac4d8aff7a3d856944e33098529fdf89f64b6e51adc7851afd887a6857",
+                       "urls":  [
+                                    "https://cdn.jsdelivr.net/gh/yousouyouka/PerfCapture@updates/bin/PerfCapture-1.5.10.zip",
+                                    "https://raw.githubusercontent.com/yousouyouka/PerfCapture/updates/bin/PerfCapture-1.5.10.zip",
+                                    "https://ghproxy.net/https://github.com/yousouyouka/PerfCapture/releases/download/v1.5.10/PerfCapture-1.5.10.zip",
+                                    "https://github.com/yousouyouka/PerfCapture/releases/download/v1.5.10/PerfCapture-1.5.10.zip"
+                                ]
+                   }
+               ]
+}

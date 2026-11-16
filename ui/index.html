@@ -66,7 +66,7 @@
           </svg>
           <span class="nav-label" data-i18n="nav.settings">设置</span>
         </button>
-        <div class="sidebar-version" id="sidebarVersion">v1.5.9</div>
+        <div class="sidebar-version" id="sidebarVersion">v1.5.10</div>
       </div>
     </nav>
   </aside>
@@ -227,7 +227,7 @@
           <div class="setting-block">
             <div class="setting-label">
               <strong>PerfCapture</strong>
-              <small>v1.5.9 · PresentMon ETW · 零注入</small>
+              <small>v1.5.10 · PresentMon ETW · 零注入</small>
             </div>
           </div>
 
@@ -388,6 +388,15 @@
           </div>
         </section>
 
+
+        <!-- 游戏帧率：独立一板（不归入 CPU / GPU 列） -->
+        <section class="rt-fps-panel">
+          <div class="rt-fps-head">
+            <span class="rt-fps-title" data-i18n="realtime.group.fps">帧率</span>
+            <span class="rt-fps-sub" id="rtFpsNote" data-i18n="realtime.fpsNote">PresentMon · 2 秒窗口</span>
+          </div>
+          <div class="rt-rows" id="rtFpsRows"></div>
+        </section>
         <div class="rt-grid">
           <section class="rt-col">
             <h2 class="rt-col-title">CPU <small id="rtCpuName"></small></h2>

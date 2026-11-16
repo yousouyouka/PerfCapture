@@ -31,21 +31,27 @@ $script:MetricsPmPath = ''
 $script:MetricsFpsPid = 0
 $script:MetricsFpsName = ''
 $script:MetricsFpsCsv = ''
+$script:MetricsFpsErrLast = ''
+$script:MetricsFpsErrAt = $null
 
 # ---------- 一轮采样（runspace 里执行；单引号 here-string，禁止变量展开） ----------
 $script:MetricsSampleScript = @'
 param($SmiPath, $Queue, $IntervalMs, $Ctl, $PmExe, $FpsCsv, $FpsPid)
 
-# ---- 实时 FPS：PresentMon 增量 tail ----
-# 目标进程 = 当前前台窗口的进程（排除本程序自己），退回「采集页上次选中的进程」$FpsPid。
-# 前台切换时重建 tail；PresentMon 被杀不会自动移除 ETW 会话，所以每次启动都带
-# --session_name 固定名 + --stop_existing_session，避免「trace session already running」静默失败。
+# ---- 实时 FPS：PresentMon burst（短窗口采集 → 进程退出后解析）----
+# 为什么不能「边采边读」：PresentMon 用 --output_file 时是**独占**打开（FileShare.None），
+# 跨进程读不到；--output_stdout 走管道是**块缓冲**，几秒内拿不到行。两条路都堵死（见 FPS-证据链.md §5）。
+# 所以每轮起一个 2 秒窗口（--timed 2 --terminate_after_timed），等它自己退出、文件锁释放后再整份解析。
+# 目标进程 = 当前前台窗口的进程（排除本程序），退回「采集页上次选中的进程」$FpsPid。
 if (-not ('PerfFg' -as [type])) {
     Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public static class PerfFg{[DllImport("user32.dll")]public static extern IntPtr GetForegroundWindow();[DllImport("user32.dll")]public static extern int GetWindowThreadProcessId(IntPtr h,out int pid);public static int Pid(){int p=0;GetWindowThreadProcessId(GetForegroundWindow(),out p);return p;}}' -ErrorAction SilentlyContinue
 }
 $hostPid = $PID
-$fps = @{ proc = $null; offset = 0; sw = $null; leftover = ''; header = $false; framesSeen = 0; ok = $false;
-          pid = 0; target = ''; err = ''; errFile = ''; cand = -1; hits = 0; win = @(); starve = 0; session = '' }
+$isAdm = $false
+try { $isAdm = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) } catch { }
+$fps = @{ proc = $null; ok = $false; pid = 0; target = ''; err = ''; cand = -1; hits = 0;
+          starve = 0; session = ''; started = $null; win = @(); value = $null; frames = 0;
+          emptyBursts = 0; burstSec = 2; timeout = 12; backoff = 0; lastDur = 0; p95 = $null }
 
 function Resolve-FpsTarget {
     param([int]$Fallback)
@@ -58,13 +64,14 @@ function Resolve-FpsTarget {
     return 0
 }
 
-function Stop-FpsTail {
+function Stop-FpsBurst {
     if ($fps.proc) { try { if (-not $fps.proc.HasExited) { Stop-Process -Id $fps.proc.Id -Force } } catch { } }
     # 杀掉 PresentMon 不会自动移除它的 ETW 会话，顺手 stop 掉自己那一个（唯一名，不会误伤别人）
     if ($fps.session) {
         try { & (Join-Path $env:SystemRoot 'System32\logman.exe') stop $fps.session -ets 2>&1 | Out-Null } catch { }
         $fps.session = ''
     }
+    if ($FpsCsv -and (Test-Path -LiteralPath $FpsCsv)) { Remove-Item -LiteralPath $FpsCsv -Force -ErrorAction SilentlyContinue }
     $fps.proc = $null
     $fps.ok = $false
     $fps.pid = 0
@@ -74,8 +81,6 @@ function Stop-FpsTail {
 # 开采集前清场：上一轮 PresentMon 被强杀会留下**卡死的 ETW 会话**，它占着 DxgKrnl 之后
 # 新会话一帧也收不到（实测：清掉 PerfCaptureLive_*/PresentMon 后，同一目标 8 秒立刻出 1661 帧）。
 function Clear-FpsSessions {
-    # 先杀掉上次没被收掉的 presentmon：它们还占着同一个 CSV 与 ETW 会话，
-    # 新实例会因为会话/文件抢占拿不到数据（实测 csv 一直在长但行数计 0）
     try { Get-Process -Name presentmon -ErrorAction SilentlyContinue | ForEach-Object { try { Stop-Process -Id $_.Id -Force } catch { } } } catch { }
     try {
         $logman = Join-Path $env:SystemRoot 'System32\logman.exe'
@@ -87,111 +92,170 @@ function Clear-FpsSessions {
     } catch { }
 }
 
-function Start-FpsTail {
+# 解析一个已经退出的 burst CSV：返回 帧数 / 窗口时长 / FPS / 1% Low / P95
+function Get-BurstFrames {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return $null }
+    $lines = @()
+    try { $lines = @(Get-Content -LiteralPath $Path -ErrorAction Stop) } catch { return $null }
+    if ($lines.Count -lt 2) { return $null }
+    $hdr = $lines[0] -split ','
+    $colCount = $hdr.Count
+    $iFt = [array]::IndexOf($hdr, 'FrameTime')
+    $iOn = [array]::IndexOf($hdr, 'CPUStartTime')
+    if ($iFt -lt 0) { return $null }
+    $n = 0
+    $sum = 0.0
+    $first = $null
+    $last = $null
+    $lastFt = 0.0
+    $list = New-Object System.Collections.Generic.List[double]
+    for ($ln = 1; $ln -lt $lines.Count; $ln++) {
+        $f = $lines[$ln] -split ','
+        if ($f.Count -ne $colCount) { continue }
+        $ft = 0.0
+        if (-not [double]::TryParse($f[$iFt], [ref]$ft)) { continue }
+        if ($ft -le 0) { continue }
+        $n++
+        $sum += $ft
+        $list.Add($ft)
+        if ($iOn -ge 0) {
+            $o = 0.0
+            if ([double]::TryParse($f[$iOn], [ref]$o)) {
+                if ($null -eq $first) { $first = $o }
+                $last = $o
+                $lastFt = $ft
+            }
+        }
+    }
+    if ($n -le 0) { return $null }
+    $avgFt = $sum / $n
+    $dur = 0.0
+    if ($null -ne $first -and $null -ne $last -and $last -gt $first) {
+        # 首帧起点 → 末帧起点 + **末帧自己的**时长 = 这 N 帧真正覆盖的时间
+        # （用平均帧时间会算错：末帧恰好是长帧时会把窗口算短、FPS 算高）
+        $dur = ($last - $first) / 1000.0 + $lastFt / 1000.0
+    }
+    if ($dur -le 0.05) { $dur = $sum / 1000.0 }
+    $val = $n / $dur
+    if ($val -le 0 -or $val -gt 2000) { $val = 1000.0 / $avgFt }
+    $sorted = @($list | Sort-Object -Descending)
+    $n1 = [math]::Max(1, [int][math]::Ceiling($sorted.Count * 0.01))
+    $slow = ($sorted | Select-Object -First $n1 | Measure-Object -Average).Average
+    $p95 = $null
+    $idx95 = [int][math]::Ceiling($sorted.Count * 0.05) - 1
+    if ($idx95 -lt 0) { $idx95 = 0 }
+    if ($idx95 -lt $sorted.Count) { $p95 = $sorted[$idx95] }
+    return @{ frames = $n; dur = $dur; fps = $val; low1 = $slow; p95 = $p95 }
+}
+
+function Start-FpsBurst {
     param([int]$TargetPid)
-    Stop-FpsTail
-    $fps.offset = 0; $fps.leftover = ''; $fps.header = $false; $fps.framesSeen = 0; $fps.err = ''; $fps.win = @(); $fps.starve = 0
+    Stop-FpsBurst
     if (-not $PmExe -or -not $FpsCsv -or $TargetPid -le 0) { return }
     if (-not (Test-Path -LiteralPath $PmExe)) { return }
     try {
         if (Test-Path -LiteralPath $FpsCsv) { Remove-Item -LiteralPath $FpsCsv -Force -ErrorAction SilentlyContinue }
-        # 实测结论：PresentMon 对 --output_file 是独占打开（FileShare.None），采样器跨进程读不到，
-        # 行数永远 0 —— 这是实时 FPS 一直不显示的**直接原因**；而 --output_stdout 走管道是块缓冲
-        # （重定向后 8 秒只有 2 字节），同样拿不到。所以「边采边读」这条路在当前版本上不成立，
-        # 需改成「短窗口采集 + 退出后解析」（burst 模式），见 CHANGELOG 1.5.7 的说明。
         $fps.session = 'PerfCaptureLive_' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
-        $pmArgs = @('--process_id', "$TargetPid", '--output_file', $FpsCsv, '--v2_metrics', '--no_console_stats',
-                    '--session_name', $fps.session)
+        $pmArgs = @('--process_id', "$TargetPid", '--output_file', $FpsCsv,
+                    '--timed', "$($fps.burstSec)", '--terminate_after_timed',
+                    '--v2_metrics', '--no_console_stats',
+                    '--session_name', $fps.session, '--stop_existing_session')
         $fps.proc = Start-Process -FilePath $PmExe -ArgumentList $pmArgs -PassThru -WindowStyle Hidden
-        $fps.sw = [Diagnostics.Stopwatch]::StartNew()
+        $fps.started = Get-Date
         $fps.ok = $true
         $fps.pid = $TargetPid
         try { $fps.target = (Get-Process -Id $TargetPid -ErrorAction Stop).ProcessName } catch { $fps.target = '' }
     } catch {
         $fps.ok = $false
         $fps.err = 'start: ' + $_.Exception.Message
+        $fps.proc = $null
         $fps.pid = 0
+        $fps.backoff = 10
     }
 }
 
-# PresentMon 起来就退出（未提权 / 会话冲突 / 参数错）时，把原因交给宿主记日志。
-# 不读 stderr（runspace 里带重定向会卡），改用退出码 + 一句可读解释。
-function Test-FpsTailDead {
+# 结算一个已经结束的 burst：解析 → 入滑动窗口 → 给读数；失败写明现场并退避
+function Complete-FpsBurst {
     if (-not $fps.proc) { return }
     $exited = $false
     try { $fps.proc.Refresh(); $exited = $fps.proc.HasExited } catch { $exited = $false }
+    $age = 0.0
+    if ($fps.started) { $age = ((Get-Date) - $fps.started).TotalSeconds }
+    if (-not $exited -and $age -gt $fps.timeout) {
+        try { Stop-Process -Id $fps.proc.Id -Force } catch { }
+        $fps.err = 'burst 超时（' + [int]$age + ' s 未退出，已强杀）'
+        $fps.proc = $null
+        $fps.ok = $false
+        $fps.starve++
+        $fps.backoff = 5
+        return
+    }
     if (-not $exited) { return }
     $code = $null
     try { $code = $fps.proc.ExitCode } catch { }
-    # 退出码 6 = PresentMon 建不了 ETW 会话（最常见就是没提权）；4201 那条已经用唯一会话名规避
-    if ($code -eq 6) {
-        $fps.err = 'PresentMon 无法创建 ETW 会话（退出码 6）：需要以管理员身份运行 PerfCapture'
-    } else {
-        $fps.err = 'presentmon exited early (exit code ' + $code + '); 常见原因：未提权或 ETW 会话被占用'
-    }
-    $fps.ok = $false
+    $r = Get-BurstFrames -Path $FpsCsv
     $fps.proc = $null
-    $fps.pid = 0
-    $fps.target = ''
-}
-function Read-NewFrames {
-    if (-not $fps.ok) { return 0 }
-    if (-not (Test-Path -LiteralPath $FpsCsv)) { return 0 }
-    # PresentMon 用独占方式持有输出文件，若这里抛「文件正由另一进程使用」，说明读取方拿不到数据 ——
-    # 把异常原文留在 $fps.err 里（宿主会写进日志），不要再静默成 0。
-    $fs = $null
-    foreach ($sh in @([IO.FileShare]::ReadWrite, ([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete), [IO.FileShare]::Read)) {
-        try { $fs = [IO.File]::Open($FpsCsv, [IO.FileMode]::Open, [IO.FileAccess]::Read, $sh); break }
-        catch { $fps.err = 'read: ' + $_.Exception.Message; $fs = $null }
+    $fps.ok = $false
+    if ($fps.session) {
+        try { & (Join-Path $env:SystemRoot 'System32\logman.exe') stop $fps.session -ets 2>&1 | Out-Null } catch { }
+        $fps.session = ''
     }
-    if (-not $fs) { return 0 }
-    $txt = ''
-    try {
+    if ($r -and $r.frames -gt 0) {
+        $fps.win += (, @([double]$r.frames, [double]$r.dur))
+        while ($fps.win.Count -gt 3) { $fps.win.RemoveAt(0) }
+        $fn = 0.0
+        $ft = 0.0
+        foreach ($w in $fps.win) { $fn += $w[0]; $ft += $w[1] }
+        if ($ft -gt 0) { $fps.value = [math]::Round($fn / $ft, 1) }
+        $fps.frames += $r.frames
+        $fps.lastDur = [math]::Round($r.dur, 2)
+        $fps.p95 = $r.p95
+        $fps.starve = 0
+        $fps.emptyBursts = 0
         $fps.err = ''
-        if ($fs.Length -le $fps.offset) { return 0 }
-        [void]$fs.Seek($fps.offset, [IO.SeekOrigin]::Begin)
-        $sr = New-Object IO.StreamReader($fs)
-        $txt = $sr.ReadToEnd()
-        $fps.offset = $fs.Position
-        $sr.Dispose()
-    } catch {
-        $fps.err = 'read: ' + $_.Exception.Message
-        return 0
-    } finally { $fs.Dispose() }
-    if (-not $txt) { return 0 }
-    $all = [string]$fps.leftover + $txt
-    $nl = $all.LastIndexOf("`n")
-    if ($nl -lt 0) { $fps.leftover = $all; return 0 }
-    $complete = $all.Substring(0, $nl)
-    $fps.leftover = $all.Substring($nl + 1)
-    $n = 0
-    foreach ($line in ($complete -split "`r?`n")) {
-        if (-not $line) { continue }
-        if (-not $fps.header) { $fps.header = $true; continue }   # 第一行是表头
-        $n++
+        $fps.backoff = 0
+    } else {
+        $fps.starve++
+        $fps.emptyBursts++
+        if ($code -eq 6) {
+            $fps.err = 'PresentMon 无法创建 ETW 会话（退出码 6）：需要以管理员身份运行 PerfCapture'
+            $fps.backoff = 15
+        } elseif ($null -ne $code -and $code -ne 0) {
+            $fps.err = ('presentmon 退出码 ' + $code + '（未提权或 ETW 会话被占用）')
+            $fps.backoff = 10
+        } elseif ($fps.emptyBursts -ge 2) {
+            $fps.err = ('目标 {0}(pid {1}) 连续 {2} 个 2 秒窗口没有帧（提权={3}）' -f $fps.target, $fps.pid, $fps.emptyBursts, $isAdm)
+            $fps.backoff = 3
+        }
+        # 连续 4 个空窗口：别再拿上一次的旧值骗人
+        if ($fps.emptyBursts -ge 4) { $fps.value = $null; $fps.win = @() }
     }
-    $fps.framesSeen += $n
-    return $n
 }
 
-# 采样循环启动前先清一次残留 ETW 会话（卡死的会话会让后面所有 tail 收不到帧）
+# 采样循环启动前先清一次残留 ETW 会话（卡死的会话会让后面所有窗口收不到帧）
 Clear-FpsSessions
 while ($true) {
     if ($Ctl -and $Ctl.stop) { break }
-# 目标选择：优先跟随前台，但**只在当前目标没在出帧时才换** ——
-# 1.5.4 实测：alt-tab 到浏览器/任务管理器就重开 tail，帧数永远攒不起来，FPS 一直空。
-$cand = Resolve-FpsTarget -Fallback $FpsPid
-if ($cand -ne $fps.cand) { $fps.cand = $cand; $fps.hits = 0 } else { $fps.hits++ }
-if ($cand -gt 0 -and $cand -ne $fps.pid) {
-    if (-not $fps.proc) { Start-FpsTail -TargetPid $cand }
-    elseif ($fps.hits -ge 3 -and $fps.starve -ge 6) { Start-FpsTail -TargetPid $cand }   # 当前 6 秒无帧 + 新目标稳定 3 秒
-}
-Test-FpsTailDead
-if ($fps.pid -gt 0) {
-    $alive = $true
-    try { [void](Get-Process -Id $fps.pid -ErrorAction Stop) } catch { $alive = $false }
-    if (-not $alive) { Stop-FpsTail }
-}
+    # 目标选择：优先跟随前台，但**只在当前目标没在出帧时才换**（alt-tab 到浏览器就换目标会让帧数永远攒不起来）
+    $cand = Resolve-FpsTarget -Fallback $FpsPid
+    if ($cand -ne $fps.cand) { $fps.cand = $cand; $fps.hits = 0 } else { $fps.hits++ }
+    $wantPid = $fps.pid
+    if ($cand -gt 0) {
+        if ($fps.pid -le 0) { $wantPid = $cand }
+        elseif ($cand -ne $fps.pid -and $fps.hits -ge 3 -and $fps.starve -ge 3) { $wantPid = $cand }
+    }
+    # 目标已经退出：收掉窗口，别再追它
+    if ($wantPid -gt 0) {
+        try { [void](Get-Process -Id $wantPid -ErrorAction Stop) } catch { $wantPid = 0; Stop-FpsBurst }
+    }
+    if ($fps.proc) {
+        Complete-FpsBurst
+    } elseif ($fps.backoff -gt 0) {
+        $fps.backoff--
+    } elseif ($wantPid -gt 0) {
+        Start-FpsBurst -TargetPid $wantPid
+    }
 $out = [ordered]@{
     at = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
     cpu = $null; cpuMhz = $null; cpuMhzMax = $null
@@ -386,42 +450,15 @@ if ($null -eq $out.ramTotal -and -not ('PcMetrics' -as [type])) {
     } catch { }
 }
 
-# ---- 实时 FPS（PresentMon 增量）----
-# 只有这一轮真的解析出帧才「结账并重置窗口」：否则生产者一次写一批会让读数在 0 与真值之间抖动。
-# 连续 2 秒以上没有新帧，才判定为「游戏不出了」，如实报 0（而不是一直显示上一次的旧值）。
-if ($fps.ok) {
-    $n = Read-NewFrames
-    if ($n -le 0) { $fps.starve++ }
-    if ($fps.sw) {
-        $elapsed = $fps.sw.Elapsed.TotalSeconds
-        if ($n -gt 0 -and $fps.framesSeen -gt 0 -and $elapsed -gt 0.2) {
-            $fps.starve = 0
-            # 3 窗口滑动平均：PresentMon 是一次批写、采样又是一秒一读，直接 n/elapsed 会周期性冒出
-            # 双倍和半量的尖峰（实测 54 / 7.3 交替）。用最近 3 个窗口合计后相除，读数才稳。
-            $fps.win += (, @([double]$n, [double]$elapsed))
-            while ($fps.win.Count -gt 3) { $fps.win.RemoveAt(0) }
-            $fn = 0.0; $ft = 0.0
-            foreach ($w in $fps.win) { $fn += $w[0]; $ft += $w[1] }
-            if ($ft -gt 0) { $out.fps = [math]::Round($fn / $ft, 1) }
-            $fps.sw.Restart()
-        } elseif ($elapsed -gt 2.0) {
-            if ($fps.framesSeen -gt 0) { $out.fps = 0.0 }
-            $fps.win = @()
-            $fps.sw.Restart()
-        }
-    }
-    # 6 秒一帧都没有：把原因交回宿主记一次日志，别让界面永远只显示「—」
-    if ($fps.starve -eq 6 -and $fps.framesSeen -eq 0) {
-        # 把现场信息一起写进日志：下次出问题时不用猜是「没起」「起错参数」还是「起了但没数据」
-        $csvInfo = if (Test-Path -LiteralPath $FpsCsv) { (Get-Item -LiteralPath $FpsCsv).Length } else { 'no-file' }
-        $isAdm = $false
-        try { $isAdm = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) } catch { }
-        $out.fpsErr = ('目标 {0}(pid {1}) 连续 6 秒无帧（csv={2}，提权={3}，ok={4}，framesSeen={5}，读错={6}）。' -f
-                       $fps.target, $fps.pid, $csvInfo, $isAdm, $fps.ok, $fps.framesSeen, $(if ($fps.err) { $fps.err } else { '无' }))
-    }
+# ---- 实时 FPS：读数已在 Complete-FpsBurst 里算好（最近 3 个窗口按帧数加权）----
+# 窗口间歇期沿用上一次的值（否则每 2 秒闪一次「—」）；连续 4 个空窗口才会清成 null。
+if ($null -ne $fps.value) { $out.fps = $fps.value }
+# 失败现场：只在「出过问题」时带上，宿主负责去重记日志（同一个错误不会每秒刷一条）
+if ($fps.err) {
+    $csvInfo = if (Test-Path -LiteralPath $FpsCsv) { (Get-Item -LiteralPath $FpsCsv).Length } else { 'no-file' }
+    $out.fpsErr = ('目标 {0}(pid {1})：{2}（csv={3} 字节，提权={4}，窗口 {5} s，累计 {6} 帧）' -f
+                   $fps.target, $fps.pid, $fps.err, $csvInfo, $isAdm, $fps.lastDur, $fps.frames)
 }
-
-if ($fps.err) { $fps.err = '' }
 $Queue.Enqueue([pscustomobject]$out)
     Start-Sleep -Milliseconds $IntervalMs
 }
@@ -583,7 +620,21 @@ function Invoke-MetricsTick {
         [void]$script:MetricsSamples.Add($sample)
         while ($script:MetricsSamples.Count -gt $script:MetricsRingSize) { $script:MetricsSamples.RemoveAt(0) }
         Update-MetricsCapsFromSample $sample
-        if ($sample.fpsErr) { Write-AppLog ('实时 FPS 不可用：' + $sample.fpsErr) 'WARN' }
+        if ($sample.fpsErr) {
+            # 同一个错误只记一次；仍没恢复就每 2 分钟提醒一次（burst 每 2 秒一轮，不这样会刷屏）
+            if ($sample.fpsErr -ne $script:MetricsFpsErrLast) {
+                $script:MetricsFpsErrLast = $sample.fpsErr
+                $script:MetricsFpsErrAt = Get-Date
+                Write-AppLog ('实时 FPS 不可用：' + $sample.fpsErr) 'WARN'
+            } elseif ($script:MetricsFpsErrAt -and ((Get-Date) - $script:MetricsFpsErrAt).TotalSeconds -ge 120) {
+                $script:MetricsFpsErrAt = Get-Date
+                Write-AppLog ('实时 FPS 仍不可用：' + $sample.fpsErr) 'WARN'
+            }
+        } elseif ($script:MetricsFpsErrLast) {
+            $script:MetricsFpsErrLast = ''
+            $script:MetricsFpsErrAt = $null
+            Write-AppLog '实时 FPS 已恢复'
+        }
         if ($sample.fpsTarget -and $sample.fpsTarget -ne $script:MetricsFpsName) {
             $script:MetricsFpsName = $sample.fpsTarget
             $script:MetricsCaps.fpsTarget = $sample.fpsTarget

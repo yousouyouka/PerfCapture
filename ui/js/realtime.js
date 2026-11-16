@@ -5,8 +5,9 @@
 (function initRealtime() {
   const cpuBox = document.getElementById('rtCpuRows');
   const gpuBox = document.getElementById('rtGpuRows');
+  const fpsBox = document.getElementById('rtFpsRows');
   const page = document.querySelector('.page[data-page=realtime]');
-  if (!cpuBox || !gpuBox || !page) return;
+  if (!cpuBox || !gpuBox || !fpsBox || !page) return;
 
   const tx = (key, fallback) => (typeof t === 'function' ? t(key, fallback) : fallback);
   const fill = (tpl, params) => Object.keys(params).reduce((s, k) => s.split('{' + k + '}').join(params[k]), tpl);
@@ -33,8 +34,13 @@
   // ---------- 字段表 ----------
   // maxOf: 条形/曲线上限；valueOf: 取原始值；caps: 能力表键（false=这台机器没有）；tip: 口径说明
   const FIELDS = [
-    // 游戏帧率（PresentMon）暂时不显示：FPS 采集还在改造中，这里先不占 CPU 列的位置，
-    // 后续补上时再决定放哪。（宿主侧的 fps / fpsTarget 采样代码保留不动。）
+    // 游戏帧率（PresentMon burst：2 秒窗口，进程退出后解析）——独立成一板，不再混进 CPU 列。
+    // 没选中进程 / 未提权 / 游戏不出帧时宿主给 null → 显示「—」。
+    { col: 'fps', key: 'fps', label: 'realtime.row.fps', unit: 'FPS', digits: 1,
+      maxOf: (c) => (c && c.fpsMax ? c.fpsMax : 240), valueOf: (s) => s.fps, caps: 'fps',
+      tip: 'realtime.tip.fps' },
+
+    // 以下遥测：每次采样一条（CPU / GPU / 内存），由宿主 35-Metrics.ps1 提供。
     { col: 'cpu', key: 'cpu.util', label: 'realtime.row.util', unit: '%', digits: 0,
       maxOf: () => 100, valueOf: (s) => s.cpu, warn: 80, bad: 95, caps: 'cpu' },
     { col: 'cpu', key: 'cpu.clock', label: 'realtime.row.clock', unit: 'GHz', digits: 2,
@@ -225,6 +231,7 @@
 
     cpuBox.innerHTML = '';
     gpuBox.innerHTML = '';
+    fpsBox.innerHTML = '';
     document.querySelectorAll('.rt-views button').forEach((b) => {
       b.setAttribute('aria-pressed', String(b.dataset.view === state.view));
     });
@@ -256,7 +263,10 @@
         visual.addEventListener('mouseleave', hideReadout);
       }
       // 内存行归到 CPU 列（系统类指标），避免再加一列
-      (f.col === 'gpu' ? gpuBox : cpuBox).appendChild(row);
+      // 帧率独立成板，不归入 CPU / GPU 列
+      if (f.col === 'fps') fpsBox.appendChild(row);
+      else if (f.col === 'gpu') gpuBox.appendChild(row);
+      else cpuBox.appendChild(row);
       return { f, row, barFill, path, value };
     });
     paint();

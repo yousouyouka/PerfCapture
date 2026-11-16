@@ -19,6 +19,16 @@ window.PerfUpdateAreas = ['capture', 'realtime', 'other'];
 
 window.PerfUpdates = [
   {
+    date: '2026-11-16', version: '1.5.10',
+    title: '实时 FPS 修好了：改用短窗口 burst 采集',
+    items: [
+      ['fix', '实时 FPS 一直是「—」的根因修掉了：PresentMon 写文件是独占打开、走管道又是块缓冲，边采边读拿不到数据。现在改成每 2 秒一个短窗口，等进程退出后再解析，FPS 才真正出数。', 'realtime'],
+      ['ui', '帧率独立成一板，放在 CPU / GPU 两列之上，不再混进 CPU 列，并标注「PresentMon · 2 秒窗口」。', 'realtime'],
+      ['ux', '读数按最近 3 个窗口加权，窗口间歇沿用上一次的值，不再每隔两秒闪一次「—」；连续失败才清空并写明原因。', 'realtime'],
+      ['compat', '同一个 FPS 错误只记一次日志，未恢复每 2 分钟提醒，恢复时记「已恢复」，不再每秒刷屏。', 'other']
+    ]
+  },
+  {
     date: '2026-11-17', version: '1.5.9',
     title: '批次 C：安装路径 / 实时监控瘦身 / 采集页说明入口',
     items: [

@@ -363,3 +363,19 @@
 .rt-metric-items { display: flex; flex-wrap: wrap; gap: 0.15rem 0.85rem; min-width: 0; }
 .rt-metric-items .rt-chk { cursor: pointer; }
 .rt-set-hint[data-warn="1"] { color: var(--warn); }
+
+/* ---- 游戏帧率：独立面板（不归入 CPU / GPU 列） ---- */
+.rt-fps-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.6rem 0.85rem 0.7rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  flex: 0 0 auto;
+}
+.rt-fps-head { display: flex; align-items: baseline; gap: 0.5rem; }
+.rt-fps-title { font-size: 0.8rem; color: var(--text-strong); }
+.rt-fps-sub { font-size: 0.64rem; color: var(--faint); }
+.rt-fps-panel .rt-row { grid-template-columns: 5.4rem minmax(2rem, 1fr) 7.2rem; }

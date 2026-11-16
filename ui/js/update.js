@@ -24,6 +24,7 @@
   let info = {};
   let pendingApply = false;     // 用户点过「立即更新」：下载完成后直接进安装并退出当前进程
   let askedVersion = '';        // 本次会话已经问过哪个版本，避免重复弹窗
+  let promptPending = false;    // 采集中检测到新版：先压住，采集结束再弹
 
   const tx = (k, fb) => (typeof t === 'function' ? t(k, fb) : fb);
   const fill = (tpl, p) => Object.keys(p).reduce((s, k) => s.split('{' + k + '}').join(p[k]), tpl);
@@ -79,6 +80,17 @@
   }
   function closePrompt() { if (modal) modal.hidden = true; }
 
+  /* 采集中先压住：把「该弹窗」记下来，等采集结束（busy=false）再弹。
+     理由：采集中途盖一层遮罩会挡住停止按钮，也打断正在看的数据。 */
+  function tryPrompt() {
+    const v = info.version || '';
+    if (!v) return;
+    if (askedVersion === v) { promptPending = false; return; }   // 问过就不再压
+    if (typeof state !== 'undefined' && state && state.busy === true) { promptPending = true; return; }
+    promptPending = false;
+    openPrompt();
+  }
+
   /** 交给宿主：先启动安装窗口，随后宿主关闭当前进程（避免覆盖正在使用的 dll） */
   function applyNow() {
     if (!info.path) { pendingApply = false; return; }
@@ -103,7 +115,7 @@
         const extra = note();
         showBanner(bannerHead() + (extra ? ' · ' + extra : ''), tx('update.download', '下载'), true);
         btnCheck.disabled = false;
-        openPrompt();
+        tryPrompt();
         break;
       }
       case 'downloading':
@@ -202,6 +214,12 @@
       }
     },
     refresh() { render(); },
+    /* 采集状态变化：采集刚结束（busy=false）时，把被压住的弹窗补上 */
+    busy(value) {
+      if (value || !promptPending) return;
+      promptPending = false;
+      openPrompt();
+    },
     current() { return { phase: phase, info: info }; },
   };
 

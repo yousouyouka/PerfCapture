@@ -62,7 +62,7 @@ function handleMessage(msg) {
     case 'progress': setProgress(msg.pct || 0); break;
     case 'log': addLog(msg.text || '', msg.cls || ''); break;
     case 'report': renderReport(msg.data); break;
-    case 'busy': setBusy(!!msg.value); break;
+    case 'busy': setBusy(!!msg.value); if (window.PerfUpdate) window.PerfUpdate.busy(!!msg.value); break;
     case 'theme': applyTheme(msg.mode); break;
     case 'update': if (window.PerfUpdate) window.PerfUpdate.handle(msg); break;
     case 'metricSample': if (window.PerfRealtime) window.PerfRealtime.handle(msg); break;

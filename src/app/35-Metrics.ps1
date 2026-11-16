@@ -30,6 +30,7 @@ $script:MetricsCpuBaseMhz = 0
 $script:MetricsPmPath = ''
 $script:MetricsFpsPid = 0
 $script:MetricsFpsName = ''
+$script:MetricsWorkerRestartAt = $null
 $script:MetricsFpsCsv = ''
 $script:MetricsFpsErrLast = ''
 $script:MetricsFpsErrAt = $null
@@ -50,8 +51,10 @@ $hostPid = $PID
 $isAdm = $false
 try { $isAdm = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) } catch { }
 $fps = @{ proc = $null; ok = $false; pid = 0; target = ''; err = ''; cand = -1; hits = 0;
-          starve = 0; session = ''; started = $null; win = @(); value = $null; frames = 0;
-          emptyBursts = 0; burstSec = 2; timeout = 12; backoff = 0; lastDur = 0; p95 = $null }
+          starve = 0; session = ''; started = $null; value = $null; frames = 0;
+          emptyBursts = 0; burstSec = 2; timeout = 12; backoff = 0; lastDur = 0; p95 = $null; lastOkAt = $null }
+# 窗口滑动记录必须是 List：数组是固定长度，RemoveAt 会抛「集合的大小是固定的」
+$fps.win = New-Object System.Collections.Generic.List[object]
 
 function Resolve-FpsTarget {
     param([int]$Fallback)
@@ -175,6 +178,13 @@ function Start-FpsBurst {
     }
 }
 
+# 停摆保护：超过 N 秒没有一次成功窗口 → 读数值视为失效（不许把十分钟前的数字当现状）
+function Test-FpsStale {
+    param($State, [int]$LimitSec = 8)
+    if (-not $State -or -not $State.lastOkAt) { return $false }
+    return (((Get-Date) - $State.lastOkAt).TotalSeconds -gt $LimitSec)
+}
+
 # 结算一个已经结束的 burst：解析 → 入滑动窗口 → 给读数；失败写明现场并退避
 function Complete-FpsBurst {
     if (-not $fps.proc) { return }
@@ -197,12 +207,14 @@ function Complete-FpsBurst {
     $r = Get-BurstFrames -Path $FpsCsv
     $fps.proc = $null
     $fps.ok = $false
-    if ($fps.session) {
-        try { & (Join-Path $env:SystemRoot 'System32\logman.exe') stop $fps.session -ets 2>&1 | Out-Null } catch { }
-        $fps.session = ''
-    }
+    # 这里**不再**调用 logman：--terminate_after_timed 会自己停掉会话，加上 --stop_existing_session
+    # 已足够。1.5.10 的教训：runspace 里每次 burst 都同步跑一次 logman，偶尔会卡死整个采样循环
+    # （表现就是 FPS 值冻在旧数、再也不更新）。会话清场只放在启动时和连续失败时做。
+    $fps.session = ''
     if ($r -and $r.frames -gt 0) {
-        $fps.win += (, @([double]$r.frames, [double]$r.dur))
+        # 注意：$fps.win 必须是 List[object]，不能用数组 += —— 数组是固定长度，
+        # RemoveAt 会抛「集合的大小是固定的」，1.5.10 的采样线程就是这么死的（读数冻住）
+        [void]$fps.win.Add(@([double]$r.frames, [double]$r.dur))
         while ($fps.win.Count -gt 3) { $fps.win.RemoveAt(0) }
         $fn = 0.0
         $ft = 0.0
@@ -214,6 +226,7 @@ function Complete-FpsBurst {
         $fps.starve = 0
         $fps.emptyBursts = 0
         $fps.err = ''
+        $fps.lastOkAt = Get-Date
         $fps.backoff = 0
     } else {
         $fps.starve++
@@ -229,7 +242,7 @@ function Complete-FpsBurst {
             $fps.backoff = 3
         }
         # 连续 4 个空窗口：别再拿上一次的旧值骗人
-        if ($fps.emptyBursts -ge 4) { $fps.value = $null; $fps.win = @() }
+        if ($fps.emptyBursts -ge 4) { $fps.value = $null; $fps.win.Clear() }
     }
 }
 
@@ -237,6 +250,7 @@ function Complete-FpsBurst {
 Clear-FpsSessions
 while ($true) {
     if ($Ctl -and $Ctl.stop) { break }
+    try {
     # 目标选择：优先跟随前台，但**只在当前目标没在出帧时才换**（alt-tab 到浏览器就换目标会让帧数永远攒不起来）
     $cand = Resolve-FpsTarget -Fallback $FpsPid
     if ($cand -ne $fps.cand) { $fps.cand = $cand; $fps.hits = 0 } else { $fps.hits++ }
@@ -255,6 +269,13 @@ while ($true) {
         $fps.backoff--
     } elseif ($wantPid -gt 0) {
         Start-FpsBurst -TargetPid $wantPid
+    }
+    } catch {
+        # 任何一次异常都不许弄死整个采样线程（1.5.10 就是这么停摆的：FPS 值冻在旧数上）
+        $fps.err = 'tick: ' + $_.Exception.Message
+        if ($fps.proc) { try { Stop-Process -Id $fps.proc.Id -Force } catch { } }
+        $fps.proc = $null
+        $fps.backoff = 3
     }
 $out = [ordered]@{
     at = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
@@ -453,6 +474,11 @@ if ($null -eq $out.ramTotal -and -not ('PcMetrics' -as [type])) {
 # ---- 实时 FPS：读数已在 Complete-FpsBurst 里算好（最近 3 个窗口按帧数加权）----
 # 窗口间歇期沿用上一次的值（否则每 2 秒闪一次「—」）；连续 4 个空窗口才会清成 null。
 if ($null -ne $fps.value) { $out.fps = $fps.value }
+# 停摆保护：超过 8 秒没有一次成功窗口，就不许再显示旧值（否则用户看到的是十分钟前的数字）
+    if (Test-FpsStale $fps) {
+        if ($null -ne $fps.value) { $fps.value = $null; $fps.win.Clear() }
+        if (-not $fps.err) { $fps.err = '窗口停摆：超过 8 秒没有完成一次 burst' }
+    }
 # 失败现场：只在「出过问题」时带上，宿主负责去重记日志（同一个错误不会每秒刷一条）
 if ($fps.err) {
     $csvInfo = if (Test-Path -LiteralPath $FpsCsv) { (Get-Item -LiteralPath $FpsCsv).Length } else { 'no-file' }
@@ -603,14 +629,15 @@ function Stop-MetricsWorker {
 function Invoke-MetricsTick {
     if (-not $script:MetricsRunning) { return }
     # 采样线程死了就报一次，别静默
+    # 采样线程死了就**重启**（1.5.10 的教训：原来直接停掉，于是 FPS 永远冻在旧数上）
     if ($script:MetricsWorker -and $script:MetricsWorker.Handle.IsCompleted) {
-        $err = $null
-        try { $err = $script:MetricsWorker.Handle.AsyncState } catch { }
-        Write-AppLog '监控采样线程已退出（可能是原生调用异常），本次会话停止采样' 'WARN'
+        $now = Get-Date
+        if ($script:MetricsWorkerRestartAt -and ($now - $script:MetricsWorkerRestartAt).TotalSeconds -lt 30) { return }
+        $script:MetricsWorkerRestartAt = $now
+        Write-AppLog '监控采样线程已退出，正在重启采样线程（FPS 读数先清空，避免显示旧值）' 'WARN'
         Stop-MetricsWorker
-        $script:MetricsRunning = $false
-        Stop-MetricsTimer
-        Send-ToUi @{ type = 'metricsCaps'; caps = $script:MetricsCaps; running = $false; error = 'worker-stopped' }
+        try { Start-MetricsWorker } catch { Write-AppLog ('重启采样线程失败：' + $_.Exception.Message) 'WARN' }
+        Send-ToUi @{ type = 'metricsCaps'; caps = $script:MetricsCaps; running = $script:MetricsRunning }
         return
     }
     if (-not $script:MetricsQueue) { return }

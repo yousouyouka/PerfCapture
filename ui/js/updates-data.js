@@ -19,6 +19,15 @@ window.PerfUpdateAreas = ['capture', 'realtime', 'other'];
 
 window.PerfUpdates = [
   {
+    date: '2026-11-16', version: '1.5.11',
+    title: 'FPS 冻在旧数字的修复：采样不再停摆',
+    items: [
+      ['fix', '实时 FPS 会停在十几分钟前的旧数字（1.5.10 的回归）：每个窗口结束后在采样线程里同步跑 logman 停会话，偶尔卡死后整个采样循环就停了。现在热路径不再调 logman，并加了停摆检测。', 'realtime'],
+      ['fix', '超过 8 秒没有完成一次窗口，帧率立刻清成「—」而不是继续显示旧值；原因直接显示在帧率板副标题上，悬停可看完整现场。', 'realtime'],
+      ['fix', '采样线程遇到异常不再整体退出（每轮 tick 有 try/catch + 退避）；万一线程真的结束，宿主会自动重启它，而不是「本次会话停止采样」。', 'realtime']
+    ]
+  },
+  {
     date: '2026-11-16', version: '1.5.10',
     title: '实时 FPS 修好了：改用短窗口 burst 采集',
     items: [

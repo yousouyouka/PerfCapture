@@ -378,4 +378,5 @@
 .rt-fps-head { display: flex; align-items: baseline; gap: 0.5rem; }
 .rt-fps-title { font-size: 0.8rem; color: var(--text-strong); }
 .rt-fps-sub { font-size: 0.64rem; color: var(--faint); }
-.rt-fps-panel .rt-row { grid-template-columns: 5.4rem minmax(2rem, 1fr) 7.2rem; }
+.rt-fps-panel .rt-row { grid-template-columns: 5.4rem minmax(2rem, 1fr) 7.2rem; }/* 帧率板副标题：出问题时变警示色（错误原因挂在这里） */
+.rt-fps-sub[data-warn="1"] { color: var(--warn); }

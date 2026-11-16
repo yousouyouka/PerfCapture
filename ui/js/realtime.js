@@ -407,6 +407,20 @@
       return;
     }
     if (msg.type === 'metricSample' && msg.sample) {
+      /* FPS 现场：出问题时把原因挂到帧率板副标题上，别让人对着一个旧数字猜 */
+      const noteEl = document.getElementById('rtFpsNote');
+      if (noteEl) {
+        const bad = msg.sample.fpsErr;
+        if (bad) {
+          noteEl.textContent = '⚠ ' + String(bad).slice(0, 60);
+          noteEl.title = bad;
+          noteEl.dataset.warn = '1';
+        } else {
+          noteEl.textContent = tx('realtime.fpsNote', 'PresentMon · 2 秒窗口');
+          noteEl.title = '';
+          noteEl.dataset.warn = '';
+        }
+      }
       state.sample = msg.sample;
       state.history.push(msg.sample);
       const cap = (state.caps && state.caps.ringSize) || 120;

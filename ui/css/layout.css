@@ -249,6 +249,14 @@
 .setting-label { display: flex; flex-direction: column; gap: 0.18rem; min-width: 0; }
 .setting-label strong { font-weight: 400; color: var(--text-strong); font-size: 0.9rem; }
 .setting-label small { color: var(--faint); font-size: 0.74rem; }
+/* 关于页的联系方式：竖向堆叠；值可一键全选（.about-v 继承 user-select: all），复制不用拖选 */
+.setting-block.is-stack { flex-direction: column; align-items: flex-start; gap: 0.5rem; }
+.about-links { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.34rem; }
+.about-links li { display: flex; align-items: baseline; gap: 0.6rem; font-size: 0.78rem; }
+.about-k { flex: 0 0 4.4rem; color: var(--faint); }
+.about-v { color: var(--text); font-size: 0.8rem; user-select: all; word-break: break-all; }
+.about-link { color: var(--accent); text-decoration: none; border-bottom: 1px dashed var(--accent); }
+.about-link:hover { color: var(--accent-hover); }
 .segmented {
   display: inline-flex;
   gap: 2px;

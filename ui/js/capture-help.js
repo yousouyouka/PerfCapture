@@ -138,6 +138,19 @@
       html += stats;
     }
 
+    /* ④b 术语：降频原因（显卡自报的限流原因，不是故障）。用户最容易被「功耗墙」吓到，
+       所以这里逐个解释，并明确「功耗墙 ≠ 供电不稳」。 */
+    html += section(tx('capture.help.throttleTitle', '降频原因是什么意思'));
+    html += '<p class="cap-help-note">' + esc(tx('capture.help.throttleLead', '')) + '</p>';
+    html += '<ul class="cap-help-list cap-help-throttle">';
+    ['sw_power_cap', 'sw_thermal', 'hw_thermal', 'hw_slowdown', 'sync_boost', 'gpu_idle', 'app_clocks', 'hw_power_brake'].forEach((k) => {
+      const why = tx('capture.help.throttleWhy.' + k, '');
+      html += '<li><b>' + esc(tx('metric.throttle.' + k, k)) + '</b>' +
+              (why ? '<div class="cap-help-why">' + esc(why) + '</div>' : '') + '</li>';
+    });
+    html += '</ul>';
+    html += '<p class="cap-help-note">' + esc(tx('capture.help.throttleFoot', '')) + '</p>';
+
     /* ⑤ 为什么有「暂不可用」：逐条写原因，绝不填 0 */
     if (doc && Array.isArray(doc.metrics)) {
       const na = doc.metrics.filter((m) => m && m.status === 'na');

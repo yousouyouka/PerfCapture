@@ -103,16 +103,13 @@
   border-color: var(--line-strong);
   opacity: 1;
 }
-.cogroup-note {
-  grid-column: 1 / -1;
-  margin: 0.1rem 0 0;
-  font-size: 0.68rem;
-  line-height: 1.55;
-  color: var(--faint);
-}
+/* 说明类文字一律走悬停提示；带提示的标题给 help 光标，让「这里能悬停」看得出来 */
+.collect-grid .cogroup { grid-column: 1 / -1; margin-top: 1.05rem; }
+.collect-grid .cogroup:first-of-type { margin-top: 0.45rem; }
+.collect-grid .cogroup-name[title] { cursor: help; }
+.cosection-title[title] { cursor: help; }
 
-/* ── 采集项按板块分组 + 「始终采集」徽标 ── */
-.collect-grid .cogroup { grid-column: 1 / -1; }
+/* ── 采集项按板块分组（板块名 = 小标题）── */
 .collect-grid .cogroup-name {
   font-size: 0.72rem;
   color: var(--muted);
@@ -382,7 +379,7 @@ body.is-col-resizing * { cursor: col-resize !important; user-select: none !impor
 .preset-reset[hidden] { display: none; }
 
 /* ---- 采集项三块：核心 / 可选 / 派生 ---- */
-.cosection { grid-column: 1 / -1; margin-top: 0.5rem; }
+.cosection { grid-column: 1 / -1; margin-top: 1.15rem; }
 .cosection:first-child { margin-top: 0; }
 .cosection-title {
   font-size: 0.78rem;
@@ -390,12 +387,6 @@ body.is-col-resizing * { cursor: col-resize !important; user-select: none !impor
   color: var(--text-strong);
   padding-bottom: 0.24rem;
   border-bottom: 1px solid var(--line);
-}
-.cosection-note {
-  margin: 0.28rem 0 0.1rem;
-  font-size: 0.68rem;
-  line-height: 1.55;
-  color: var(--faint);
 }
 /* 派生项：没有勾选框，只说明它是算出来的 */
 .collect-grid .check.is-derived {

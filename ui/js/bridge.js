@@ -77,6 +77,8 @@ function handleMessage(msg) {
 
 function setProcs(items) {
   state.procs = items || [];
+  /* 进程列表变了：通知实时监控页刷新「目标进程」下拉（那边不直接读 state） */
+  try { document.dispatchEvent(new CustomEvent('perf:procs', { detail: { procs: state.procs } })); } catch (e) { }
   if (!state.procs.length) {
     $('#procText').textContent = '（没有找到带窗口的进程）';
     return;

@@ -18,6 +18,7 @@
 
     { "skip": "cpuutil",   "module": "cpu",         "kind": "core",     "label": "capture.item.cpuutil" },
     { "skip": "proccpu",   "module": "cpu",         "kind": "optional", "label": "capture.item.proccpu",   "default": true },
+    { "skip": "cpupower",  "module": "cpu",         "kind": "optional", "label": "capture.item.cpupower",  "tip": "capture.tip.cpupower", "default": true },
 
     { "skip": "gpuusage",  "module": "gpu",         "kind": "optional", "label": "capture.item.gpuusage",  "tip": "capture.tip.gpuusage", "default": true },
     { "skip": "gputemp",   "module": "gpu",         "kind": "optional", "label": "capture.item.gputemp",   "tip": "capture.tip.gputemp", "default": true },
@@ -35,7 +36,7 @@
     { "skip": "res",       "module": "environment", "kind": "optional", "label": "capture.item.res",       "default": true }
   ],
   "presets": [
-    { "id": "quick",    "label": "capture.preset.quick",    "seconds": 60,  "warmup": 0, "skip": ["latency", "proccpu", "sysmem", "sharedmem", "features", "res"] },
+    { "id": "quick",    "label": "capture.preset.quick",    "seconds": 60,  "warmup": 0, "skip": ["latency", "proccpu", "cpupower", "sysmem", "sharedmem", "features", "res"] },
     { "id": "standard", "label": "capture.preset.standard", "seconds": 120, "warmup": 3, "skip": ["features"] },
     { "id": "pro",      "label": "capture.preset.pro",      "seconds": 180, "warmup": 5, "skip": [] }
   ]

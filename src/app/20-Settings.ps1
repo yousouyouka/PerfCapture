@@ -8,9 +8,12 @@ function New-DefaultConfig {
         preset = 'pro'; customBase = 'pro'; warmup = 5
         language = 'zh-CN'
         lastPid = 0; windowW = 1180; windowH = 780
+        # 实时监控的「目标进程」：0 = 跟随前台窗口；>0 = 固定采这个进程（rtTargetName 只用于显示/日志）
+        rtTargetPid = 0; rtTargetName = ''
         # 检查更新：auto 关掉后不再自动查；skippedVersion 是用户点过「跳过此版本」的版本号
         updateCheck = @{ auto = $true; lastCheckAt = ''; skippedVersion = '' }
-        overlay     = @{ visible = $false; x = -1; y = -1; opacity = 90; collapsed = $false; anchor = 'tr'; px = 100; py = 0; fontSize = 'normal'; fontColor = 'white'; layout = 'linear'; metrics = @('fps', 'cpu', 'gpu', 'mem'); hotkey = @{ ctrl = $true; alt = $true; shift = $false; key = 'M' } }
+        # 浮窗：items 是 16 项逐项勾选（老配置的 metrics 四族会一次性迁移过来，见 55-Overlay.ps1）
+        overlay     = @{ visible = $false; x = -1; y = -1; opacity = 0; collapsed = $false; anchor = 'tr'; px = 100; py = 0; fontSize = 'normal'; fontColor = 'white'; layout = 'linear'; items = @('fps', 'gpuutil', 'gputemp', 'gpupower', 'ram'); hotkey = @{ ctrl = $true; alt = $true; shift = $false; key = 'M' } }
     }
 }
 
@@ -82,6 +85,18 @@ if (Test-Path $script:CfgPath) {
         $j = Get-Content $script:CfgPath -Raw -Encoding UTF8 | ConvertFrom-Json
         foreach ($k in 'theme', 'language', 'seconds', 'minimize', 'sound', 'skip', 'lastPid', 'windowW', 'windowH') {
             if ($null -ne $j.$k) { Set-ConfigValue $k $j.$k }
+        }
+        # 实时监控目标进程（新增键，老配置没有就用默认 0 = 跟随前台）
+        $rtp = ConvertTo-ConfigInt $j.rtTargetPid
+        if ($null -ne $rtp -and $rtp -ge 0 -and $rtp -le 1000000) { $script:Cfg.rtTargetPid = $rtp }
+        if ($null -ne $j.rtTargetName) { $script:Cfg.rtTargetName = [string]$j.rtTargetName }
+        if ($null -ne $j.overlay) {
+            foreach ($ok in $j.overlay.PSObject.Properties) { $script:Cfg.overlay[$ok.Name] = $ok.Value }
+            # 老配置只有 metrics 四族、没有 items：删掉默认 items，交给 55-Overlay 走「族 → 项」迁移；
+            # 否则用户以前选的四族会被新版本的默认 6 项顶掉。
+            if ($null -ne $j.overlay.metrics -and $null -eq $j.overlay.items) {
+                if ($script:Cfg.overlay -is [hashtable]) { [void]$script:Cfg.overlay.Remove('items') }
+            }
         }
         Write-AppLog ('配置已载入: ' + $script:CfgPath)
     } catch {

@@ -336,6 +336,21 @@
 .rt-step:hover { background: var(--accent-soft); }
 .rt-step-value { min-width: 4.2rem; text-align: center; font-size: 0.78rem; color: var(--text-strong); }
 .rt-range { flex: 1 1 8rem; min-width: 6rem; accent-color: var(--accent); }
+/* 目标进程旁边的刷新按钮：与下拉同高，正方形，不抢眼 */
+.rt-refresh {
+  width: 1.7rem;
+  height: 1.7rem;
+  padding: 0;
+  font-size: 0.9rem;
+  line-height: 1;
+  color: var(--text);
+  background: var(--tile);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  cursor: pointer;
+}
+.rt-refresh:hover:not(:disabled) { background: var(--input); }
+.rt-refresh:disabled { opacity: 0.45; cursor: default; }
 .rt-num {
   width: 4.4rem;
   padding: 0.2rem 0.4rem;
@@ -372,6 +387,20 @@
 .rt-metric-items { display: flex; flex-wrap: wrap; gap: 0.15rem 0.85rem; min-width: 0; }
 .rt-metric-items .rt-chk { cursor: pointer; }
 .rt-set-hint[data-warn="1"] { color: var(--warn); }
+
+/* 浮窗「显示内容」：标签在上，16 个勾选框按列自动铺开 */
+.rt-set-row.rt-set-col { flex-direction: column; align-items: flex-start; gap: 0.3rem; }
+.rt-set-row.rt-set-col > .rt-set-label { flex: 0 0 auto; }
+.rt-chk-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(7.4rem, 1fr));
+  gap: 0.2rem 0.9rem;
+  width: 100%;
+}
+.rt-chk-grid .rt-chk { cursor: pointer; }
+/* 本机采不到的项：灰掉、不可勾选 */
+.rt-chk.is-locked { opacity: 0.45; cursor: not-allowed; }
+.rt-chk.is-locked input { cursor: not-allowed; }
 
 /* ---- 游戏帧率：独立面板（不归入 CPU / GPU 列） ---- */
 .rt-fps-panel {

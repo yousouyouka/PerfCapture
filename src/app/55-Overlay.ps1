@@ -19,23 +19,46 @@ $script:OverlayHotkeyWasDown = $false
 $script:OverlayControls = $null
 $script:OverlayStyle = $null
 
-$script:OverlayRowDefs = @(
-    @{ key = 'fps'; label = 'FPS'; max = 0 }
-    @{ key = 'cpu'; label = 'CPU'; max = 100 }
-    @{ key = 'gpu'; label = 'GPU'; max = 100 }
-    @{ key = 'mem'; label = 'MEM'; max = 100 }
+# ── 浮窗可显示的 16 项（键名与 35-Metrics 采样字段一一对应）──
+# group：显示分组（FPS / GPU / CPU / 延迟 / RAM）
+# label：堆叠布局里一行的名字（照用户给的样式：GPU 利用率 / FPS 1%L / PCL（av）…）
+# field / unit：采样字段与单位；locked：本机确实拿不到，界面上**不给勾选**
+$script:OverlayItemDefs = @(
+    @{ key = 'fps';      group = 'FPS';  label = 'FPS';         unit = '';    field = 'fps' }
+    @{ key = 'fpslow';   group = 'FPS';  label = 'FPS 1%L';     unit = '';    field = 'fpsLow1' }
+    @{ key = 'gpuutil';  group = 'GPU';  label = 'GPU 利用率';   unit = '%';   field = 'gpu' }
+    @{ key = 'gputemp';  group = 'GPU';  label = 'GPU 温度';     unit = '°C';  field = 'gpuTemp' }
+    @{ key = 'gpuclock'; group = 'GPU';  label = 'GPU 频率';     unit = 'MHz'; field = 'gpuClock' }
+    @{ key = 'gpupower'; group = 'GPU';  label = 'GPU 功率';     unit = 'W';   field = 'gpuPower' }
+    @{ key = 'gpufan';   group = 'GPU';  label = 'GPU 风扇速度'; unit = '%';   field = 'gpuFan' }
+    @{ key = 'vramclk';  group = 'GPU';  label = 'VRAM 频率';    unit = 'MHz'; field = 'gpuMemClock' }
+    @{ key = 'gpuvolt';  group = 'GPU';  label = 'GPU 电压';     unit = 'V';   locked = $true }
+    @{ key = 'cpuutil';  group = 'CPU';  label = 'CPU 利用率';   unit = '%';   field = 'cpu' }
+    @{ key = 'cpuclock'; group = 'CPU';  label = 'CPU 频率';     unit = 'MHz'; field = 'cpuMhz' }
+    @{ key = 'cpupower'; group = 'CPU';  label = 'CPU 功率';     unit = 'W';   field = 'cpuPower' }
+    @{ key = 'cputemp';  group = 'CPU';  label = 'CPU 温度';     unit = '°C';  locked = $true }
+    @{ key = 'rlat';     group = '延迟'; label = 'RLAT';         unit = 'ms';  field = 'rlat' }
+    @{ key = 'pcl';      group = '延迟'; label = 'PCL（av）';    unit = 'ms';  field = 'pcl' }
+    @{ key = 'ram';      group = 'RAM';  label = 'RAM';          unit = '%';   field = '__ram' }
 )
 
-$script:OverlayMetricKeys = @('fps', 'cpu', 'gpu', 'mem')
+$script:OverlayItemKeys = @($script:OverlayItemDefs | ForEach-Object { $_.key })
+# 本机拿不到的项：界面上灰掉、不可勾选，也不写进配置
+$script:OverlayLockedKeys = @($script:OverlayItemDefs | Where-Object { $_.locked } | ForEach-Object { $_.key })
+$script:OverlaySelectableKeys = @($script:OverlayItemDefs | Where-Object { -not $_.locked } | ForEach-Object { $_.key })
+$script:OverlayGroupOrder = @('FPS', 'GPU', 'CPU', '延迟', 'RAM')
 
-# 只显示用户勾选的指标族；空集合兜底 FPS，避免浮窗变空白
-function Get-OverlayRowSet {
+# 首次开启时的默认显示项（想只看 FPS 就在设置里全关掉、只留一项）
+$script:OverlayDefaultItems = @('fps', 'gpuutil', 'gputemp', 'gpupower', 'ram')
+
+# 只显示用户勾选的项（locked 项一律剔除）；空集合兜底 FPS，避免浮窗变空白
+function Get-OverlayItemSet {
     param($Cfg)
     $keys = @()
-    if ($null -ne $Cfg.metrics) { $keys = @($Cfg.metrics) }
-    if (-not $keys.Count) { $keys = @('fps') }
-    $rows = @($script:OverlayRowDefs | Where-Object { $keys -contains $_.key })
-    if (-not $rows.Count) { $rows = @($script:OverlayRowDefs[0]) }
+    if ($null -ne $Cfg.items) { $keys = @($Cfg.items) }
+    if (-not $keys.Count) { $keys = $script:OverlayDefaultItems }
+    $rows = @($script:OverlayItemDefs | Where-Object { $keys -contains $_.key -and -not $_.locked })
+    if (-not $rows.Count) { $rows = @($script:OverlayItemDefs[0]) }
     return $rows
 }
 
@@ -46,40 +69,63 @@ function Get-OverlayCfg {
     if (-not $script:Cfg.overlay) { $script:Cfg.overlay = @{} }
     $o = $script:Cfg.overlay
     $def = [ordered]@{
-        visible = $false; x = -1; y = -1; opacity = 90; collapsed = $false
+        visible = $false; x = -1; y = -1; opacity = 0; collapsed = $false
         anchor = 'tr'; px = 100; py = 0
         fontSize = 'normal'; fontColor = 'white'; layout = 'linear'
     }
     foreach ($k in $def.Keys) { if ($null -eq $o.$k) { $o.$k = $def[$k] } }
     if (-not $o.hotkey) { $o.hotkey = @{ ctrl = $true; alt = $true; shift = $false; key = 'M' } }
     if (-not $o.hotkey.key) { $o.hotkey.key = 'M' }
-    # 浮窗显示哪些指标族（界面「显示指标」勾选后按族折算，页面与浮窗共用一份）
-    $mk = @()
-    if ($null -ne $o.metrics) { $mk = @(@($o.metrics) | ForEach-Object { ([string]$_).ToLower() } | Where-Object { $script:OverlayMetricKeys -contains $_ } | Select-Object -Unique) }
-    if (-not $mk.Count) { $mk = @('fps', 'cpu', 'gpu', 'mem') }
-    $o.metrics = $mk
-    # 老配置里 opacity 是 0..1，迁移到百分比
-    $op = 90.0
+
+    # 显示项：新键 items（16 项逐项勾）。老配置只有 metrics（四个族）→ 一次性迁移，之后不再读 metrics
+    $ik = @()
+    if ($null -ne $o.items) {
+        $ik = @(@($o.items) | ForEach-Object { ([string]$_).ToLower() } | Where-Object { $script:OverlaySelectableKeys -contains $_ } | Select-Object -Unique)
+    }
+    if (-not $ik.Count -and $null -ne $o.metrics) {
+        $map = @{ fps = @('fps', 'fpslow'); cpu = @('cpuutil', 'cpuclock', 'cpupower'); gpu = @('gpuutil', 'gputemp', 'gpupower'); mem = @('ram') }
+        foreach ($fam in @($o.metrics)) {
+            $kk = ([string]$fam).ToLower()
+            if ($map.ContainsKey($kk)) { $ik += $map[$kk] }
+        }
+        $ik = @($ik | Select-Object -Unique)
+        if ($ik.Count) { Write-AppLog '浮窗配置迁移：旧的四族 metrics → 新的逐项 items' }
+    }
+    # 老配置里可能有已下线的项（比如黑字时代的组合），统一按可选清单收口
+    $ik = @($ik | Where-Object { $script:OverlaySelectableKeys -contains $_ })
+    if (-not $ik.Count) { $ik = $script:OverlayDefaultItems }
+    $o.items = $ik
+
+    # 老配置里 opacity 是 0..1，迁移到百分比；现在允许 0（背景完全透明，只有字浮在画面上）
+    $op = 0.0
     try { $op = [double]$o.opacity } catch { }
-    if ($op -le 1) { $op = $op * 100 }
-    $o.opacity = [int][math]::Min(100, [math]::Max(20, [math]::Round($op)))
+    if ($op -gt 0 -and $op -le 1) { $op = $op * 100 }
+    $o.opacity = [int][math]::Min(100, [math]::Max(0, [math]::Round($op)))
     if ($o.anchor -notin $script:OverlayAnchors -and $o.anchor -ne 'custom') { $o.anchor = 'tr' }
     if ($o.fontSize -notin @('small', 'normal', 'large')) { $o.fontSize = 'normal' }
-    if ($o.fontColor -notin @('white', 'gray', 'green', 'yellow')) { $o.fontColor = 'white' }
-    if ($o.layout -ne 'linear') { $o.layout = 'linear' }
+    if ($o.fontColor -notin @('white', 'green', 'red', 'blue')) { $o.fontColor = 'white' }
+    if ($o.layout -notin @('linear', 'stacked')) { $o.layout = 'linear' }
     return $o
 }
 
 function Get-OverlayStyle {
     param($Cfg)
-    $size = switch ($Cfg.fontSize) { 'small' { 8 } 'large' { 11 } default { 9 } }
-    $color = switch ($Cfg.fontColor) {
-        'gray' { [System.Drawing.Color]::FromArgb(176, 180, 190) }
-        'green' { [System.Drawing.Color]::FromArgb(150, 226, 170) }
-        'yellow' { [System.Drawing.Color]::FromArgb(240, 214, 140) }
-        default { [System.Drawing.Color]::FromArgb(235, 238, 245) }
+    $size = switch ($Cfg.fontSize) { 'small' { 8 } 'large' { 12 } default { 10 } }
+    # 四种字色（黑字已删：透明底上看不见，配浅底又和其他颜色行为不一致）
+    $pal = @{
+        white = @(235, 238, 245)
+        green = @(150, 226, 170)
+        red   = @(242, 138, 138)
+        blue  = @(150, 195, 245)
     }
-    return @{ size = $size; small = [math]::Max(6, $size - 1); color = $color }
+    $c = if ($pal.ContainsKey([string]$Cfg.fontColor)) { $pal[[string]$Cfg.fontColor] } else { $pal['white'] }
+    return @{
+        size  = $size
+        color = [System.Drawing.Color]::FromArgb($c[0], $c[1], $c[2])
+        back  = [System.Drawing.Color]::FromArgb(26, 28, 34)
+        # TransparencyKey 用一个绝不会出现在文字里的颜色，避免把字也抠掉
+        key   = [System.Drawing.Color]::FromArgb(1, 2, 3)
+    }
 }
 
 # 九宫格 / 百分比 → 工作区坐标（custom 时直接用像素）
@@ -140,59 +186,55 @@ function Build-OverlayForm {
     $f.ShowInTaskbar = $false
     $f.TopMost = $true
     $f.Text = 'PerfCapture 浮窗'
-    $f.BackColor = [System.Drawing.Color]::FromArgb(26, 28, 34)
-    $f.Opacity = [double]$cfg.opacity / 100.0
+    $f.BackColor = $style.back
     $f.MinimizeBox = $false
     $f.MaximizeBox = $false
+    $f.Padding = New-Object System.Windows.Forms.Padding(0)
 
     $font = New-Object System.Drawing.Font('Microsoft YaHei UI', $style.size)
-    $fontSmall = New-Object System.Drawing.Font('Microsoft YaHei UI', $style.small)
-    $labelColor = [System.Drawing.Color]::FromArgb(170, 176, 188)
-    $rowH = [int]($style.size + 9)
 
-    $controls = @{}
+    # 按项生成：每项一对「名字 + 数值」标签。
+    #   堆叠：一项一行，名字用完整名（GPU 利用率 / FPS 1%L / PCL（av））
+    #   线性：同一组的项并到一行，组名只出现一次（FPS / GPU / CPU / 延迟 / RAM），后面只跟值
+    # 两种布局共用同一批标签，切换时只改文本与坐标（见 Apply-OverlayLayout）。
     $rows = @()
-    $y = 10
-    $defs = @(Get-OverlayRowSet $cfg)
-    foreach ($def in $defs) {
-        $lbl = New-Object System.Windows.Forms.Label
-        $lbl.Text = $def.label
-        $lbl.Font = $font
-        $lbl.ForeColor = $labelColor
-        $lbl.AutoSize = $false
-        $lbl.TextAlign = 'MiddleLeft'
-        $lbl.SetBounds(12, $y, 40, $rowH)
+    $items = @(Get-OverlayItemSet $cfg)
+    $seenGroups = @{}
+    foreach ($def in $items) {
+        $isGroupHead = -not $seenGroups.ContainsKey([string]$def.group)
+        $seenGroups[[string]$def.group] = $true
 
-        $track = New-Object System.Windows.Forms.Panel
-        $track.BackColor = [System.Drawing.Color]::FromArgb(52, 56, 66)
-        $track.SetBounds(56, $y + [int]($rowH / 3), 118, 6)
-
-        $fill = New-Object System.Windows.Forms.Panel
-        $fill.BackColor = [System.Drawing.Color]::FromArgb(134, 114, 186)
-        $fill.SetBounds(0, 0, 0, 6)
-        $track.Controls.Add($fill)
+        $name = New-Object System.Windows.Forms.Label
+        $name.Text = [string]$def.label
+        $name.Font = $font
+        $name.ForeColor = $style.color
+        $name.BackColor = [System.Drawing.Color]::Transparent
+        $name.AutoSize = $false
+        $name.TextAlign = 'MiddleLeft'
 
         $val = New-Object System.Windows.Forms.Label
-        $val.Text = '—'
-        $val.Font = $fontSmall
+        $val.Text = 'N/A'
+        $val.Font = $font
         $val.ForeColor = $style.color
+        $val.BackColor = [System.Drawing.Color]::Transparent
         $val.AutoSize = $false
         $val.TextAlign = 'MiddleRight'
-        $val.SetBounds(178, $y, 58, $rowH)
 
-        $f.Controls.Add($lbl)
-        $f.Controls.Add($track)
+        $f.Controls.Add($name)
         $f.Controls.Add($val)
-        $rows += @{ def = $def; label = $lbl; track = $track; fill = $fill; value = $val }
-        $y += ($rowH + 12)
+        $rows += @{ def = $def; group = [string]$def.group; head = $isGroupHead; name = $name; value = $val }
     }
 
-    # 拖动 / 双击收起
+    # 拖动 / 双击收起（挂到窗体与每个标签上，否则点在字上拖不动）
     $dragStart = {
         param($sender, $e)
         if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
             $script:OverlayDragging = $true
             $script:OverlayDragOffset = $e.Location
+            if ($sender -isnot [System.Windows.Forms.Form]) {
+                $script:OverlayDragOffset = New-Object System.Drawing.Point(
+                    ($e.X + $sender.Left), ($e.Y + $sender.Top))
+            }
         }
     }
     $dragMove = {
@@ -215,15 +257,18 @@ function Build-OverlayForm {
     $f.add_MouseUp($dragEnd)
     $f.add_DoubleClick({ param($sender, $e) Toggle-OverlayCollapsed })
 
-    foreach ($c in @($f.Controls)) {
-        $c.add_MouseDown($dragStart)
-        $c.add_MouseMove($dragMove)
-        $c.add_MouseUp($dragEnd)
-        $c.add_DoubleClick({ param($s, $e) Toggle-OverlayCollapsed })
+    foreach ($r in $rows) {
+        foreach ($c in @($r.name, $r.value)) {
+            $c.add_MouseDown($dragStart)
+            $c.add_MouseMove($dragMove)
+            $c.add_MouseUp($dragEnd)
+            $c.add_DoubleClick({ param($s, $e) Toggle-OverlayCollapsed })
+        }
     }
 
     $script:OverlayForm = $f
     $script:OverlayControls = $rows
+    Set-OverlayVisuals
     Apply-OverlayLayout
 
     $pos = Get-OverlayPlacement $cfg $f.Width $f.Height
@@ -231,38 +276,110 @@ function Build-OverlayForm {
     return $f
 }
 
+# 两种布局共用同一批标签，只是摆放方式不同：
+#   stacked（堆叠，默认）= 一项一行，名字在左、数值在右
+#   linear（线性）      = 一整行横着排，项与项之间空开；超宽时窗口自己变宽（不换行）
 function Apply-OverlayLayout {
     $f = $script:OverlayForm
     if (-not $f) { return }
     $cfg = Get-OverlayCfg
-    $style = Get-OverlayStyle $cfg
-    $rowH = [int]($style.size + 9)
+    $rows = @($script:OverlayControls)
+    if (-not $rows.Count) { return }
+    $pad = 10
+    $meas = [System.Windows.Forms.TextRenderer]
+
     if ($script:OverlayCollapsed) {
-        $f.Size = New-Object System.Drawing.Size(250, 40)
-        $i = 0
-        foreach ($row in $script:OverlayControls) {
-            $show = ($i -eq 0)
-            $row.label.Visible = $show
-            $row.track.Visible = $show
-            $row.value.Visible = $show
-            $i++
+        foreach ($r in $rows) { $r.name.Visible = $false; $r.value.Visible = $false }
+        $first = $rows[0]
+        $first.value.Visible = $true
+        $sz = $meas::MeasureText([string]$first.value.Text, $first.value.Font)
+        $w = [int]($sz.Width + $pad * 2)
+        $h = [int]($sz.Height + $pad)
+        $first.value.SetBounds($pad, [int]($pad / 2), $sz.Width, $sz.Height)
+        $f.Size = New-Object System.Drawing.Size($w, $h)
+        return
+    }
+
+    # 两种布局共用的控件，只是文本与坐标不同
+    #   堆叠：一行一项，名字用完整名，值右对齐
+    #   线性：同组并到一行——组名只出现在组首（组间加 |），组内只排值
+    if ($cfg.layout -eq 'linear') {
+        $gap = 7
+        $groupGap = 12
+        $x = $pad
+        $maxH = 0
+        $firstGroup = $true
+        foreach ($r in $rows) {
+            if ($r.head) {
+                if (-not $firstGroup) { $x += $groupGap }
+                $r.name.Text = $(if ($firstGroup) { [string]$r.group } else { '| ' + [string]$r.group })
+                $r.name.Visible = $true
+                $s1 = $meas::MeasureText([string]$r.name.Text, $r.name.Font)
+                $r.name.SetBounds($x, $pad, $s1.Width, $s1.Height)
+                $x += $s1.Width + $gap
+                if ($s1.Height -gt $maxH) { $maxH = $s1.Height }
+                $firstGroup = $false
+            } else {
+                # 组内其余项：不显示名字（值靠顺序对应）
+                $r.name.Text = ''
+                $r.name.Visible = $false
+                $r.name.SetBounds($x, $pad, 0, 1)
+            }
+            $r.value.Visible = $true
+            $s2 = $meas::MeasureText([string]$r.value.Text, $r.value.Font)
+            $r.value.SetBounds($x, $pad, $s2.Width, $s2.Height)
+            $x += $s2.Width + $gap
+            if ($s2.Height -gt $maxH) { $maxH = $s2.Height }
         }
+        $w = [int]($x - $gap + $pad)
+        $wa = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+        if ($w -gt [int]($wa.Width * 0.95)) { $w = [int]($wa.Width * 0.95) }
+        $f.Size = New-Object System.Drawing.Size($w, [int]($maxH + $pad * 2))
     } else {
-        $h = 10 + ($script:OverlayControls.Count * ($rowH + 12)) + 2
-        $f.Size = New-Object System.Drawing.Size(250, $h)
-        foreach ($row in $script:OverlayControls) {
-            $row.label.Visible = $true
-            $row.track.Visible = $true
-            $row.value.Visible = $true
+        $nameW = 0
+        $valW = 0
+        $rowH = 0
+        foreach ($r in $rows) {
+            $r.name.Text = [string]$r.def.label
+            $r.name.Visible = $true
+            $r.value.Visible = $true
+            $s1 = $meas::MeasureText([string]$r.name.Text, $r.name.Font)
+            $s2 = $meas::MeasureText([string]$r.value.Text, $r.value.Font)
+            if ($s1.Width -gt $nameW) { $nameW = $s1.Width }
+            if ($s2.Width -gt $valW) { $valW = $s2.Width }
+            if ($s1.Height -gt $rowH) { $rowH = $s1.Height }
         }
+        $rowH = [int]($rowH + 6)
+        $y = $pad
+        foreach ($r in $rows) {
+            $r.name.SetBounds($pad, $y, $nameW, $rowH)
+            $r.value.SetBounds($pad + $nameW + 14, $y, $valW, $rowH)
+            $y += $rowH
+        }
+        $f.Size = New-Object System.Drawing.Size([int]($pad * 2 + $nameW + 14 + $valW), [int]($y + $pad))
     }
 }
 
+# 背景不透明度：
+#   0   = 背景完全透明（TransparencyKey 抠掉底色），文字仍是 100% 不透明 —— 这是默认值
+#   >0  = 整窗按百分比半透明（WinForms 的 Opacity 只能整窗，文字会跟着变淡）
 function Set-OverlayVisuals {
     $f = $script:OverlayForm
     if (-not $f) { return }
     $cfg = Get-OverlayCfg
-    try { $f.Opacity = [double]$cfg.opacity / 100.0 } catch { }
+    $style = Get-OverlayStyle $cfg
+    $op = [int]$cfg.opacity
+    try {
+        if ($op -le 0) {
+            $f.Opacity = 1.0
+            $f.BackColor = $style.key
+            $f.TransparencyKey = $style.key
+        } else {
+            $f.TransparencyKey = [System.Drawing.Color]::Empty
+            $f.BackColor = $style.back
+            $f.Opacity = [double]$op / 100.0
+        }
+    } catch { }
 }
 
 function Rebuild-Overlay {
@@ -292,6 +409,43 @@ function Save-OverlayPosition {
     } catch { }
 }
 
+# 单项取值：只返回「数值 + 单位」（短名由调用方拼），取不到返回 $null
+function Format-OverlayItemValue {
+    param($Def, $S)
+    if ($Def.locked) { return $null }
+    if (-not $S) { return $null }
+    $raw = $null
+    if ($Def.field -eq '__ram') {
+        if ($null -ne $S.ramUsed -and $null -ne $S.ramTotal -and [double]$S.ramTotal -gt 0) {
+            $raw = [double]$S.ramUsed / [double]$S.ramTotal * 100.0
+        }
+    } else {
+        $raw = $S.($Def.field)
+    }
+    if ($null -eq $raw) { return $null }
+    $v = [double]$raw
+    $txt = switch ($Def.key) {
+        'fps'      { '{0:0.0}' -f $v }
+        'fpslow'   { '{0:0.0}' -f $v }
+        'rlat'     { '{0:0.0}' -f $v }
+        'pcl'      { '{0:0.0}' -f $v }
+        'gpuutil'  { '{0:0}' -f $v }
+        'gputemp'  { '{0:0}' -f $v }
+        'gpuclock' { '{0:0}' -f $v }
+        'gpupower' { '{0:0.0}' -f $v }
+        'gpufan'   { '{0:0}' -f $v }
+        'vramclk'  { '{0:0}' -f $v }
+        'cpuutil'  { '{0:0}' -f $v }
+        'cpuclock' { '{0:0}' -f $v }
+        'cpupower' { '{0:0.0}' -f $v }
+        'ram'      { '{0:0}' -f $v }
+        default    { '{0:0.0}' -f $v }
+    }
+    if ($Def.unit) { $txt += ' ' + $Def.unit }
+    return $txt
+}
+
+# 一项一个数值：拿不到就写 N/A（绝不写 0，也不留上一次的旧值）
 function Update-OverlayReadout {
     $f = $script:OverlayForm
     if (-not $f -or -not $script:OverlayControls) { return }
@@ -299,47 +453,17 @@ function Update-OverlayReadout {
     if ($script:MetricsSamples -and $script:MetricsSamples.Count -gt 0) {
         $s = $script:MetricsSamples[$script:MetricsSamples.Count - 1]
     }
+    $changed = $false
     foreach ($row in $script:OverlayControls) {
-        switch ($row.def.key) {
-            'fps' {
-                if ($s -and $null -ne $s.fps) {
-                    $row.value.Text = ('{0:0.#} FPS' -f [double]$s.fps)
-                    $row.fill.Width = [int]([math]::Min(1.0, ([double]$s.fps / 240.0)) * $row.track.Width)
-                } else {
-                    $row.value.Text = '—'
-                    $row.fill.Width = 0
-                }
-            }
-            'cpu' {
-                if ($s -and $null -ne $s.cpu) {
-                    $row.value.Text = ('{0} %' -f [int]$s.cpu)
-                    $row.fill.Width = [int]([math]::Min(1.0, ($s.cpu / 100.0)) * $row.track.Width)
-                } else {
-                    $row.value.Text = '—'
-                    $row.fill.Width = 0
-                }
-            }
-            'gpu' {
-                if ($s -and $null -ne $s.gpu) {
-                    $row.value.Text = ('{0} %' -f [int]$s.gpu)
-                    $row.fill.Width = [int]([math]::Min(1.0, ($s.gpu / 100.0)) * $row.track.Width)
-                } else {
-                    $row.value.Text = '—'
-                    $row.fill.Width = 0
-                }
-            }
-            'mem' {
-                if ($s -and $null -ne $s.ramUsed -and $null -ne $s.ramTotal -and [double]$s.ramTotal -gt 0) {
-                    $pct = [double]$s.ramUsed / [double]$s.ramTotal * 100.0
-                    $row.value.Text = ('{0} %' -f [int][math]::Round($pct))
-                    $row.fill.Width = [int]([math]::Min(1.0, ($pct / 100.0)) * $row.track.Width)
-                } else {
-                    $row.value.Text = '—'
-                    $row.fill.Width = 0
-                }
-            }
+        $v = Format-OverlayItemValue $row.def $s
+        $txt = if ($null -ne $v) { $v } else { 'N/A' }
+        if ($row.value.Text -ne $txt) {
+            $row.value.Text = $txt
+            $changed = $true
         }
     }
+    # 数值宽度会变（57.3 → 100.4），重新摆一次位置，避免右对齐的数字抖
+    if ($changed) { Apply-OverlayLayout }
 }
 
 function Start-OverlayTimer {
@@ -408,7 +532,9 @@ function Send-OverlayState {
             fontSize = [string]$cfg.fontSize
             fontColor = [string]$cfg.fontColor
             layout = [string]$cfg.layout
-            metrics = @($cfg.metrics)
+            items = @($cfg.items)
+            itemKeys = @($script:OverlayItemKeys)
+            itemLocked = @($script:OverlayLockedKeys)
             hotkey = @{
                 ctrl = [bool]$cfg.hotkey.ctrl
                 alt = [bool]$cfg.hotkey.alt
@@ -428,7 +554,7 @@ function Apply-OverlayConfig {
         $a = [string]$In.anchor
         if ($a -eq 'custom' -or $a -in $script:OverlayAnchors) { $cfg.anchor = $a }
     }
-    foreach ($pair in @(@('px', 'px', 0, 100), @('py', 'py', 0, 100), @('x', 'x', -1, 30000), @('y', 'y', -1, 30000), @('opacity', 'opacity', 20, 100))) {
+    foreach ($pair in @(@('px', 'px', 0, 100), @('py', 'py', 0, 100), @('x', 'x', -1, 30000), @('y', 'y', -1, 30000), @('opacity', 'opacity', 0, 100))) {
         $src, $dst, $lo, $hi = $pair
         $raw = $In.$src
         if ($null -ne $raw) {
@@ -437,11 +563,12 @@ function Apply-OverlayConfig {
         }
     }
     if ($In.fontSize -in @('small', 'normal', 'large')) { $cfg.fontSize = [string]$In.fontSize }
-    if ($In.fontColor -in @('white', 'gray', 'green', 'yellow')) { $cfg.fontColor = [string]$In.fontColor }
-    if ($In.layout) { $cfg.layout = 'linear' }
-    if ($null -ne $In.metrics) {
-        $mk = @(@($In.metrics) | ForEach-Object { ([string]$_).ToLower() } | Where-Object { $script:OverlayMetricKeys -contains $_ } | Select-Object -Unique)
-        if ($mk.Count) { $cfg.metrics = $mk }
+    if ($In.fontColor -in @('white', 'green', 'red', 'blue')) { $cfg.fontColor = [string]$In.fontColor }
+    if ($In.layout -in @('linear', 'stacked')) { $cfg.layout = [string]$In.layout }
+    if ($null -ne $In.items) {
+        $ik = @(@($In.items) | ForEach-Object { ([string]$_).ToLower() } | Where-Object { $script:OverlaySelectableKeys -contains $_ } | Select-Object -Unique)
+        # 允许只留一项，但**不允许全空**：全空时浮窗会变成一块空白，比不显示更糟
+        if ($ik.Count) { $cfg.items = $ik }
     }
     if ($In.hotkey) {
         $hk = $cfg.hotkey

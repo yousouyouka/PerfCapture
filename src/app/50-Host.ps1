@@ -169,6 +169,24 @@ $form.Add_Shown({
             } catch { return }
             Handle-UiMessage $msg
         })
+
+        # 外链（关于页的 GitHub）：WebView2 遇到 target=_blank 会尝试开新窗口，
+        # 这里拦下来交给系统默认浏览器；只放行 http/https，避免页面借这条通道拉起别的协议。
+        $script:Core.add_NewWindowRequested({
+            param($sender, $e)
+            try {
+                $uri = [string]$e.Uri
+                if ($uri -match '^https?://') {
+                    $e.Handled = $true
+                    Start-Process $uri | Out-Null
+                } else {
+                    $e.Handled = $true
+                    Write-AppLog ('拒绝打开非 http(s) 链接: ' + $uri) 'WARN'
+                }
+            } catch {
+                Write-AppLog ('打开外链失败: ' + $_.Exception.Message) 'WARN'
+            }
+        })
     } catch {
         Write-AppLog ('WebView2 初始化失败: ' + $_.Exception.Message) 'ERROR'
         try {

@@ -28,6 +28,7 @@ const FALLBACK_OPTIONS = [
   { skip: 'latency', module: 'perf', kind: 'optional', label: 'capture.item.latency', tip: 'capture.tip.latency', default: true },
   { skip: 'cpuutil', module: 'cpu', kind: 'core', label: 'capture.item.cpuutil' },
   { skip: 'proccpu', module: 'cpu', kind: 'optional', label: 'capture.item.proccpu', default: true },
+  { skip: 'cpupower', module: 'cpu', kind: 'optional', label: 'capture.item.cpupower', tip: 'capture.tip.cpupower', default: true },
   { skip: 'gpuusage', module: 'gpu', kind: 'optional', label: 'capture.item.gpuusage', tip: 'capture.tip.gpuusage', default: true },
   { skip: 'gputemp', module: 'gpu', kind: 'optional', label: 'capture.item.gputemp', tip: 'capture.tip.gputemp', default: true },
   { skip: 'vram', module: 'memory', kind: 'optional', label: 'capture.item.vram', default: true },
@@ -118,16 +119,16 @@ function renderCaptureOptions(options, presets, groups) {
       span.textContent = String(o.skip);
     }
 
+    /* 核心项：标题右边已经写了「（始终采集）」，条目旁不再重复徽标——
+       这一项能不能关，本来就是「不能」，重复标一次只增加噪声。悬停仍给一句说明。 */
     if (always) {
-      const chip = document.createElement('span');
-      chip.className = 'cotier is-always';
-      chip.textContent = t('capture.tier.always', '始终采集');
-      chip.title = t('capture.tier.alwaysTip', '这一项由引擎无条件采集，不能关闭');
-      wrap.append(input, span, chip);
+      wrap.append(input, span);
+      wrap.dataset.i18nTitle = 'capture.tier.alwaysTip';
+      wrap.title = t('capture.tier.alwaysTip', '这一项由引擎无条件采集，不能关闭');
     } else {
       wrap.append(input, span);
       /* 关闭会影响报告里哪些内容：写在悬停提示上，不占用版面也不拦人 */
-      if (o.tip) wrap.title = t(o.tip, '');
+      if (o.tip) { wrap.dataset.i18nTitle = String(o.tip); wrap.title = t(o.tip, ''); }
     }
     return wrap;
   };
@@ -152,12 +153,11 @@ function renderCaptureOptions(options, presets, groups) {
     title.dataset.i18n = sec.title;
     title.textContent = t(sec.title, sec.dflt);
     box.append(title);
+    /* 块的说明文字（「关掉的项当真不采，报告里显示未采集」这类）收进标题的悬停提示：
+       这几句是解释，不是选项，平铺在版面上会把真正要看的东西挤远。 */
     if (sec.note) {
-      const note = document.createElement('div');
-      note.className = 'cosection-note';
-      note.dataset.i18n = sec.note;
-      note.textContent = t(sec.note, '');
-      box.append(note);
+      title.dataset.i18nTitle = sec.note;
+      title.title = t(sec.note, '');
     }
     /* 块内按板块分组（顺序沿用 groups 定义，未声明的归到「其他」） */
     const boards = [];
@@ -181,13 +181,10 @@ function renderCaptureOptions(options, presets, groups) {
       itemsBox.className = 'cogroup-items';
       b.items.forEach(o => itemsBox.append(makeItem(o)));
       row.append(name, itemsBox);
-      /* 板块说明（比如「两项共用同一次显卡查询」）只在它第一次出现的位置给一次 */
+      /* 板块说明（比如「两项共用同一次显卡查询」）挂到板块名上做悬停提示，不再单独占一行 */
       if (g && g.note && !noted.has(b.id)) {
-        const n = document.createElement('div');
-        n.className = 'cogroup-note';
-        n.dataset.i18n = String(g.note);
-        n.textContent = t(g.note, '');
-        row.append(n);
+        name.dataset.i18nTitle = String(g.note);
+        name.title = t(g.note, '');
         noted.add(b.id);
       }
       box.append(row);
@@ -229,7 +226,7 @@ function renderCaptureOptions(options, presets, groups) {
    （改时长不该顺手把预热丢掉，那样会让「套了标准又调时长」的结果变来变去）。 */
 
 const FALLBACK_PRESETS = [
-  { id: 'quick',    label: 'capture.preset.quick',    seconds: 60,  warmup: 0, skip: ['latency', 'proccpu', 'sysmem', 'sharedmem', 'features', 'res'] },
+  { id: 'quick',    label: 'capture.preset.quick',    seconds: 60,  warmup: 0, skip: ['latency', 'proccpu', 'cpupower', 'sysmem', 'sharedmem', 'features', 'res'] },
   { id: 'standard', label: 'capture.preset.standard', seconds: 120, warmup: 3, skip: ['features'] },
   { id: 'pro',      label: 'capture.preset.pro',      seconds: 180, warmup: 5, skip: [] },
 ];

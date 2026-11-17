@@ -66,7 +66,7 @@
           </svg>
           <span class="nav-label" data-i18n="nav.settings">设置</span>
         </button>
-        <div class="sidebar-version" id="sidebarVersion">v2.0.11</div>
+        <div class="sidebar-version" id="sidebarVersion">v2.0.21</div>
       </div>
     </nav>
   </aside>
@@ -229,8 +229,24 @@
           <div class="setting-block">
             <div class="setting-label">
               <strong>PerfCapture</strong>
-              <small>v2.0.11 · PresentMon ETW · 零注入</small>
+              <small>v2.0.21 · PresentMon ETW · 零注入</small>
             </div>
+          </div>
+
+          <!-- 联系方式：项目主页 + 邮箱 + QQ。值都可一键全选（user-select: all），复制不用拖选 -->
+          <div class="setting-block is-stack about-contact">
+            <div class="setting-label">
+              <strong data-i18n="settings.contact">联系方式</strong>
+              <small data-i18n="settings.contactHint">问题反馈、功能建议都可以发这里；值点一下即全选，再按 Ctrl+C 复制</small>
+            </div>
+            <ul class="about-links">
+              <li><span class="about-k" data-i18n="settings.contactRepo">项目主页</span>
+                <a class="about-v about-link" href="https://github.com/yousouyouka/PerfCapture" target="_blank" rel="noopener">github.com/yousouyouka/PerfCapture</a></li>
+              <li><span class="about-k" data-i18n="settings.contactMail">邮箱</span>
+                <span class="about-v">yousou.youka.meikyou.shisui@gmail.com</span></li>
+              <li><span class="about-k" data-i18n="settings.contactQQ">QQ</span>
+                <span class="about-v">2879663371</span></li>
+            </ul>
           </div>
 
           <div class="setting-block update-block">
@@ -314,6 +330,8 @@
             </div>
             <div class="rt-set-row">
               <span class="rt-set-label" data-i18n="realtime.set.fpsTarget">FPS 目标</span>
+              <select class="rt-select" id="rtTarget"></select>
+              <button type="button" class="rt-refresh" id="btnTargetRefresh" data-i18n-title="realtime.target.refresh" title="刷新进程列表">↻</button>
               <span class="rt-set-hint" id="rtFpsTarget">—</span>
             </div>
           </div>
@@ -348,6 +366,10 @@
               <input type="number" class="rt-num" id="ovPx" min="0" max="30000" step="1" title="X">
               <input type="number" class="rt-num" id="ovPy" min="0" max="30000" step="1" title="Y">
             </div>
+            <div class="rt-set-row rt-set-col">
+              <span class="rt-set-label" data-i18n="realtime.set.items">显示内容</span>
+              <div class="rt-chk-grid" id="ovItems"></div>
+            </div>
             <div class="rt-set-row">
               <span class="rt-set-label" data-i18n="realtime.set.layout">布局</span>
               <span class="rt-stepper">
@@ -358,8 +380,8 @@
             </div>
             <div class="rt-set-row">
               <span class="rt-set-label" data-i18n="realtime.set.opacity">背景不透明度</span>
-              <input type="range" class="rt-range" id="ovOpacity" min="20" max="100" step="5" value="90">
-              <input type="number" class="rt-num" id="ovOpacityNum" min="20" max="100" step="5" value="90">
+              <input type="range" class="rt-range" id="ovOpacity" min="0" max="100" step="1" value="0">
+              <input type="number" class="rt-num" id="ovOpacityNum" min="0" max="100" step="1" value="0">
             </div>
             <div class="rt-set-row">
               <span class="rt-set-label" data-i18n="realtime.set.fontSize">字体大小</span>

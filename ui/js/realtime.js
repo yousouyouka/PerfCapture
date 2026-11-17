@@ -470,35 +470,48 @@
   /* 2) 浮窗设置 */
   const ANCHORS = ['tl', 't', 'tr', 'l', 'c', 'r', 'bl', 'b', 'br'];
   const SIZES = ['small', 'normal', 'large'];
-  const COLORS = ['white', 'gray', 'green', 'yellow'];
-  const LAYOUTS = ['linear'];
+  const COLORS = ['white', 'green', 'red', 'blue'];
+  const LAYOUTS = ['stacked', 'linear'];
+  /* 宿主没下发清单时的兜底（正常由 overlayState.itemKeys / itemLocked 下发） */
+  const FALLBACK_ITEMS = ['fps', 'fpslow', 'rlat', 'pcl', 'gpuutil', 'gputemp', 'gpuclock', 'gpupower',
+    'gpufan', 'vramclk', 'gpuvolt', 'cpuutil', 'cpuclock', 'cpupower', 'cputemp', 'ram'];
+  const FALLBACK_LOCKED = ['gpuvolt', 'cputemp'];
   const KEYS = [];
   for (let c = 65; c <= 90; c++) KEYS.push(String.fromCharCode(c));
   for (let f = 1; f <= 12; f++) KEYS.push('F' + f);
 
-  /* 浮窗显示的指标族跟随「监控设置」里的勾选（页面与浮窗共用同一份选择） */
-  const localFamilies = () => (window.PerfRealtime && typeof window.PerfRealtime.families === 'function')
-    ? window.PerfRealtime.families().slice()
-    : ['fps', 'cpu', 'gpu', 'mem'];
+  /* 浮窗显示项：逐项勾选，独立于页面「监控设置」的族勾选（两套各管各的） */
+  let itemKeys = FALLBACK_ITEMS.slice();
+  /* 本机拿不到、界面上灰掉的项（宿主下发 itemLocked） */
+  let lockedKeys = FALLBACK_LOCKED.slice();
 
   let cfg = {
     anchor: 'tr', px: 100, py: 0, x: -1, y: -1,
-    opacity: 90, fontSize: 'normal', fontColor: 'white', layout: 'linear',
+    opacity: 0, fontSize: 'normal', fontColor: 'white', layout: 'linear',
     hotkey: { ctrl: true, alt: true, shift: false, key: 'M' },
-    metrics: localFamilies(),
+    items: ['fps', 'gpuutil', 'gputemp', 'gpupower', 'ram'],
     visible: false
   };
   let syncing = false;
   let timer = 0;
-  let firstSyncDone = false;
+
 
   /* 勾选变了：直接改 cfg 并立刻下发（勾完就该看到浮窗变，不等防抖） */
-  document.addEventListener('perf:metrics', (e) => {
-    const m = e && e.detail && e.detail.metrics;
-    if (!m || !m.length) return;
-    cfg.metrics = m.slice();
-    push(0);
-  });
+  /* 2.0.18：浮窗显示项改成独立的一份，不再跟随页面「监控设置」的族勾选。
+     否则在页面上关掉一项，会把浮窗里整族一起关掉，与「逐项自由开关」冲突。 */
+  let itemsHintTimer = 0;
+  function flashItemsHint() {
+    const hint = byId('ovItemsHint');
+    if (!hint) return;
+    if (hint.getAttribute('data-orig') == null) hint.setAttribute('data-orig', hint.textContent);
+    hint.textContent = tx('realtime.set.itemsLast', '至少要保留一项');
+    hint.dataset.warn = '1';
+    clearTimeout(itemsHintTimer);
+    itemsHintTimer = setTimeout(() => {
+      hint.dataset.warn = '';
+      hint.textContent = hint.getAttribute('data-orig') || '';
+    }, 1800);
+  }
 
   const lbl = (prefix, v, fb) => tx(prefix + '.' + v, fb);
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -507,6 +520,52 @@
   const keySel = byId('ovHotKey');
   if (keySel) {
     KEYS.forEach((k) => { const o = document.createElement('option'); o.value = k; o.textContent = k; keySel.appendChild(o); });
+  }
+  /* 显示内容：按宿主下发的 itemKeys 渲染逐项勾选（名字走 i18n，缺键回退键名） */
+  function renderItemChoices(keys) {
+    const box = byId('ovItems');
+    if (!box) return;
+    itemKeys = (Array.isArray(keys) && keys.length) ? keys.slice() : FALLBACK_ITEMS.slice();
+    box.innerHTML = '';
+    itemKeys.forEach((k) => {
+      const isLocked = lockedKeys.indexOf(k) >= 0;
+      const lab = document.createElement('label');
+      lab.className = 'rt-chk';
+      if (isLocked) lab.classList.add('is-locked');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.value = k;
+      /* 本机采不到的项：灰掉、不可勾选（不是勾上再显示 N/A） */
+      cb.disabled = isLocked;
+      cb.checked = !isLocked && (cfg.items || []).indexOf(k) >= 0;
+      if (isLocked) lab.title = tx('realtime.set.itemLocked', '本机采不到这一项，不能勾选');
+      cb.addEventListener('change', () => {
+        const cur = (cfg.items || []).slice();
+        const i = cur.indexOf(k);
+        if (cb.checked) { if (i < 0) cur.push(k); }
+        else if (i >= 0) { cur.splice(i, 1); }
+        /* 不许全关：浮窗会变成一块空白，比不显示更糟 */
+        if (!cur.length) { cb.checked = true; flashItemsHint(); return; }
+        /* 按 itemKeys 的顺序归一，避免勾选顺序影响浮窗里的排列 */
+        cfg.items = itemKeys.filter((x) => cur.indexOf(x) >= 0);
+        push(0);
+      });
+      const span = document.createElement('span');
+      /* 挂 data-i18n：切语言时由 applyI18n 统一换掉，否则这里会停在旧语言 */
+      span.dataset.i18n = 'overlay.item.' + k;
+      span.textContent = tx('overlay.item.' + k, k);
+      lab.append(cb, span);
+      box.appendChild(lab);
+    });
+  }
+
+  function paintItems() {
+    const box = byId('ovItems');
+    if (!box) return;
+    const sel = cfg.items || [];
+    box.querySelectorAll('input[type=checkbox]').forEach((cb) => {
+      cb.checked = sel.indexOf(cb.value) >= 0;
+    });
   }
 
   function paint() {
@@ -530,6 +589,7 @@
     if (keySel) keySel.value = cfg.hotkey.key || 'M';
     const btn = byId('btnOverlay');
     if (btn) btn.textContent = cfg.visible ? tx('realtime.overlayOff', '关闭浮窗') : tx('realtime.overlayOn', '开启浮窗');
+    paintItems();
     syncing = false;
   }
 
@@ -555,7 +615,7 @@
   }
   bindPair('ovPosX', 'ovPosXNum', 0, 100, 'px');
   bindPair('ovPosY', 'ovPosYNum', 0, 100, 'py');
-  bindPair('ovOpacity', 'ovOpacityNum', 20, 100, 'opacity');
+  bindPair('ovOpacity', 'ovOpacityNum', 0, 100, 'opacity');
 
   /* 直接指定坐标（像素）：写进去就等于「自定义」位置 */
   [['ovPx', 'x'], ['ovPy', 'y']].forEach(([id, field]) => {
@@ -611,23 +671,77 @@
         anchor: o.anchor || 'custom',
         px: int(o.px, 50), py: int(o.py, 50),
         x: int(o.x, -1), y: int(o.y, -1),
-        opacity: int(o.opacity, 90),
+        opacity: int(o.opacity, 0),
         fontSize: o.fontSize || 'normal',
         fontColor: o.fontColor || 'white',
         layout: o.layout || 'linear',
         hotkey: o.hotkey || { ctrl: true, alt: true, shift: false, key: 'M' },
-        metrics: (o.metrics && o.metrics.length) ? o.metrics.slice() : localFamilies(),
+        items: (o.items && o.items.length) ? o.items.filter((k) => lockedKeys.indexOf(k) < 0) : ['fps', 'gpuutil', 'gputemp', 'gpupower', 'ram'],
         visible: !!o.visible
       };
+      /* 宿主下发的项清单变了才重建勾选框（避免每次回填都把焦点/滚动位置重置） */
+      const keys = (o.itemKeys && o.itemKeys.length) ? o.itemKeys.slice() : FALLBACK_ITEMS.slice();
+      const locks = (o.itemLocked && o.itemLocked.length) ? o.itemLocked.slice() : FALLBACK_LOCKED.slice();
+      const locksChanged = locks.join(',') !== lockedKeys.join(',');
+      lockedKeys = locks;
+      if (keys.join(',') !== itemKeys.join(',') || locksChanged) renderItemChoices(keys);
+      else paintItems();
       paint();
-      /* 首次回填：宿主的指标族和本地勾选不一致时补推一次，之后不再自动改（避免来回打架） */
-      if (!firstSyncDone) {
-        firstSyncDone = true;
-        const local = localFamilies();
-        if (cfg.metrics.join(',') !== local.join(',')) { cfg.metrics = local; push(0); }
-      }
     }
   };
+
+  renderItemChoices(itemKeys);
+  /* ---------- 目标进程选择（实时监控）----------
+     不选 = 跟随当前前台窗口；选了就固定采那个进程。
+     列表来自 bridge 的 procs 消息（宿主 Get-ProcessChoices），这里只读事件，不碰 state。 */
+  (function initTargetPicker() {
+    const sel = document.getElementById('rtTarget');
+    if (!sel) return;
+    let procs = [];
+    let curPid = 0;
+
+    const fill = () => {
+      const keep = curPid;
+      sel.innerHTML = '';
+      const auto = document.createElement('option');
+      auto.value = '0';
+      auto.textContent = tx('realtime.target.auto', '自动（跟随前台窗口）');
+      sel.appendChild(auto);
+      procs.forEach((p) => {
+        const o = document.createElement('option');
+        o.value = String(p.pid);
+        o.textContent = p.text || (p.name + ' (' + p.pid + ')');
+        sel.appendChild(o);
+      });
+      sel.value = String(keep);
+    };
+
+    const apply = () => {
+      const pid = parseInt(sel.value, 10) || 0;
+      curPid = pid;
+      const p = procs.find((x) => x.pid === pid);
+      if (typeof send === 'function') send({ cmd: 'metricsTarget', pid: pid, name: p ? p.name : '' });
+    };
+
+    sel.addEventListener('change', apply);
+
+    /* 刷新按钮：让宿主重新枚举进程（走已有的 refreshProcs），回包会派发 perf:procs */
+    const btn = document.getElementById('btnTargetRefresh');
+    if (btn) {
+      let busy = 0;
+      btn.addEventListener('click', () => {
+        if (busy) return;
+        busy = setTimeout(() => { busy = 0; btn.disabled = false; }, 700);
+        btn.disabled = true;
+        if (typeof send === 'function') send({ cmd: 'refreshProcs' });
+      });
+    }
+    document.addEventListener('perf:procs', (e) => {
+      procs = (e && e.detail && Array.isArray(e.detail.procs)) ? e.detail.procs : [];
+      fill();
+    });
+    fill();
+  })();
 
   paint();
 })();

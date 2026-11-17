@@ -349,6 +349,7 @@ const METRIC_TEXT = {
   'cpu.process': (r) => numText(r.cpu_extra && r.cpu_extra.proc_cpu_avg_pct, '%', 1),
   'cpu.coreMax': (r) => numText(r.cpu_max_core_peak_pct, '%', 1),
   'cpu.clock': (r) => numText(r.cpu_clock_avg_mhz, 'MHz', 0),
+  'cpu.power': (r) => numText(r.cpu_extra && r.cpu_extra.pkg_power_avg_w, 'W', 1),
   'gpu.util': (r) => numText(r.gpu_util_avg_pct, '%', 0),
   'gpu.temp': (r) => numText(r.gpu_temp_max_c, '°C', 0),
   'gpu.clock': (r) => numText(r.gpu_clock_avg_mhz, 'MHz', 0),
@@ -372,8 +373,11 @@ const METRIC_TEXT = {
     return numText(used, 'MB', 0);
   },
   'mem.availableRam': (r) => numText(r.memory && r.memory.sys_ram_min_avail_mb, 'MB', 0),
+  'mem.sharedVram': (r) => numText(r.memory && r.memory.shared_vram_max_mb, 'MB', 0),
   'mem.commit': (r) => numText(r.memory && r.memory.sys_commit_max_mb, 'MB', 0),
   'thermal.gpuPowerAvg': (r) => numText(r.gpu_power_avg_w, 'W', 1),
+  'thermal.cpuPowerAvg': (r) => numText(r.cpu_extra && r.cpu_extra.pkg_power_avg_w, 'W', 1),
+  'thermal.cpuPowerPeak': (r) => numText(r.cpu_extra && r.cpu_extra.pkg_power_max_w, 'W', 1),
   'thermal.gpuPowerPeak': (r) => numText(r.gpu_power_max_w, 'W', 1),
   'thermal.gpuThermalLimit': (r) => throttleState(r, 'sw_thermal'),
   'thermal.gpuPowerLimit': (r) => throttleState(r, 'sw_power_cap'),
@@ -394,6 +398,36 @@ const METRIC_TEXT = {
   },
   /* 游戏内档位：直接给原始编码（不猜含义），读不到就说「无法确认档位」而不是「暂不可用」 */
   'env.upscalerPreset': (r) => presetCode(r, 'feature.upscalerLevel'),
+  /* 供电侧（07 测试环境）：台机没电池时 battery 行自动不显示；缺字段一律返回 null 让行消失，
+     但「0 次电源中断」「无异常」是真实值，必须显示出来，不能被当成空值吞掉。 */
+  'env.powerSource': (r) => {
+    const e = r.environment || {};
+    const name = { ac: t('value.powerAc', '交流电'), battery: t('value.powerBattery', '电池'), mixed: t('value.powerMixed', '交流电与电池混用') }[e.power_source];
+    if (!name) return null;
+    if (e.ac_off_pct > 0 && e.ac_off_pct < 100) return name + '（' + t('value.batteryShare', '电池占比') + ' ' + e.ac_off_pct + '%）';
+    return name;
+  },
+  'env.gpuPowerLimit': (r) => {
+    const e = r.environment || {};
+    if (e.gpu_limit_max_w == null) return null;
+    const a = numText(e.gpu_limit_min_w, 'W', 1), b = numText(e.gpu_limit_max_w, 'W', 1);
+    return a === b ? b : a + ' – ' + b;
+  },
+  'env.batteryLevel': (r) => {
+    const e = r.environment || {};
+    if (!e.battery_present || e.battery_min_pct == null) return null;
+    return e.battery_min_pct + ' – ' + e.battery_max_pct + ' %';
+  },
+  'env.powerEvents': (r) => {
+    const e = r.environment || {};
+    if (e.power_events == null) return null;
+    return e.power_events === 0 ? '0 ' + t('value.times', '次') : e.power_events + ' ' + t('value.times', '次');
+  },
+  'env.powerHealth': (r) => {
+    const e = r.environment || {};
+    if (!e.power_health) return null;
+    return e.power_health === 'ok' ? t('value.normal', '无异常') : (e.power_health_detail || t('value.hasIssue', '有记录'));
+  },
   'env.dlssPreset': (r) => presetCode(r, 'feature.dlssMode'),
   'env.fgPreset': (r) => presetCode(r, 'feature.framegenModeLevel'),
   'env.foreground': (r) => numText(r.foreground_pct, '%', 0),
@@ -439,6 +473,24 @@ function metricOff(r, x) {
   const keys = opts.filter(Boolean);
   return keys.length > 0 && keys.every((k) => c[k] === false);
 }
+/* 开关开着、但引擎这次确实没采到时的原因（例如目标进程没出现在显卡计数器实例里）。
+   返回 '' 表示「不是这种情况」；返回字符串则按「暂不可用」渲染并显示该原因。
+   目的：不让一行数据因为「这次没采到」就悄悄消失——用户有权知道为什么没有。 */
+function runtimeNaWhy(r, x) {
+  if (!r || !x) return '';
+  if (x.id === 'mem.sharedVram' && r.memory && r.memory.shared_vram_state === 'noAdapterInstance') {
+    return t('report.naWhy.noAdapterInstance',
+      '目标游戏未出现在显卡计数器实例中，本次没有采到共享内存数值（可能是驱动未暴露该计数器，或该进程不走 DXGI 呈现）。');
+  }
+  /* CPU 功耗：开关开着但这台机器没有 Energy Meter 计数器 —— 必须出「暂不可用」+ 原因，
+     既不能藏行，也不能拿 0 W 或估算值顶上。 */
+  if ((x.id === 'cpu.power' || x.id === 'thermal.cpuPowerAvg' || x.id === 'thermal.cpuPowerPeak') &&
+      r.cpu_extra && r.cpu_extra.pkg_power_state === 'unavailable') {
+    return t('report.naWhy.noEnergyMeter',
+      '这台机器没有向 Windows 提供 CPU 能量计数器（Energy Meter），本次没有采到功耗数值；这里不会用 0 W 或估算值代替。');
+  }
+  return '';
+}
 
 /** 按字典顺序渲染 7 个板块；字典缺失时返回 ''，交给调用方回退平铺明细 */
 function renderMetricModules(r, only) {
@@ -472,6 +524,14 @@ function renderMetricModules(r, only) {
         // 默认只出短句，底层原因放进 title 提示（普通玩家不需要每个字段旁边都写一遍实现细节）
         body += `<div class="rp-na-why"` + (why ? ` title="${escapeHtml(why)}"` : '') + `>` +
                 escapeHtml(t('report.naShort', '当前采集方式无法可靠读取')) + '</div>';
+        return;
+      }
+      const unWhy = runtimeNaWhy(r, x);
+      if (unWhy) {
+        body += `<div class="row is-na" data-metric="${escapeHtml(x.id)}" title="${escapeHtml(unWhy)}">` +
+                `<span class="k">${label}<span class="rp-na-badge">${escapeHtml(t('report.na', '暂不可用'))}</span></span>` +
+                `<span class="v na">—</span></div>`;
+        body += `<div class="rp-na-why" title="${escapeHtml(unWhy)}">${escapeHtml(unWhy)}</div>`;
         return;
       }
       const fn = METRIC_TEXT[x.id];

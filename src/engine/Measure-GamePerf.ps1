@@ -38,6 +38,7 @@ $collectRam      = -not ($skipList -contains 'ram')
 $collectProcCpu  = -not ($skipList -contains 'proccpu')
 $collectSysMem   = -not ($skipList -contains 'sysmem')
 $collectShared   = -not ($skipList -contains 'sharedmem')
+$collectCpuPower = -not ($skipList -contains 'cpupower')   # 2.0.17：CPU 封装功耗（PDH Energy Meter）
 $collectFeatures = -not ($skipList -contains 'features')
 $collectRes      = -not ($skipList -contains 'res')
 $collectChart    = $true      # 图表始终生成：UI 不再提供开关，报告里必定含曲线
@@ -126,14 +127,15 @@ Write-Host ''
 # 批次 C：一次 nvidia-smi 取全部 GPU 字段（时钟/功耗/风扇/PCIe/降频原因），
 # CPU 每核占用用 CIM 的 formatted data（英文类名，不受系统语言影响）。
 # 老驱动/老 nvidia-smi 不认识新字段时整条查询会报错 -> 退回 1.4 的三字段，绝不因此丢数据。
-$sampler = Start-Job -ArgumentList $GamePid, $sensCsv, ($Seconds + 10), $smi, $collectGpuSensors, $collectVram, $collectRam, $collectProcCpu, $collectSysMem, $collectShared -ScriptBlock {
-    param($gpid, $csv, $maxSec, $smi, $wantGpu, $wantVram, $wantRam, $wantProcCpu, $wantSysMem, $wantShared)
-    if (-not ($wantGpu -or $wantVram -or $wantRam -or $wantProcCpu -or $wantSysMem -or $wantShared)) { return }
+$sampler = Start-Job -ArgumentList $GamePid, $sensCsv, ($Seconds + 10), $smi, $collectGpuSensors, $collectVram, $collectRam, $collectProcCpu, $collectSysMem, $collectShared, $collectCpuPower -ScriptBlock {
+    param($gpid, $csv, $maxSec, $smi, $wantGpu, $wantVram, $wantRam, $wantProcCpu, $wantSysMem, $wantShared, $wantCpuPower)
+    if (-not ($wantGpu -or $wantVram -or $wantRam -or $wantProcCpu -or $wantSysMem -or $wantShared -or $wantCpuPower)) { return }
     $script:t0 = Get-Date
     $cols = @('timestamp_utc', 'gpu_temp_c', 'gpu_util_pct', 'gpu_mem_used_mb', 'proc_vram_mb', 'proc_ram_mb',
               'gpu_clock_mhz', 'gpu_mem_clock_mhz', 'gpu_clock_max_mhz', 'gpu_power_w', 'gpu_fan_pct',
               'pcie_gen', 'pcie_width', 'cpu_util_pct', 'cpu_max_core_pct',
               'proc_cpu_pct', 'sys_ram_pct', 'sys_ram_avail_mb', 'sys_commit_mb', 'shared_vram_mb',
+              'gpu_limit_w', 'ac_online', 'battery_pct', 'cpu_pkg_w',
               'thr_sw_power_cap', 'thr_sw_thermal', 'thr_hw_thermal', 'thr_hw_slowdown', 'thr_sync_boost',
               'thr_gpu_idle', 'thr_app_clocks', 'thr_hw_power_brake')
     ($cols -join ',') | Out-File -FilePath $csv -Encoding ASCII
@@ -144,12 +146,81 @@ $sampler = Start-Job -ArgumentList $GamePid, $sensCsv, ($Seconds + 10), $smi, $c
              'clocks_throttle_reasons.hw_slowdown,clocks_throttle_reasons.sync_boost,clocks_throttle_reasons.gpu_idle,' +
              'clocks_throttle_reasons.applications_clocks_setting,clocks_throttle_reasons.hw_power_brake_slowdown'
     $extOk = $null          # $null = 还没探测；false = 这台机器的 nvidia-smi 不支持扩展字段
+
+    # ---- 供电侧：AC 状态 / 电池（GetSystemPowerStatus，零依赖、每 tick 一次几乎没有开销）----
+    # 台机没有电池 → BatteryFlag 的 128 位会置位，电量读 255（未知），这些都不当错误处理。
+    if (-not ('PerfPower' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class PerfPower {
+    [StructLayout(LayoutKind.Sequential)]
+    public struct SPS {
+        public byte ACLineStatus; public byte BatteryFlag; public byte BatteryLifePercent;
+        public byte SystemStatusFlag; public int BatteryLifeTime; public int BatteryFullLifeTime;
+    }
+    [DllImport("kernel32.dll")] public static extern bool GetSystemPowerStatus(out SPS s);
+    public static int[] Read() {
+        SPS s;
+        if (!GetSystemPowerStatus(out s)) return null;
+        return new int[] { s.ACLineStatus, s.BatteryFlag, s.BatteryLifePercent, s.SystemStatusFlag };
+    }
+}
+'@ -ErrorAction SilentlyContinue
+    }
+    $powerEvOk = $false
+    $limitOk = $null        # $null = 还没探测；false = 这台机器的 nvidia-smi 没有 enforced.power.limit
+    $lastLimit = 'NA'
+    # ---- CPU 封装功耗：只读 Windows 已暴露的 PDH 计数器（Energy Meter / rapl_package0_pkg）----
+    # 不装驱动、不提权、不碰游戏进程。平台不提供这个计数器集时永久关掉该字段，不报错、不退化成估算。
+    $cpuPwr = $null
+    $cpuPwrOk = $false
+    if ($wantCpuPower) {
+        try {
+            $cpuPwr = New-Object System.Diagnostics.PerformanceCounter('Energy Meter', 'power', 'rapl_package0_pkg')
+            [void]$cpuPwr.NextValue()                 # 速率型计数器第一次读数恒为 0，先预热
+            Start-Sleep -Milliseconds 300
+            [void]$cpuPwr.NextValue()
+            $cpuPwrOk = $true
+        } catch { $cpuPwrOk = $false; $cpuPwr = $null }
+    }
     $tick = 0
     while (((Get-Date) - $script:t0).TotalSeconds -lt $maxSec) {
         $ts = (Get-Date).ToString('HH:mm:ss')
         $v = @{}
         foreach ($k in $cols) { $v[$k] = 'NA' }
         $v['timestamp_utc'] = $ts
+        # ---- 供电侧采样（每 tick）----
+        try {
+            $pw = [PerfPower]::Read()
+            if ($pw) {
+                if ($pw[0] -eq 0 -or $pw[0] -eq 1) { $v['ac_online'] = $pw[0] }
+                if ($pw[2] -ne 255) { $v['battery_pct'] = $pw[2] }
+            }
+        } catch { }
+
+        # ---- 显卡功耗上限（enforced.power.limit）：每 5 个 tick 探一次，旧驱动没这字段就永久关掉 ----
+        if ((Test-Path $smi) -and $limitOk -ne $false -and ($tick % 5) -eq 0) {
+            try {
+                $lq = & $smi --query-gpu=enforced.power.limit --format=csv,noheader,nounits 2>$null
+                $ltext = ([string]$lq).Trim()
+                $lnum = 0.0
+                if ($ltext -and [double]::TryParse($ltext, [ref]$lnum) -and $lnum -gt 0) {
+                    $limitOk = $true
+                    $lastLimit = $lnum
+                } else {
+                    $limitOk = $false
+                }
+            } catch { $limitOk = $false }
+        }
+        if ($lastLimit -ne 'NA') { $v['gpu_limit_w'] = $lastLimit }
+        # ---- CPU 封装功耗（计数器单位 mW → W）----
+        if ($cpuPwrOk) {
+            try {
+                $cw = [double]$cpuPwr.NextValue() / 1000.0
+                if ($cw -gt 0 -and $cw -lt 2000) { $v['cpu_pkg_w'] = [math]::Round($cw, 1) }
+            } catch { $cpuPwrOk = $false }
+        }
         # 温度与占用来自同一次 nvidia-smi 查询，分开开关只在汇总时区分
         if ($wantGpu -and (Test-Path $smi)) {
             try {
@@ -262,15 +333,51 @@ public static class PerfMem {
                     $script:sysCommit = [math]::Round(($mm[2] - $mm[3]) / 1MB, 0)
                 }
             } catch { }
-            # 共享 GPU 内存：Windows GPU Adapter Memory 计数器；拿不到就保持 NA（绝不填 0）
+            # 共享 GPU 内存：只取「目标游戏所在的那张卡」，不跨适配器求和（求和会把核显/虚拟适配器一起算进来）
+            # 取值链（已实测）：GPU Process Memory(pid_<游戏>_luid_0xAAAA_0xBBBB_phys_N) → 拼出适配器实例名
+            #                  → \GPU Adapter Memory(luid_...)\Shared Usage
+            # 拿不到就保持 NA（绝不填 0）；适配器实例会随进程消失，出错时清缓存下轮重解析。
             if ($wantShared) {
-            try {
-                $c2 = Get-Counter -Counter '\GPU Adapter Memory(*)\Shared Usage' -ErrorAction SilentlyContinue
-                if ($c2 -and $c2.CounterSamples.Count -gt 0) {
-                    $sumShared = ($c2.CounterSamples | Measure-Object -Property CookedValue -Sum).Sum
-                    if ($sumShared -gt 0) { $script:sharedVram = [math]::Round($sumShared / 1MB, 0) }
+                try {
+                    if (-not $script:sharedPc) {
+                        $luids = @()
+                        $pcat = New-Object System.Diagnostics.PerformanceCounterCategory('GPU Process Memory')
+                        foreach ($pi in $pcat.GetInstanceNames()) {
+                            if ($pi -match ('^pid_' + $gpid + '_luid_0x([0-9A-Fa-f]+)_0x([0-9A-Fa-f]+)_phys_(\d+)$')) {
+                                $luids += [pscustomobject]@{
+                                    Name = 'luid_0x' + $matches[1].PadLeft(8, '0') + '_0x' + $matches[2].PadLeft(8, '0') + '_phys_' + $matches[3]
+                                    Inst = $pi
+                                }
+                            }
+                        }
+                        # 多张卡都挂着这个进程时，取它显存占用最大的那张（真正的渲染卡）
+                        $pick = $null
+                        if ($luids.Count -gt 1) {
+                            $best = -1.0
+                            foreach ($l in $luids) {
+                                try {
+                                    $dc = New-Object System.Diagnostics.PerformanceCounter('GPU Process Memory', 'Dedicated Usage', $l.Inst)
+                                    [void]$dc.NextValue(); Start-Sleep -Milliseconds 80
+                                    $dv = [double]$dc.NextValue()
+                                    if ($dv -gt $best) { $best = $dv; $pick = $l.Name }
+                                } catch { }
+                            }
+                        }
+                        if (-not $pick -and $luids.Count -gt 0) { $pick = $luids[0].Name }
+                        if ($pick) {
+                            $pcNew = New-Object System.Diagnostics.PerformanceCounter('GPU Adapter Memory', 'Shared Usage', $pick)
+                            [void]$pcNew.NextValue()          # 首次取值恒为 0，必须先热身
+                            $script:sharedPc = $pcNew
+                        }
+                    }
+                    if ($script:sharedPc) {
+                        $bytes = [double]$script:sharedPc.NextValue()
+                        if ($bytes -ge 0) { $script:sharedVram = [math]::Round($bytes / 1MB, 0) }
+                    }
+                } catch {
+                    $script:sharedPc = $null      # 实例消失/驱动重启：下轮重新解析
+                    $script:sharedVram = $null
                 }
-            } catch { }
             }
         }
         if ($wantSysMem) {
@@ -389,6 +496,7 @@ Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^(pre
 
 $pmArgs = @('--process_id', "$GamePid", '--output_file', $pmCsv, '--v2_metrics', '--no_console_stats')
 Write-Host ('Capturing ' + $Seconds + ' s ...') -ForegroundColor Green
+$capStartTime = Get-Date
 $pmProc = Start-Process $pmExe -ArgumentList $pmArgs -PassThru -WindowStyle Hidden
 
 # PresentMon writes the CSV on the first captured frame.
@@ -449,6 +557,27 @@ if (-not (Test-Path $pmCsv)) {
     Pause-End 'Press Enter to exit'; exit 2
 }
 
+# ---------------- 供电侧：采集窗口内的电源中断 + 近 24 小时异常关机/硬件错误 ----------------
+# 说明：105 = 「电源来源变化」（拔/插交流电、掉电切电池都会记）；41 / 6008 是非正常关机；
+# WHEA-Logger 是硬件错误（供电/PCIe 问题会报在这里）。一律只读事件日志，不猜。
+$capEndTime = Get-Date
+$powerEvents = $null
+try {
+    $ev105 = @(Get-WinEvent -FilterHashtable @{ LogName = 'System'; Id = 105; StartTime = $capStartTime; EndTime = $capEndTime } -ErrorAction SilentlyContinue)
+    $powerEvents = $ev105.Count
+} catch { $powerEvents = $null }
+$powerHealth = $null
+$powerHealthDetail = $null
+try {
+    $since24 = (Get-Date).AddHours(-24)
+    $evBad  = @(Get-WinEvent -FilterHashtable @{ LogName = 'System'; Id = 41, 6008; StartTime = $since24 } -ErrorAction SilentlyContinue)
+    $evWhea = @(Get-WinEvent -FilterHashtable @{ LogName = 'System'; ProviderName = 'Microsoft-Windows-WHEA-Logger'; StartTime = $since24 } -ErrorAction SilentlyContinue)
+    $powerHealth = if (($evBad.Count + $evWhea.Count) -eq 0) { 'ok' } else { 'events' }
+    $powerHealthDetail = '非正常关机 ' + $evBad.Count + ' 次 · 硬件错误 ' + $evWhea.Count + ' 条'
+} catch {
+    $powerHealth = $null
+    $powerHealthDetail = $null
+}
 $frameTimes = New-Object System.Collections.Generic.List[double]
 $dispLat    = New-Object System.Collections.Generic.List[double]
 $inLat      = New-Object System.Collections.Generic.List[double]
@@ -741,6 +870,19 @@ $sysRam   = if ($collectSysMem) { Get-SensorStat 'sys_ram_pct' } else { $null }
 $sysAvail = if ($collectSysMem) { Get-SensorStat 'sys_ram_avail_mb' } else { $null }
 $sysCommit = if ($collectSysMem) { Get-SensorStat 'sys_commit_mb' } else { $null }
 $sharedVram = if ($collectShared) { Get-SensorStat 'shared_vram_mb' } else { $null }
+$cpuPkg   = if ($collectCpuPower) { Get-SensorStat 'cpu_pkg_w' } else { $null }
+
+# 供电侧统计（都来自采样 CSV；AC 状态按样本计数，不做估算）
+$acOn = 0; $acOff = 0
+foreach ($s0 in $sensors) {
+    $ax = [string]$s0.ac_online
+    if ($ax -eq '1') { $acOn++ } elseif ($ax -eq '0') { $acOff++ }
+}
+$acTotal  = $acOn + $acOff
+$acOffPct = if ($acTotal -gt 0) { [math]::Round(100.0 * $acOff / $acTotal, 1) } else { $null }
+$powerSource = if ($acTotal -eq 0) { 'unknown' } elseif ($acOff -eq 0) { 'ac' } elseif ($acOn -eq 0) { 'battery' } else { 'mixed' }
+$batteryPct = Get-SensorStat 'battery_pct'
+$gpuLimit   = Get-SensorStat 'gpu_limit_w'
 
 # 内存代数（WMI SMBIOSMemoryType）：26=DDR4 34=DDR5，其余按编号回报
 $ramTypeText = $null
@@ -1239,10 +1381,18 @@ $summary = [ordered]@{
         sys_ram_min_avail_mb = $(if ($sysAvail) { [math]::Round($sysAvail.Min, 0) } else { $null })
         sys_commit_max_mb = $(if ($sysCommit) { [math]::Round($sysCommit.Max, 0) } else { $null })
         shared_vram_max_mb = $(if ($sharedVram) { [math]::Round($sharedVram.Max, 0) } else { $null })
+        shared_vram_avg_mb = $(if ($sharedVram) { [math]::Round($sharedVram.Avg, 0) } else { $null })
+        # 采不到时给出原因码，报告据此显示「暂不可用」而不是把这一行藏掉
+        shared_vram_state = $(if (-not $collectShared) { 'skipped' } elseif ($null -eq $sharedVram) { 'noAdapterInstance' } else { 'ok' })
     }
     cpu_extra        = [ordered]@{
         proc_cpu_avg_pct = $(if ($procCpu) { [math]::Round($procCpu.Avg, 1) } else { $null })
         proc_cpu_max_pct = $(if ($procCpu) { [math]::Round($procCpu.Max, 1) } else { $null })
+        # CPU 封装功耗（含核显与 uncore）：口径必须写清，报告里不许简写成「CPU 功耗」
+        pkg_power_avg_w = $(if ($cpuPkg) { [math]::Round($cpuPkg.Avg, 1) } else { $null })
+        pkg_power_max_w = $(if ($cpuPkg) { [math]::Round($cpuPkg.Max, 1) } else { $null })
+        # 采不到时说清是哪一种：skipped = 用户关了开关；unavailable = 这台机器没有这个计数器
+        pkg_power_state = $(if (-not $collectCpuPower) { 'skipped' } elseif ($null -eq $cpuPkg) { 'unavailable' } else { 'ok' })
     }
     environment      = [ordered]@{
         cpu_model = $cpuModelText
@@ -1251,6 +1401,17 @@ $summary = [ordered]@{
         vram_type = $null
         present_api = $apiName
         present_mode = $presentMode
+        # 供电侧（07 测试环境）：台机没有电池时 battery_* 为 null，报告侧不显示该行，不当错误
+        power_source        = $powerSource        # ac / battery / mixed / unknown
+        ac_off_pct          = $acOffPct           # 采集期间不在交流电上的样本占比
+        battery_present     = $(if ($batteryPct) { $true } else { $false })
+        battery_min_pct     = $(if ($batteryPct) { [math]::Round($batteryPct.Min, 0) } else { $null })
+        battery_max_pct     = $(if ($batteryPct) { [math]::Round($batteryPct.Max, 0) } else { $null })
+        gpu_limit_min_w     = $(if ($gpuLimit) { [math]::Round($gpuLimit.Min, 1) } else { $null })
+        gpu_limit_max_w     = $(if ($gpuLimit) { [math]::Round($gpuLimit.Max, 1) } else { $null })
+        power_events        = $powerEvents        # 采集窗口内 Kernel-Power 105 的条数
+        power_health        = $powerHealth        # ok / events / $null(查询失败)
+        power_health_detail = $powerHealthDetail
     }
     run              = $runName
     process          = $exeBase
@@ -1328,6 +1489,7 @@ $summary = [ordered]@{
     collected        = [ordered]@{
         latency   = $collectLatency
         proccpu   = $collectProcCpu
+        cpupower  = $collectCpuPower
         gpuusage  = $collectGpuUsage
         gputemp   = $collectGpuTemp
         vram      = $collectVram
@@ -1359,11 +1521,23 @@ if ($summary.throttle.Count -gt 0) {
     Write-Host ("  throttle        : " + ($thrText -join ', '))
 } else { Write-Host '  throttle        : none' }
 Write-Host ("  CPU             : " + $(if ($null -ne $summary.cpu_util_avg_pct) { "" + $summary.cpu_util_avg_pct + " % avg, 最高单核 " + $summary.cpu_max_core_avg_pct + " % (峰值 " + $summary.cpu_max_core_peak_pct + " %)" } else { "NA" }))
+Write-Host ("  CPU package     : " + $(if ($null -ne $summary.cpu_extra.pkg_power_avg_w) { "" + $summary.cpu_extra.pkg_power_avg_w + " W avg / " + $summary.cpu_extra.pkg_power_max_w + " W max (iGPU + uncore included)" } else { "NA" }))
 if ($summary.warmup_dropped -gt 0) { Write-Host ("  warmup          : 已丢弃开头 " + $summary.warmup_seconds + " s（" + $summary.warmup_dropped + " 帧）") }
 Write-Host ("  display latency : " + $(if ($null -ne $summary.display_latency_avg_ms) { "" + $summary.display_latency_avg_ms + " ms (p95 " + $summary.display_latency_p95_ms + " ms)" } else { "NA" }))
 Write-Host ("  GPU usage       : " + $(if ($null -ne $summary.gpu_util_avg_pct) { "" + $summary.gpu_util_avg_pct + " % (max " + $summary.gpu_util_max_pct + " %)" } else { "NA" }))
 Write-Host ("  GPU temp        : " + $(if ($null -ne $summary.gpu_temp_avg_c) { "" + $summary.gpu_temp_avg_c + " C (max " + $summary.gpu_temp_max_c + " C)" } else { "NA" }))
 Write-Host ("  VRAM (this app) : " + $(if ($null -ne $summary.vram_avg_mb) { "" + $summary.vram_avg_mb + " MB (max " + $summary.vram_max_mb + " MB)" } else { "NA" }))
+Write-Host ("  Shared VRAM     : " + $(if ($null -ne $summary.memory.shared_vram_max_mb) { "" + $summary.memory.shared_vram_avg_mb + " MB (max " + $summary.memory.shared_vram_max_mb + " MB) · target game's adapter" } else { "NA" }))
+$pwSrcTxt = switch ([string]$summary.environment.power_source) {
+    'ac'      { '交流电' }
+    'battery' { '电池' }
+    'mixed'   { '交流电与电池混用（采集中发生切换）' }
+    default   { '无法确认' }
+}
+if ($null -ne $summary.environment.ac_off_pct -and $summary.environment.ac_off_pct -gt 0 -and $summary.environment.ac_off_pct -lt 100) {
+    $pwSrcTxt += '（电池时间占比 ' + (Fmt $summary.environment.ac_off_pct '0.0') + ' %）'
+}
+Write-Host ("  power           : " + $pwSrcTxt + $(if ($null -ne $summary.environment.gpu_limit_max_w) { " · GPU limit " + (Fmt $summary.environment.gpu_limit_max_w '0.0') + " W" } else { '' }) + $(if ($null -ne $summary.environment.power_events) { " · interruptions " + $summary.environment.power_events } else { '' }))
 Write-Host ("  RAM  (this app) : " + $(if ($null -ne $summary.ram_avg_mb) { "" + $summary.ram_avg_mb + " MB (max " + $summary.ram_max_mb + " MB)" } else { "NA" }))
 Write-Host ("  PC latency est. : " + $(if ($null -ne $summary.pc_latency_avg_ms) { "" + $summary.pc_latency_avg_ms + " ms (mean frametime + display latency; p95 " + $summary.pc_latency_p95_ms + " ms)" } else { "NA" }))
 Write-Host ("  game foreground : " + $(if ($null -ne $summary.foreground_pct) { "" + $summary.foreground_pct + " % of the capture" } else { "NA" }))
@@ -1662,10 +1836,20 @@ $detRows += SecRow 'CPU 运行状态'
 if ($null -ne $summary.cpu_util_avg_pct) {
     $detRows += '<tr><td>CPU 占用 平均 / 最高' + $(if ($null -ne $summary.cpu_max_core_avg_pct) { '<br><span style="font-size:11.5px">最高单核 ' + (Fmt $summary.cpu_max_core_avg_pct '0.0') + ' %（峰值 ' + (Fmt $summary.cpu_max_core_peak_pct '0.0') + ' %）</span>' } else { '' }) + '</td><td>' + (Fmt $summary.cpu_util_avg_pct '0.0') + ' / ' + (Fmt $summary.cpu_util_max_pct '0.0') + ' %</td></tr>'
 }
+if ($null -ne $summary.cpu_extra.pkg_power_avg_w) {
+    $detRows += '<tr><td>CPU 封装功耗 平均 / 峰值<br><span style="font-size:11.5px">含核显与 uncore，不是单核功耗</span></td><td>' + (Fmt $summary.cpu_extra.pkg_power_avg_w '0.0') + ' / ' + (Fmt $summary.cpu_extra.pkg_power_max_w '0.0') + ' W</td></tr>'
+} elseif ($collectCpuPower) {
+    $detRows += '<tr><td>CPU 封装功耗</td><td>NA<span style="font-size:11.5px;color:#8a8a8a">（这台机器没有提供 CPU 能量计数器）</span></td></tr>'
+}
 $detRows += NaRows 'cpu'
 $detRows += SecRow '内存与显存'
 if ($collectVram) {
     $detRows += '<tr><td>显存 平均 / 最高（本程序）</td><td>' + (Fmt $summary.vram_avg_mb '0') + ' / ' + (Fmt $summary.vram_max_mb '0') + ' MB</td></tr>'
+}
+if ($collectShared -and $null -ne $summary.memory.shared_vram_max_mb) {
+    $detRows += '<tr><td>共享 GPU 内存（目标游戏所在显卡）</td><td>平均 ' + (Fmt $summary.memory.shared_vram_avg_mb '0') + ' / 最高 ' + (Fmt $summary.memory.shared_vram_max_mb '0') + ' MB</td></tr>'
+} elseif ($collectShared) {
+    $detRows += '<tr><td>共享 GPU 内存</td><td>NA<span style="font-size:11.5px;color:#8a8a8a">（目标游戏未出现在显卡计数器实例中）</span></td></tr>'
 }
 if ($collectRam) {
     $detRows += '<tr><td>内存 平均 / 最高（本程序）</td><td>' + (Fmt $summary.ram_avg_mb '0') + ' / ' + (Fmt $summary.ram_max_mb '0') + ' MB</td></tr>'
@@ -1682,6 +1866,25 @@ if ($collectRes -and $summary.resolution) {
 }
 if ($summary.present_mode) { $detRows += '<tr><td>呈现模式</td><td>' + $summary.present_mode + '</td></tr>' }
 $detRows += '<tr><td>采集完整度</td><td>有效 ' + $summary.captured_seconds + 's / 采集 ' + $summary.wall_seconds + 's</td></tr>'
+# 供电侧的全部数据都放在 07 测试环境（属于「这次的现场条件」，不是性能指标）
+$detRows += '<tr><td>供电状态（采集期间）</td><td>' + $pwSrcTxt + '</td></tr>'
+if ($null -ne $summary.environment.gpu_limit_max_w) {
+    $limTxt = if ($summary.environment.gpu_limit_min_w -eq $summary.environment.gpu_limit_max_w) {
+        (Fmt $summary.environment.gpu_limit_max_w '0.0') + ' W'
+    } else {
+        (Fmt $summary.environment.gpu_limit_min_w '0.0') + ' – ' + (Fmt $summary.environment.gpu_limit_max_w '0.0') + ' W'
+    }
+    $detRows += '<tr><td>显卡功耗上限（生效值）<br><span style="font-size:11.5px">驱动/厂商按供电与性能模式给的功率预算，不是瞬时功耗</span></td><td>' + $limTxt + '</td></tr>'
+}
+if ($summary.environment.battery_present) {
+    $detRows += '<tr><td>电池电量（采集期间）</td><td>' + (Fmt $summary.environment.battery_min_pct '0') + ' – ' + (Fmt $summary.environment.battery_max_pct '0') + ' %</td></tr>'
+}
+if ($null -ne $summary.environment.power_events) {
+    $detRows += '<tr><td>采集期间电源中断</td><td>' + $(if ($summary.environment.power_events -eq 0) { '0 次' } else { [string]$summary.environment.power_events + ' 次（Kernel-Power 105）' }) + '</td></tr>'
+}
+if ($summary.environment.power_health) {
+    $detRows += '<tr><td>近 24 小时异常关机 / 硬件错误</td><td>' + $(if ($summary.environment.power_health -eq 'ok') { '无' } else { [string]$summary.environment.power_health_detail }) + '</td></tr>'
+}
 $detRows += NaRows 'env'
 
 # ── B3：把详细数据按 01–07 的板块顺序重排 ──
@@ -1724,6 +1927,7 @@ $fgPctText = if ($null -ne $summary.foreground_pct) { $summary.foreground_pct.To
 $skipNames = @()
 if (-not $collectLatency)   { $skipNames += '上屏延迟' }
 if (-not $collectProcCpu)   { $skipNames += '游戏进程 CPU' }
+if (-not $collectCpuPower)  { $skipNames += 'CPU 封装功耗' }
 if (-not $collectGpuTemp)   { $skipNames += 'GPU 温度 / 功耗' }
 if (-not $collectGpuUsage)  { $skipNames += 'GPU 占用 / 频率' }
 if (-not $collectVram)      { $skipNames += '显存' }

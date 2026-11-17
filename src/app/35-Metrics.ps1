@@ -37,7 +37,7 @@ $script:MetricsFpsErrAt = $null
 
 # ---------- 一轮采样（runspace 里执行；单引号 here-string，禁止变量展开） ----------
 $script:MetricsSampleScript = @'
-param($SmiPath, $Queue, $IntervalMs, $Ctl, $PmExe, $FpsCsv, $FpsPid)
+param($SmiPath, $Queue, $IntervalMs, $Ctl, $PmExe, $FpsCsv, $FpsPid, $FpsFixed)
 
 # ---- 实时 FPS：PresentMon burst（短窗口采集 → 进程退出后解析）----
 # 为什么不能「边采边读」：PresentMon 用 --output_file 时是**独占**打开（FileShare.None），
@@ -52,12 +52,17 @@ $isAdm = $false
 try { $isAdm = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) } catch { }
 $fps = @{ proc = $null; ok = $false; pid = 0; target = ''; err = ''; cand = -1; hits = 0;
           starve = 0; session = ''; started = $null; value = $null; frames = 0;
-          emptyBursts = 0; burstSec = 2; timeout = 12; backoff = 0; lastDur = 0; p95 = $null; lastOkAt = $null }
+          emptyBursts = 0; burstSec = 1; timeout = 12; backoff = 0; lastDur = 0; p95 = $null; lastOkAt = $null;
+          low1 = $null; dl = $null }
 # 窗口滑动记录必须是 List：数组是固定长度，RemoveAt 会抛「集合的大小是固定的」
 $fps.win = New-Object System.Collections.Generic.List[object]
 
 function Resolve-FpsTarget {
     param([int]$Fallback)
+    # 用户在「实时监控」里指定了目标进程 → 固定用它（进程还活着时），不再跟随前台
+    if ($FpsFixed -and $FpsPid -gt 0) {
+        try { [void](Get-Process -Id $FpsPid -ErrorAction Stop); return $FpsPid } catch { }
+    }
     $fg = 0
     try { if ('PerfFg' -as [type]) { $fg = [PerfFg]::Pid() } } catch { $fg = 0 }
     if ($fg -gt 0 -and $fg -ne $hostPid) { return $fg }
@@ -113,6 +118,8 @@ function Get-BurstFrames {
     $last = $null
     $lastFt = 0.0
     $list = New-Object System.Collections.Generic.List[double]
+    $dlSum = 0.0; $dlN = 0
+    $iDl = [array]::IndexOf($hdr, 'DisplayLatency')
     for ($ln = 1; $ln -lt $lines.Count; $ln++) {
         $f = $lines[$ln] -split ','
         if ($f.Count -ne $colCount) { continue }
@@ -130,9 +137,16 @@ function Get-BurstFrames {
                 $lastFt = $ft
             }
         }
+        if ($iDl -ge 0) {
+            $dv = 0.0
+            if ([double]::TryParse($f[$iDl], [ref]$dv) -and $dv -ge 0) { $dlSum += $dv; $dlN++ }
+        }
     }
     if ($n -le 0) { return $null }
     $avgFt = $sum / $n
+    # 渲染延迟（RLAT）= 这次 present 到真正上屏的平均毫秒数（PresentMon 的 DisplayLatency）
+    $dl = $null
+    if ($dlN -gt 0) { $dl = [math]::Round($dlSum / $dlN, 2) }
     $dur = 0.0
     if ($null -ne $first -and $null -ne $last -and $last -gt $first) {
         # 首帧起点 → 末帧起点 + **末帧自己的**时长 = 这 N 帧真正覆盖的时间
@@ -149,7 +163,7 @@ function Get-BurstFrames {
     $idx95 = [int][math]::Ceiling($sorted.Count * 0.05) - 1
     if ($idx95 -lt 0) { $idx95 = 0 }
     if ($idx95 -lt $sorted.Count) { $p95 = $sorted[$idx95] }
-    return @{ frames = $n; dur = $dur; fps = $val; low1 = $slow; p95 = $p95 }
+    return @{ frames = $n; dur = $dur; fps = $val; low1 = $slow; p95 = $p95; dl = $dl; avgft = $avgFt }
 }
 
 function Start-FpsBurst {
@@ -223,6 +237,8 @@ function Complete-FpsBurst {
         $fps.frames += $r.frames
         $fps.lastDur = [math]::Round($r.dur, 2)
         $fps.p95 = $r.p95
+        $fps.low1 = $r.low1
+        $fps.dl = $r.dl
         $fps.starve = 0
         $fps.emptyBursts = 0
         $fps.err = ''
@@ -242,12 +258,20 @@ function Complete-FpsBurst {
             $fps.backoff = 3
         }
         # 连续 4 个空窗口：别再拿上一次的旧值骗人
-        if ($fps.emptyBursts -ge 4) { $fps.value = $null; $fps.win.Clear() }
+        if ($fps.emptyBursts -ge 4) { $fps.value = $null; $fps.low1 = $null; $fps.dl = $null; $fps.win.Clear() }
     }
 }
 
 # 采样循环启动前先清一次残留 ETW 会话（卡死的会话会让后面所有窗口收不到帧）
 Clear-FpsSessions
+# CPU 封装功耗（PDH Energy Meter / rapl_package0_pkg，单位 mW）：与报告口径一致；平台没有就不给值
+$cpuPwrCounter = $null
+try {
+    $cpuPwrCounter = New-Object System.Diagnostics.PerformanceCounter('Energy Meter', 'power', 'rapl_package0_pkg')
+    [void]$cpuPwrCounter.NextValue()
+    Start-Sleep -Milliseconds 300
+    [void]$cpuPwrCounter.NextValue()
+} catch { $cpuPwrCounter = $null }
 while ($true) {
     if ($Ctl -and $Ctl.stop) { break }
     try {
@@ -283,7 +307,7 @@ $out = [ordered]@{
     gpu = $null; gpuClock = $null; gpuMemClock = $null; gpuTemp = $null; gpuPower = $null; gpuFan = $null
     vramUsed = $null; vramTotal = $null
     ramUsed = $null; ramTotal = $null
-    fps = $null
+    fps = $null; fpsLow1 = $null; rlat = $null; pcl = $null; cpuPower = $null
     fpsTarget = $fps.target
     fpsErr = $fps.err
 }
@@ -474,9 +498,21 @@ if ($null -eq $out.ramTotal -and -not ('PcMetrics' -as [type])) {
 # ---- 实时 FPS：读数已在 Complete-FpsBurst 里算好（最近 3 个窗口按帧数加权）----
 # 窗口间歇期沿用上一次的值（否则每 2 秒闪一次「—」）；连续 4 个空窗口才会清成 null。
 if ($null -ne $fps.value) { $out.fps = $fps.value }
+if ($cpuPwrCounter) {
+    try {
+        $cw = [double]$cpuPwrCounter.NextValue() / 1000.0
+        if ($cw -gt 0 -and $cw -lt 2000) { $out.cpuPower = [math]::Round($cw, 1) }
+    } catch { $cpuPwrCounter = $null }
+}
+if ($null -ne $fps.low1) { $out.fpsLow1 = [math]::Round([double]$fps.low1, 2) }
+if ($null -ne $fps.dl) { $out.rlat = [math]::Round([double]$fps.dl, 2) }
+# 平均 PC 延迟（PCL）= 平均帧时间 + 渲染延迟；两个都在才有值，绝不估算
+if ($null -ne $fps.dl -and $null -ne $out.fps -and [double]$out.fps -gt 0) {
+    $out.pcl = [math]::Round((1000.0 / [double]$out.fps) + [double]$fps.dl, 2)
+}
 # 停摆保护：超过 8 秒没有一次成功窗口，就不许再显示旧值（否则用户看到的是十分钟前的数字）
     if (Test-FpsStale $fps) {
-        if ($null -ne $fps.value) { $fps.value = $null; $fps.win.Clear() }
+        if ($null -ne $fps.value) { $fps.value = $null; $fps.low1 = $null; $fps.dl = $null; $fps.win.Clear() }
         if (-not $fps.err) { $fps.err = '窗口停摆：超过 8 秒没有完成一次 burst' }
     }
 # 失败现场：只在「出过问题」时带上，宿主负责去重记日志（同一个错误不会每秒刷一条）
@@ -600,6 +636,7 @@ function Start-MetricsWorker {
         [void]$ps.AddParameter('PmExe', $script:MetricsPmPath)
         [void]$ps.AddParameter('FpsCsv', $script:MetricsFpsCsv)
         [void]$ps.AddParameter('FpsPid', $script:MetricsFpsPid)
+        [void]$ps.AddParameter('FpsFixed', [bool]$script:MetricsFpsFixed)
         $handle = $ps.BeginInvoke()
         $script:MetricsWorker = @{ PS = $ps; Handle = $handle; Started = (Get-Date) }
         Write-AppLog '监控采样线程已启动（常驻 runspace）'
@@ -700,14 +737,28 @@ function Start-MetricsSampler {
     # 实时 FPS 的「备选目标」：采集页上次选中的进程（还活着才用）。主目标是当前前台应用，见采样脚本。
     $script:MetricsFpsPid = 0
     $script:MetricsFpsName = ''
-    try {
-        $lp = [int]$script:Cfg.lastPid
-        if ($lp -gt 0) {
-            $p = Get-Process -Id $lp -ErrorAction Stop
+    $script:MetricsFpsFixed = $false
+    # 实时页选的「目标进程」优先（固定目标，不跟随前台）；没选才退回「采集页上次的进程」当备选
+    $rt = 0
+    try { $rt = [int]$script:Cfg.rtTargetPid } catch { }
+    if ($rt -gt 0) {
+        try {
+            $p = Get-Process -Id $rt -ErrorAction Stop
             $script:MetricsFpsPid = $p.Id
             $script:MetricsFpsName = $p.ProcessName
-        }
-    } catch { }
+            $script:MetricsFpsFixed = $true
+        } catch { $script:Cfg.rtTargetPid = 0 }
+    }
+    if (-not $script:MetricsFpsFixed) {
+        try {
+            $lp = [int]$script:Cfg.lastPid
+            if ($lp -gt 0) {
+                $p = Get-Process -Id $lp -ErrorAction Stop
+                $script:MetricsFpsPid = $p.Id
+                $script:MetricsFpsName = $p.ProcessName
+            }
+        } catch { }
+    }
     $script:MetricsRunning = $true
     $script:MetricsSamples.Clear()
     $script:MetricsFirstLogged = $false
@@ -720,12 +771,17 @@ function Start-MetricsSampler {
         $script:MetricsCaps.fpsAdmin = $adm
         if (-not $adm) { Write-AppLog '实时 FPS 需要管理员权限：当前进程未提权，PresentMon 无法建立 ETW 会话（FPS 只会显示「—」）' 'WARN' }
         $script:MetricsCaps.fpsTarget = $script:MetricsFpsName
+        $script:MetricsCaps.fpsFixed = [bool]$script:MetricsFpsFixed
     }
     Start-MetricsWorker
     Send-MetricsCaps
     $fpsNote = if ($script:MetricsPmPath -and $script:MetricsFpsCsv) {
-        $fb = if ($script:MetricsFpsPid -gt 0) { ('；无前台时退回 ' + $script:MetricsFpsName + '(' + $script:MetricsFpsPid + ')') } else { '' }
-        'FPS 跟随前台应用' + $fb
+        if ($script:MetricsFpsFixed) {
+            'FPS 固定目标 ' + $script:MetricsFpsName + '(' + $script:MetricsFpsPid + ')'
+        } else {
+            $fb = if ($script:MetricsFpsPid -gt 0) { ('；无前台时退回 ' + $script:MetricsFpsName + '(' + $script:MetricsFpsPid + ')') } else { '' }
+            'FPS 跟随前台应用' + $fb
+        }
     } else { 'FPS 未启用（缺少 PresentMon）' }
     Write-AppLog (("实时监控开始：间隔 {0} ms，环形缓冲 {1} 点，GPU 源 {2}，{3}" -f $script:MetricsIntervalMs, $script:MetricsRingSize, $(if ($script:MetricsSmiPath) { 'nvidia-smi' } else { '无' }), $fpsNote))
 
@@ -754,5 +810,22 @@ function Invoke-MetricsCommand {
     switch ($Msg.cmd) {
         'metricsStart' { Set-MetricsConsumer -Name 'page' -On $true }
         'metricsStop' { Set-MetricsConsumer -Name 'page' -On $false }
+        'metricsTarget' {
+            # 0 = 跟随前台；>0 = 固定目标。正在采样时重启一次，让新目标立刻生效
+            $pid2 = 0
+            if ($null -ne $Msg.pid) { try { $pid2 = [int]$Msg.pid } catch { $pid2 = 0 } }
+            if ($pid2 -lt 0) { $pid2 = 0 }
+            $wasRunning = [bool]$script:MetricsRunning
+            $script:Cfg.rtTargetPid = $pid2
+            $script:Cfg.rtTargetName = [string]$Msg.name
+            try { Save-Config } catch { }
+            if ($wasRunning) {
+                Stop-MetricsSampler
+                Start-Sleep -Milliseconds 120
+                Start-MetricsSampler
+            }
+            Send-ToUi @{ type = 'metricsCaps'; caps = $script:MetricsCaps; running = [bool]$script:MetricsRunning }
+            Write-AppLog ('实时监控目标：' + $(if ($pid2 -gt 0) { [string]$Msg.name + '(' + $pid2 + ')' } else { '跟随前台窗口' }))
+        }
     }
 }

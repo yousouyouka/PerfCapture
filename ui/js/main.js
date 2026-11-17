@@ -88,7 +88,7 @@ function saveSettings() {
   send({
     cmd: 'saveSettings',
     settings: {
-      seconds: parseInt($('#seconds').value, 10) || 120,
+      seconds: parseInt($('#seconds').value, 10) || 180,
       minimize: $('#chkMin').checked,
       sound: $('#chkSound').checked,
       skip,

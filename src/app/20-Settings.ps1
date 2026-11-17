@@ -2,10 +2,10 @@
 
 function New-DefaultConfig {
     [pscustomobject]@{
-        theme = 'system'; seconds = 120; minimize = $true; sound = $true; skip = ''
-        # 采集预设：standard 是默认档；warmup = 预热丢弃秒数（引擎 -WarmupSec）
-        # customBase = 自定义是从哪一档改出来的（界面显示「自定义 · 基于标准」用）
-        preset = 'standard'; customBase = 'standard'; warmup = 3
+        theme = 'system'; seconds = 180; minimize = $true; sound = $true; skip = ''
+        # 采集预设：首次安装默认「专业」档（180 秒 / 预热 5 秒 / 全部采集项），与 capture-options.json 的 pro 一致
+        # customBase = 自定义是从哪一档改出来的（界面显示「自定义 · 基于专业」用）
+        preset = 'pro'; customBase = 'pro'; warmup = 5
         language = 'zh-CN'
         lastPid = 0; windowW = 1180; windowH = 780
         # 检查更新：auto 关掉后不再自动查；skippedVersion 是用户点过「跳过此版本」的版本号

@@ -1,5 +1,9 @@
 # ── 构建产物（打包生成，不进仓库）──
-/dist/
+/dist/*
+# 例外：只保留「当前版本」的安装包 —— 发版后用 git add -f 显式加进来
+# 例外：只保留「当前版本」的安装包 —— 用 git add -f dist/PerfCapture-Setup-<版本>.exe 显式加进来；
+# 不要写 !/dist/PerfCapture-Setup-*.exe 这种通配例外，否则 git add -A 会把所有历史 exe 一起加进来
+# 展开的版本目录与历史 zip 不入库（例外只对 Setup exe 生效）
 # 根目录的 PerfCapture.exe 是本地编译的启动器，随 dist 产物走，源码仓库不带
 /PerfCapture.exe
 /build/payload.zip
@@ -17,3 +21,8 @@
 *.bak
 Thumbs.db
 desktop.ini
+
+# ── 内部文档：只留本地，不上传 GitHub ──
+/FPS-证据链.md
+/性能采集重构规划.md
+/暂不可用与所需工具.md

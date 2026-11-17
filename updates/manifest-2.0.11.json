@@ -1,0 +1,38 @@
+{
+    "schema":  1,
+    "app":  "PerfCapture",
+    "channel":  "stable",
+    "version":  "2.0.11",
+    "date":  "2026-11-18",
+    "serial":  60,
+    "notes":  {
+                  "zh":  "默认专业档 / 公告补齐 1.3.3–1.3.7 / 日期与仓库整理",
+                  "en":  "See the release notes in the app (What\u0027s new).",
+                  "ja":  "アプリ内の更新情報をご覧ください。"
+              },
+    "assets":  [
+                   {
+                       "kind":  "setup",
+                       "name":  "PerfCapture-Setup-2.0.11.exe",
+                       "size":  10419200,
+                       "sha256":  "f3b05d72c2ad387a7ad36706b3491f0fae076188840564e4d5282c0ecdec0acc",
+                       "urls":  [
+                                    "https://raw.githubusercontent.com/yousouyouka/PerfCapture/updates/bin/PerfCapture-Setup-2.0.11.exe",
+                                    "https://ghproxy.net/https://github.com/yousouyouka/PerfCapture/releases/download/v2.0.11/PerfCapture-Setup-2.0.11.exe",
+                                    "https://github.com/yousouyouka/PerfCapture/releases/download/v2.0.11/PerfCapture-Setup-2.0.11.exe"
+                                ]
+                   },
+                   {
+                       "kind":  "zip",
+                       "name":  "PerfCapture-2.0.11.zip",
+                       "size":  10372398,
+                       "sha256":  "bc0d3ccf269d0a99b2fca22f57989e16f50f293969da969119a53f3919c65f3c",
+                       "urls":  [
+                                    "https://cdn.jsdelivr.net/gh/yousouyouka/PerfCapture@updates/bin/PerfCapture-2.0.11.zip",
+                                    "https://raw.githubusercontent.com/yousouyouka/PerfCapture/updates/bin/PerfCapture-2.0.11.zip",
+                                    "https://ghproxy.net/https://github.com/yousouyouka/PerfCapture/releases/download/v2.0.11/PerfCapture-2.0.11.zip",
+                                    "https://github.com/yousouyouka/PerfCapture/releases/download/v2.0.11/PerfCapture-2.0.11.zip"
+                                ]
+                   }
+               ]
+}

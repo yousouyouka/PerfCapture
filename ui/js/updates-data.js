@@ -19,7 +19,7 @@ window.PerfUpdateAreas = ['capture', 'realtime', 'other'];
 
 window.PerfUpdates = [
   {
-    date: '2026-11-19', version: '2.0.21',
+    date: '2026-11-17', version: '2.0.21',
     title: '进程列表可以一键刷新；1%L 改为默认关闭',
     items: [
       ['ux', '「FPS 目标」旁边加了刷新按钮：点一下就重新拉一次进程列表，不用退出页面重进；刷新时按钮短暂禁用，防止连点。', 'realtime'],
@@ -28,7 +28,7 @@ window.PerfUpdates = [
     ]
   },
   {
-    date: '2026-11-19', version: '2.0.20',
+    date: '2026-11-17', version: '2.0.20',
     title: '浮窗排版照图重做；实时监控可以选目标进程',
     items: [
       ['ui', '堆叠布局改成一行一项：FPS / FPS 1%L / GPU 利用率 / GPU 温度 / GPU 频率 / GPU 电压 / GPU 功率 / GPU 风扇速度 / VRAM 频率 / CPU 利用率 / CPU 温度 / CPU 频率 / CPU 功率 / RLAT / PCL（av）/ RAM，名字在左、数值在右。', 'realtime'],
@@ -41,7 +41,7 @@ window.PerfUpdates = [
     ]
   },
   {
-    date: '2026-11-18', version: '2.0.19',
+    date: '2026-11-17', version: '2.0.19',
     title: '浮窗改成按组合并显示：GPU 占用 56 % 温度 49 °C',
     items: [
       ['ui', '名字合并了：勾了 GPU 占用和温度就显示「GPU 占用 56 % 温度 49 °C」，不再把「利用率」「百分比」这类词重复一遍。', 'realtime'],
@@ -54,7 +54,7 @@ window.PerfUpdates = [
     ]
   },
   {
-    date: '2026-11-18', version: '2.0.18',
+    date: '2026-11-17', version: '2.0.18',
     title: '实时监控浮窗重做：16 项数据自选、两种布局、可选 5 色字',
     items: [
       ['feature', '浮窗可以自己挑要显示什么：16 个逐项开关，只看 FPS 就只留 FPS。以前是跟着页面四个分组一起开关，现在两套互不干扰。', 'realtime'],

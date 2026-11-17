@@ -22,11 +22,14 @@ $script:UpdateAllowedHosts = @(
     'ghproxy.net', 'gitee.com'
 )
 
-# 清单源顺序：jsDelivr（国内多数可达）→ raw → api（境内实测三者都通，按速度排）
+# 清单源顺序：raw / api 直连仓库、内容即刻更新；jsDelivr 排最后 —— 2.0.21 发布后实测它
+# 长时间（数小时以上）仍返回 2.0.10 的旧清单，排第一会把「有新版本」误判成「已是最新」。
+# 注意：顺序如今只影响同版本并列时的取舍与日志，真正选中哪一份由 version/serial 最大者决定
+# （见下方 UpdateFetchScript 的多源策略）。
 $script:UpdateManifestSources = @(
-    'https://cdn.jsdelivr.net/gh/yousouyouka/PerfCapture@main/updates/latest.json',
     'https://raw.githubusercontent.com/yousouyouka/PerfCapture/main/updates/latest.json',
-    'https://api.github.com/repos/yousouyouka/PerfCapture/contents/updates/latest.json'
+    'https://api.github.com/repos/yousouyouka/PerfCapture/contents/updates/latest.json',
+    'https://cdn.jsdelivr.net/gh/yousouyouka/PerfCapture@main/updates/latest.json'
 )
 
 $script:UpdateMaxManifestBytes = 262144
@@ -101,8 +104,12 @@ function Stop-UpdateTimer {
 # ---------- 后台线程里跑的脚本（runspace，不阻塞 UI 线程） ----------
 $script:UpdateFetchScript = @'
 param($ManifestUrls, $TimeoutSec, $PublicKeyXml, $AllowedHosts)
-# 逐源验签：某个镜像拿到「新清单 + 旧签名」这类混用内容时，直接换下一个源，
-# 而不是让整次检查失败（jsDelivr 实测出现过这种错配）。
+# 多源策略（2.0.22 起）：
+#   1) 所有源**同时**取清单与签名，互不等待，总耗时约等于最慢的那个（串行最坏要 3 倍超时）；
+#   2) 每个源各自独立验签，验签不过的直接丢弃 —— 镜像出现「新清单 + 旧签名」错配时不牵连其它源；
+#   3) 全部收齐后按 version 取最大、同版本再比 serial。某个镜像缓存滞后（jsDelivr 实测长期吐 2.0.10）
+#      不会再让检查更新误判成「已是最新」；
+#   4) 源顺序只影响同版本并列时的取舍与日志，不再决定结果。
 function Test-Host($uri) {
     try { return ($AllowedHosts -contains $uri.Host.ToLowerInvariant()) } catch { return $false }
 }
@@ -117,16 +124,41 @@ function Test-Sig([byte[]]$Data, [byte[]]$Sig) {
         return $ok
     } catch { return $false }
 }
+function Compare-Ver([string]$A, [string]$B) {
+    $sa = @([string]$A -split '\.' | ForEach-Object { $n = 0; if ([int]::TryParse($_, [ref]$n)) { $n } else { 0 } })
+    $sb = @([string]$B -split '\.' | ForEach-Object { $n = 0; if ([int]::TryParse($_, [ref]$n)) { $n } else { 0 } })
+    $len = [Math]::Max($sa.Count, $sb.Count)
+    for ($i = 0; $i -lt $len; $i++) {
+        $x = if ($i -lt $sa.Count) { $sa[$i] } else { 0 }
+        $y = if ($i -lt $sb.Count) { $sb[$i] } else { 0 }
+        if ($x -gt $y) { return 1 }
+        if ($x -lt $y) { return -1 }
+    }
+    return 0
+}
 $errs = @()
 $sigFail = $false
+$cands = @()
 $http = New-Object System.Net.Http.HttpClient
 $http.Timeout = [TimeSpan]::FromSeconds($TimeoutSec)
 try { $http.DefaultRequestHeaders.UserAgent.ParseAdd('PerfCapture/1.4') } catch {}
 try { $http.DefaultRequestHeaders.Add('Accept', 'application/vnd.github.raw, application/json, */*') } catch {}
+# 先把所有请求一次性发出去（清单与签名各一个 Task），再逐个收结果
+$pending = @()
 foreach ($u in $ManifestUrls) {
     $sw = [Diagnostics.Stopwatch]::StartNew()
     try {
-        $r = $http.GetAsync($u).GetAwaiter().GetResult()
+        $mt = $http.GetAsync($u)
+        $st = $http.GetAsync($u + '.sig')
+        $pending += [pscustomobject]@{ Url = $u; MT = $mt; ST = $st; Sw = $sw }
+    } catch {
+        $errs += ('{0} 请求未发出: {1}' -f $u, (($_.Exception.Message -split '\r?\n')[0]))
+    }
+}
+foreach ($p in $pending) {
+    $u = $p.Url
+    try {
+        $r = $p.MT.GetAwaiter().GetResult()
         if (-not $r.IsSuccessStatusCode) { $errs += ('{0} HTTP {1}' -f $u, [int]$r.StatusCode); continue }
         # 白名单要按**最终**地址判：允许自动重定向，但重定向到白名单外一律拒绝
         if (-not (Test-Host $r.RequestMessage.RequestUri)) {
@@ -137,7 +169,7 @@ foreach ($u in $ManifestUrls) {
         $mb = $r.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult()
         if ($mb.Length -lt 2 -or $mb.Length -gt 262144) { $errs += ('{0} 大小异常 {1}' -f $u, $mb.Length); continue }
 
-        $sr = $http.GetAsync($u + '.sig').GetAwaiter().GetResult()
+        $sr = $p.ST.GetAwaiter().GetResult()
         if (-not $sr.IsSuccessStatusCode) { $errs += ('{0}.sig HTTP {1}' -f $u, [int]$sr.StatusCode); continue }
         if (-not (Test-Host $sr.RequestMessage.RequestUri)) { $errs += ('{0}.sig 被重定向到白名单外主机' -f $u); continue }
         $sb = $sr.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult()
@@ -151,14 +183,42 @@ foreach ($u in $ManifestUrls) {
             $errs += ('{0} 签名不符（镜像清单与签名不同步？）' -f $u)
             continue
         }
-        return [pscustomobject]@{ ok = $true; url = $u; ms = $sw.ElapsedMilliseconds
-            manifest = [Convert]::ToBase64String($mb); sig = [Convert]::ToBase64String($sigRaw)
-            sigFail = $false; errors = $errs }
+        # 验签通过还不够：要能读出 version 才能比较新旧，读不出的一律不当候选
+        $ver = ''
+        $ser = [long]0
+        try {
+            $jk = ([Text.Encoding]::UTF8.GetString($mb)) | ConvertFrom-Json
+            $ver = [string]$jk.version
+            if ($jk.serial) { $ser = [long]$jk.serial }
+        } catch { }
+        if (-not $ver) { $errs += ('{0} 清单缺少 version 字段' -f $u); continue }
+        $cands += [pscustomobject]@{
+            Url = $u; Ms = $p.Sw.ElapsedMilliseconds; Version = $ver; Serial = $ser
+            Manifest = [Convert]::ToBase64String($mb); Sig = [Convert]::ToBase64String($sigRaw)
+        }
     } catch {
-        $errs += ('{0} 失败: {1}' -f $u, (($_.Exception.Message -split "`r?`n")[0]))
+        $errs += ('{0} 失败: {1}' -f $u, (($_.Exception.Message -split '\r?\n')[0]))
+    } finally {
+        try { $p.Sw.Stop() } catch { }
     }
 }
-return [pscustomobject]@{ ok = $false; url = ''; ms = 0; manifest = ''; sig = ''; sigFail = $sigFail; errors = $errs }
+if ($cands.Count -gt 0) {
+    $best = $cands[0]
+    foreach ($c in $cands) {
+        $cmp = Compare-Ver $c.Version $best.Version
+        if ($cmp -gt 0 -or ($cmp -eq 0 -and $c.Serial -gt $best.Serial)) { $best = $c }
+    }
+    $seen = @($cands | ForEach-Object { [pscustomobject]@{ url = $_.Url; version = $_.Version; serial = $_.Serial } })
+    return [pscustomobject]@{
+        ok = $true; url = $best.Url; ms = $best.Ms
+        manifest = $best.Manifest; sig = $best.Sig; sigFail = $false; errors = $errs
+        version = $best.Version; serial = $best.Serial; candidates = $seen
+    }
+}
+return [pscustomobject]@{
+    ok = $false; url = ''; ms = 0; manifest = ''; sig = ''; sigFail = $sigFail; errors = $errs
+    version = ''; serial = [long]0; candidates = @()
+}
 '@
 
 $script:UpdateDownloadScript = @'
@@ -308,7 +368,11 @@ function Complete-UpdateCheck {
 
     $newer = (Compare-AppVersion $man.version $script:AppVersion) -gt 0
     $skipped = ($script:Cfg.updateCheck -and $script:Cfg.updateCheck.skippedVersion -eq $man.version)
-    Write-AppLog ("清单版本 {0}，当前 {1}，来源 {2}（{3} ms）" -f $man.version, $script:AppVersion, $obj.url, $obj.ms)
+    Write-AppLog ("清单版本 {0}（serial {1}），当前 {2}，来源 {3}（{4} ms）" -f $man.version, $obj.serial, $script:AppVersion, $obj.url, $obj.ms)
+    # 多源候选一并记下：日后排查「某镜像缓存滞后」不必再手动 curl
+    if ($obj.candidates -and @($obj.candidates).Count -gt 1) {
+        Write-AppLog ('多源候选：' + (@($obj.candidates | ForEach-Object { '{0}={1}/s{2}' -f $_.url, $_.version, $_.serial }) -join '；'))
+    }
 
     if (-not $newer -or $skipped) {
         $script:UpdateState = 'latest'

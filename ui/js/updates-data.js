@@ -19,6 +19,15 @@ window.PerfUpdateAreas = ['capture', 'realtime', 'other'];
 
 window.PerfUpdates = [
   {
+    date: '2026-11-17', version: '2.0.22',
+    title: '检查更新不再被镜像缓存拖住',
+    items: [
+      ['fix', '检查更新改成把三个清单源一起取回来，按版本号取最高的那份；某个镜像还停在旧版本时，不会再被误判成「已是最新」。', 'other'],
+      ['compat', 'jsDelivr 的清单地址从第一位挪到最后一位只做兜底：这个镜像有过发布数小时后仍返回旧清单的记录，排第一会把「有新版本」吃掉。', 'other'],
+      ['install', '更新日志里会记下每个源给出的版本与序号，日后排查镜像问题不用再手动访问。', 'other']
+    ]
+  },
+  {
     date: '2026-11-17', version: '2.0.21',
     title: '进程列表可以一键刷新；1%L 改为默认关闭',
     items: [

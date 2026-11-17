@@ -208,6 +208,9 @@ try {
     # 实测清整个分支（不带文件路径）才可靠。
     $owner = (& git -C $root config --get "remote.$Remote.url") -replace '.*[:/]([^/]+)/([^/]+?)(?:\.git)?$', '$1/$2'
     try {
+        # Windows PowerShell 5.1 默认不加载 System.Net.Http：不显式加载，New-Object 会抛，
+        # 外层 catch 又把整段静默跳过 —— 前几轮发布 jsDelivr 一直没被真正清掉就是这个原因。
+        try { Add-Type -AssemblyName System.Net.Http -ErrorAction Stop } catch { throw ('加载 System.Net.Http 失败: ' + $_.Exception.Message) }
         $purge = New-Object System.Net.Http.HttpClient
         $purge.Timeout = [TimeSpan]::FromSeconds(20)
         foreach ($p in @("https://purge.jsdelivr.net/gh/$owner@main", "https://purge.jsdelivr.net/gh/$owner@$branch")) {

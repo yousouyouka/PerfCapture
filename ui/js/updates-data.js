@@ -19,6 +19,15 @@ window.PerfUpdateAreas = ['capture', 'realtime', 'other'];
 
 window.PerfUpdates = [
   {
+    date: '2026-11-17', version: '2.0.23',
+    title: '实时监控的目标进程选择终于生效',
+    items: [
+      ['fix', '实时监控里选了目标进程却一直「跟随前台」：宿主把这条消息当成未知命令直接丢掉了，现在会真的记下并按它采帧。', 'realtime'],
+      ['ux', '切换目标后立刻生效，不再等旧目标「连续几秒没出帧」才肯换。', 'realtime'],
+      ['compat', '旧配置里的目标进程会被正确读回；进程已退出时自动退回跟随前台，不会卡在一个死 PID 上。', 'realtime']
+    ]
+  },
+  {
     date: '2026-11-17', version: '2.0.22',
     title: '检查更新不再被镜像缓存拖住',
     items: [

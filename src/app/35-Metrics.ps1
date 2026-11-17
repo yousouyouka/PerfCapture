@@ -281,7 +281,12 @@ while ($true) {
     $wantPid = $fps.pid
     if ($cand -gt 0) {
         if ($fps.pid -le 0) { $wantPid = $cand }
-        elseif ($cand -ne $fps.pid -and $fps.hits -ge 3 -and $fps.starve -ge 3) { $wantPid = $cand }
+        elseif ($cand -ne $fps.pid) {
+            # 固定目标不设门限：用户在「目标进程」里点名了哪个进程，就立刻切过去。
+            # 「等旧目标连续饿死才换」只适用于跟随前台 —— 那时旧目标还在出帧就不该乱切。
+            if ($FpsFixed) { Stop-FpsBurst; $wantPid = $cand }
+            elseif ($fps.hits -ge 3 -and $fps.starve -ge 3) { $wantPid = $cand }
+        }
     }
     # 目标已经退出：收掉窗口，别再追它
     if ($wantPid -gt 0) {

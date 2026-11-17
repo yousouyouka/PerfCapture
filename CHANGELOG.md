@@ -1,5 +1,23 @@
 ﻿# 更新记录
 
+## 2.0.23 — 2026-11-17（实时监控的目标进程选择终于生效）
+
+### ① 根因：命令被宿主当成未知命令丢弃
+- UI 一直在正常下发 `metricsTarget`，但宿主的命令白名单 `KnownCommands` 漏了它，`Handle-UiMessage` 一进门就把整条消息拦掉，只在日志里留一句「未知命令已被拒绝: metricsTarget」。
+- 后果：`Cfg.rtTargetPid` 从未被写入，每次开监控都退回「FPS 跟随前台应用」，选哪个进程都没用。这个缺陷从 2.0.20 引入该功能起就存在。
+
+### ② 修法
+- 白名单补上 `metricsTarget`，分发条件扩成 `metricsStart / metricsStop / metricsTarget`，一起交给 `Invoke-MetricsCommand`。
+- 顺带修掉切换门限：原来要「旧目标连续 3 tick 没出帧」才肯换（`$fps.starve -ge 3`）。跟随前台时合理，但固定目标下如果旧目标还在出帧就永远切不过去。现在固定目标直接 `Stop-FpsBurst` 后立刻换，跟随前台仍保留门限。
+
+### ③ 边界（保持现状）
+- 这个下拉影响的是 **FPS**：PresentMon 按进程采帧。GPU/CPU 占用、温度、功率仍是整机值，不跟进程。
+
+### 验证
+- **B110 新增 22 项**：白名单 / 路由 / 命令实现 / UI 命令名一致性，并真跑 `Resolve-FpsTarget`（活着返回它、已退出不返回僵尸 pid、跟随模式仍走 fallback）。
+- **B111 新增 13 项**：dot-source 真实 `60-Capture.ps1`，shim 掉 `Send-ToUi` / `Invoke-MetricsCommand`，直接喂消息 —— `metricsTarget` 不再被拒绝、pid 原样转下去；反向断言真未知命令仍被拒绝（白名单没被放空）。
+- 回归：B106(32)、B108(25)、冒烟通过。
+
 ## 2.0.22 — 2026-11-17（检查更新不再被镜像缓存拖住）
 
 ### ① 多源清单改成「取版本最高」，不再是「取第一个连上的」

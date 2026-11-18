@@ -19,6 +19,15 @@ window.PerfUpdateAreas = ['capture', 'realtime', 'other'];
 
 window.PerfUpdates = [
   {
+    date: '2026-11-18', version: '2.0.27',
+    title: '性能采集降负载：GPU 采样改走 NVML',
+    items: [
+      ['compat', '出报告时的采样不再每秒启动一次 nvidia-smi：改直调驱动自带的 NVML，单次从 45–60 ms 降到 0.05 ms，采集期间开销约 60–75 ms/秒 → 15–20 ms/秒。', 'capture'],
+      ['metrics', '温度/利用率/频率/功耗/风扇/PCIe/降频原因/功耗墙现在一次读全，降频原因仍按 Active / Not Active 输出，报告口径不变。', 'capture'],
+      ['fix', '任何一项 NVML 取不到都会自动回退 nvidia-smi，不会因为驱动差异丢数据。', 'capture']
+    ]
+  },
+  {
     date: '2026-11-18', version: '2.0.26',
     title: '实时监控降负载；修好 FPS 与 1%L 的三个 bug',
     items: [

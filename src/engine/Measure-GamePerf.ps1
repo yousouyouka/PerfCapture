@@ -130,6 +130,81 @@ Write-Host ''
 $sampler = Start-Job -ArgumentList $GamePid, $sensCsv, ($Seconds + 10), $smi, $collectGpuSensors, $collectVram, $collectRam, $collectProcCpu, $collectSysMem, $collectShared, $collectCpuPower -ScriptBlock {
     param($gpid, $csv, $maxSec, $smi, $wantGpu, $wantVram, $wantRam, $wantProcCpu, $wantSysMem, $wantShared, $wantCpuPower)
     if (-not ($wantGpu -or $wantVram -or $wantRam -or $wantProcCpu -or $wantSysMem -or $wantShared -or $wantCpuPower)) { return }
+
+# ---- NvGpu：直调 nvml.dll（<1 ms）替代 nvidia-smi（每次 45–60 ms 进程启动）----
+# 任何一项取不到都回退 nvidia-smi，功能不退化。
+$gpuUseNvml = $false
+if (-not ('NvGpu' -as [type])) {
+    $nvcs = @(
+        'using System;'
+        'using System.Runtime.InteropServices;'
+        'public static class NvGpu {'
+        '    [DllImport("nvml.dll", EntryPoint = "nvmlInit_v2")] private static extern int Init();'
+        '    [DllImport("nvml.dll", EntryPoint = "nvmlDeviceGetCount_v2")] private static extern int GetCount(out uint n);'
+        '    [DllImport("nvml.dll", EntryPoint = "nvmlDeviceGetHandleByIndex_v2")] private static extern int GetHandle(uint i, out IntPtr h);'
+        '    [DllImport("nvml.dll", EntryPoint = "nvmlDeviceGetUtilizationRates")] private static extern int Util(IntPtr h, out UtilRate r);'
+        '    [DllImport("nvml.dll", EntryPoint = "nvmlDeviceGetTemperature")] private static extern int Temp(IntPtr h, int sensor, out uint t);'
+        '    [DllImport("nvml.dll", EntryPoint = "nvmlDeviceGetPowerUsage")] private static extern int Power(IntPtr h, out uint mw);'
+        '    [DllImport("nvml.dll", EntryPoint = "nvmlDeviceGetClockInfo")] private static extern int Clock(IntPtr h, int type, out uint mhz);'
+        '    [DllImport("nvml.dll", EntryPoint = "nvmlDeviceGetMaxClockInfo")] private static extern int MaxClock(IntPtr h, int type, out uint mhz);'
+        '    [DllImport("nvml.dll", EntryPoint = "nvmlDeviceGetFanSpeed")] private static extern int Fan(IntPtr h, out uint pct);'
+        '    [DllImport("nvml.dll", EntryPoint = "nvmlDeviceGetMemoryInfo")] private static extern int Mem(IntPtr h, out MemInfo m);'
+        '    [DllImport("nvml.dll", EntryPoint = "nvmlDeviceGetCurrPcieLinkGeneration")] private static extern int PcieGen(IntPtr h, out uint g);'
+        '    [DllImport("nvml.dll", EntryPoint = "nvmlDeviceGetCurrPcieLinkWidth")] private static extern int PcieWidth(IntPtr h, out uint w);'
+        '    [DllImport("nvml.dll", EntryPoint = "nvmlDeviceGetCurrentClocksThrottleReasons")] private static extern int Throttle(IntPtr h, out ulong mask);'
+        '    [DllImport("nvml.dll", EntryPoint = "nvmlDeviceGetEnforcedPowerLimit")] private static extern int EnfLimit(IntPtr h, out uint mw);'
+        '    [StructLayout(LayoutKind.Sequential)] public struct UtilRate { public uint Gpu; public uint Memory; }'
+        '    [StructLayout(LayoutKind.Sequential)] public struct MemInfo { public ulong Total; public ulong Free; public ulong Used; }'
+        '    private static IntPtr dev = IntPtr.Zero;'
+        '    private static bool tried = false;'
+        '    public static bool Start() {'
+        '        if (tried) return dev != IntPtr.Zero;'
+        '        tried = true;'
+        '        try {'
+        '            if (Init() != 0) return false;'
+        '            uint n; if (GetCount(out n) != 0 || n < 1) return false;'
+        '            IntPtr h; if (GetHandle(0, out h) != 0) return false;'
+        '            dev = h;'
+        '            return true;'
+        '        } catch { return false; }'
+        '    }'
+        '    // gpu%, 图形频率, 显存频率, 温度, 功率W, 风扇%, VRAM已用MB, VRAM总量MB'
+        '    public static double[] Sample() {'
+        '        if (dev == IntPtr.Zero) return null;'
+        '        double gpu = -1, clk = -1, mclk = -1, tmp = -1, pwr = -1, fan = -1, vu = -1, vt = -1;'
+        '        try {'
+        '            UtilRate u; if (Util(dev, out u) == 0) gpu = u.Gpu;'
+        '            uint v;'
+        '            if (Clock(dev, 0, out v) == 0) clk = v;'
+        '            if (Clock(dev, 2, out v) == 0) mclk = v;'
+        '            if (Temp(dev, 0, out v) == 0) tmp = v;'
+        '            if (Power(dev, out v) == 0) pwr = v / 1000.0;'
+        '            if (Fan(dev, out v) == 0) fan = v;'
+        '            MemInfo m;'
+        '            if (Mem(dev, out m) == 0) { vu = Math.Round(m.Used / 1048576.0); vt = Math.Round(m.Total / 1048576.0); }'
+        '        } catch { }'
+        '        return new double[] { gpu, clk, mclk, tmp, pwr, fan, vu, vt };'
+        '    }'
+        '    // 最大频率, PCIe代, PCIe宽度, 降频原因位掩码, 功耗墙W'
+        '    public static double[] Extra() {'
+        '        if (dev == IntPtr.Zero) return null;'
+        '        double ck = -1, pg = -1, pw = -1, th = -1, lm = -1;'
+        '        try {'
+        '            uint v;'
+        '            if (MaxClock(dev, 0, out v) == 0) ck = v;'
+        '            if (PcieGen(dev, out v) == 0) pg = v;'
+        '            if (PcieWidth(dev, out v) == 0) pw = v;'
+        '            ulong m;'
+        '            if (Throttle(dev, out m) == 0) th = (double)m;'
+        '            if (EnfLimit(dev, out v) == 0) lm = v / 1000.0;'
+        '        } catch { }'
+        '        return new double[] { ck, pg, pw, th, lm };'
+        '    }'
+        '}'
+    ) -join "`n"
+    try { Add-Type -TypeDefinition $nvcs -Language CSharp -ErrorAction Stop } catch { }
+}
+if ('NvGpu' -as [type]) { try { $gpuUseNvml = [NvGpu]::Start() } catch { $gpuUseNvml = $false } }
     $script:t0 = Get-Date
     $cols = @('timestamp_utc', 'gpu_temp_c', 'gpu_util_pct', 'gpu_mem_used_mb', 'proc_vram_mb', 'proc_ram_mb',
               'gpu_clock_mhz', 'gpu_mem_clock_mhz', 'gpu_clock_max_mhz', 'gpu_power_w', 'gpu_fan_pct',
@@ -200,7 +275,7 @@ public static class PerfPower {
         } catch { }
 
         # ---- 显卡功耗上限（enforced.power.limit）：每 5 个 tick 探一次，旧驱动没这字段就永久关掉 ----
-        if ((Test-Path $smi) -and $limitOk -ne $false -and ($tick % 5) -eq 0) {
+        if ((Test-Path $smi) -and $limitOk -ne $false -and -not $gpuUseNvml -and ($tick % 5) -eq 0) {
             try {
                 $lq = & $smi --query-gpu=enforced.power.limit --format=csv,noheader,nounits 2>$null
                 $ltext = ([string]$lq).Trim()
@@ -221,8 +296,46 @@ public static class PerfPower {
                 if ($cw -gt 0 -and $cw -lt 2000) { $v['cpu_pkg_w'] = [math]::Round($cw, 1) }
             } catch { $cpuPwrOk = $false }
         }
-        # 温度与占用来自同一次 nvidia-smi 查询，分开开关只在汇总时区分
-        if ($wantGpu -and (Test-Path $smi)) {
+        # 温度与占用：优先 NVML（<1 ms），失败再回退 nvidia-smi（45–60 ms 进程启动）
+        $gpuDone = $false
+        if ($wantGpu -and $gpuUseNvml) {
+            try {
+                $ns = [NvGpu]::Sample()
+                $ne = [NvGpu]::Extra()
+                if ($ns -and $ns[0] -ge 0) {
+                    $v['gpu_temp_c'] = [math]::Round($ns[3], 1)
+                    $v['gpu_util_pct'] = [math]::Round($ns[0], 0)
+                    $v['gpu_mem_used_mb'] = [math]::Round($ns[6], 0)
+                    if ($ns[1] -ge 0) { $v['gpu_clock_mhz'] = [math]::Round($ns[1], 0) }
+                    if ($ns[2] -ge 0) { $v['gpu_mem_clock_mhz'] = [math]::Round($ns[2], 0) }
+                    if ($ns[4] -ge 0) { $v['gpu_power_w'] = [math]::Round($ns[4], 2) }
+                    if ($ns[5] -ge 0) { $v['gpu_fan_pct'] = [math]::Round($ns[5], 0) }
+                    if ($ne) {
+                        if ($ne[0] -ge 0) { $v['gpu_clock_max_mhz'] = [math]::Round($ne[0], 0) }
+                        if ($ne[1] -ge 0) { $v['pcie_gen'] = [math]::Round($ne[1], 0) }
+                        if ($ne[2] -ge 0) { $v['pcie_width'] = [math]::Round($ne[2], 0) }
+                        if ($ne[3] -ge 0) {
+                            # NVML 位掩码 → 与 nvidia-smi 相同的 Active / Not Active 文案
+                            # （下游按 ^Active$ 计数，格式必须一致）
+                            # 0x1 GpuIdle / 0x2 AppClocks / 0x4 SwPowerCap / 0x8 HwSlowdown
+                            # 0x10 SyncBoost / 0x20 SwThermal / 0x40 HwThermal / 0x80 HwPowerBrake
+                            $m = [int64]$ne[3]
+                            $v['thr_gpu_idle']       = $(if (($m -band 0x1) -ne 0) { 'Active' } else { 'Not Active' })
+                            $v['thr_app_clocks']     = $(if (($m -band 0x2) -ne 0) { 'Active' } else { 'Not Active' })
+                            $v['thr_sw_power_cap']   = $(if (($m -band 0x4) -ne 0) { 'Active' } else { 'Not Active' })
+                            $v['thr_hw_slowdown']    = $(if (($m -band 0x8) -ne 0) { 'Active' } else { 'Not Active' })
+                            $v['thr_sync_boost']     = $(if (($m -band 0x10) -ne 0) { 'Active' } else { 'Not Active' })
+                            $v['thr_sw_thermal']     = $(if (($m -band 0x20) -ne 0) { 'Active' } else { 'Not Active' })
+                            $v['thr_hw_thermal']     = $(if (($m -band 0x40) -ne 0) { 'Active' } else { 'Not Active' })
+                            $v['thr_hw_power_brake'] = $(if (($m -band 0x80) -ne 0) { 'Active' } else { 'Not Active' })
+                        }
+                        if ($ne[4] -ge 0) { $v['gpu_limit_w'] = [math]::Round($ne[4], 1) }
+                    }
+                    $gpuDone = $true
+                }
+            } catch { $gpuDone = $false }
+        }
+        if (-not $gpuDone -and $wantGpu -and (Test-Path $smi)) {
             try {
                 $p = $null
                 if ($extOk -ne $false) {

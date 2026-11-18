@@ -19,7 +19,35 @@ window.PerfUpdateAreas = ['capture', 'realtime', 'other'];
 
 window.PerfUpdates = [
   {
-    date: '2026-11-17', version: '2.0.23',
+    date: '2026-11-18', version: '2.0.26',
+    title: '实时监控降负载；修好 FPS 与 1%L 的三个 bug',
+    items: [
+      ['fix', 'FPS 一帧都采不到的三个问题都修了：0.5 秒窗口被 PresentMon 拒绝、启动参数让它自己秒退、每次重启都清空 1%L 的统计窗口。现在 FPS 与 1%L 都能稳定出数。', 'realtime'],
+      ['compat', 'GPU 指标改走 NVML（驱动自带），单次 0.05 ms 取代 nvidia-smi 的 42–60 ms；GPU 采样降到 2 秒一次，presentmon 也降到低优先级 —— 开监控时的卡顿明显减轻。', 'realtime'],
+      ['fix', '采集进程被强杀会留下卡死的 ETW 会话，让之后一直采不到数据；现在失败时会自动清理。', 'realtime'],
+      ['fix', '任务栏图标补上了：以前 exe 从来没嵌入过图标（引用的 ico 文件根本不存在），现在用 9 个尺寸生成，任务栏与 Alt+Tab 都清晰。', 'other']
+    ]
+  },
+  {
+    date: '2026-11-18', version: '2.0.25',
+    title: 'FPS 改为常驻流式采样，延迟降到亚秒',
+    items: [
+      ['compat', 'FPS 采样不再每秒重启一次 PresentMon：改成常驻一个进程、每 250 ms 读一次新增数据，读数延迟从 1.5–2.5 秒降到 0.25–0.5 秒。', 'realtime'],
+      ['metrics', 'FPS 取最近 1 秒、1%L 取最近约 6 秒，两个窗口各按帧时间之和裁剪；历史曲线仍保留约 2 分钟。', 'realtime'],
+      ['fix', '如果采集文件被系统或安全软件锁住读不到，会自动退回原来的短窗口模式，FPS 不会变成永远的「—」。', 'realtime']
+    ]
+  },
+  {
+    date: '2026-11-18', version: '2.0.24',
+    title: '任务栏图标补上；实时 1%L 修正口径',
+    items: [
+      ['fix', '任务栏图标修好了：assets 里一直只有 png、没有 ico，编译时又照着一个不存在的图标文件去嵌，所以 exe 从来没带过图标。现在从 png 生成 9 个尺寸的 ico，标题栏与任务栏都清晰。', 'other'],
+      ['metrics', '实时浮窗的 1%L 修了两处：以前显示的是帧时间（毫秒）却被当成 FPS，而且只取 1 秒窗口（60 帧时等于最低帧）。现在累计最近约 6 秒再算。', 'realtime'],
+      ['ui', '更新公告按新到旧严格排列，2.0 全系统一为 11-18。', 'other']
+    ]
+  },
+  {
+    date: '2026-11-18', version: '2.0.23',
     title: '实时监控的目标进程选择终于生效',
     items: [
       ['fix', '实时监控里选了目标进程却一直「跟随前台」：宿主把这条消息当成未知命令直接丢掉了，现在会真的记下并按它采帧。', 'realtime'],
@@ -28,7 +56,7 @@ window.PerfUpdates = [
     ]
   },
   {
-    date: '2026-11-17', version: '2.0.22',
+    date: '2026-11-18', version: '2.0.22',
     title: '检查更新不再被镜像缓存拖住',
     items: [
       ['fix', '检查更新改成把三个清单源一起取回来，按版本号取最高的那份；某个镜像还停在旧版本时，不会再被误判成「已是最新」。', 'other'],
@@ -37,7 +65,7 @@ window.PerfUpdates = [
     ]
   },
   {
-    date: '2026-11-17', version: '2.0.21',
+    date: '2026-11-18', version: '2.0.21',
     title: '进程列表可以一键刷新；1%L 改为默认关闭',
     items: [
       ['ux', '「FPS 目标」旁边加了刷新按钮：点一下就重新拉一次进程列表，不用退出页面重进；刷新时按钮短暂禁用，防止连点。', 'realtime'],
@@ -46,7 +74,7 @@ window.PerfUpdates = [
     ]
   },
   {
-    date: '2026-11-17', version: '2.0.20',
+    date: '2026-11-18', version: '2.0.20',
     title: '浮窗排版照图重做；实时监控可以选目标进程',
     items: [
       ['ui', '堆叠布局改成一行一项：FPS / FPS 1%L / GPU 利用率 / GPU 温度 / GPU 频率 / GPU 电压 / GPU 功率 / GPU 风扇速度 / VRAM 频率 / CPU 利用率 / CPU 温度 / CPU 频率 / CPU 功率 / RLAT / PCL（av）/ RAM，名字在左、数值在右。', 'realtime'],
@@ -59,7 +87,7 @@ window.PerfUpdates = [
     ]
   },
   {
-    date: '2026-11-17', version: '2.0.19',
+    date: '2026-11-18', version: '2.0.19',
     title: '浮窗改成按组合并显示：GPU 占用 56 % 温度 49 °C',
     items: [
       ['ui', '名字合并了：勾了 GPU 占用和温度就显示「GPU 占用 56 % 温度 49 °C」，不再把「利用率」「百分比」这类词重复一遍。', 'realtime'],
@@ -72,7 +100,7 @@ window.PerfUpdates = [
     ]
   },
   {
-    date: '2026-11-17', version: '2.0.18',
+    date: '2026-11-18', version: '2.0.18',
     title: '实时监控浮窗重做：16 项数据自选、两种布局、可选 5 色字',
     items: [
       ['feature', '浮窗可以自己挑要显示什么：16 个逐项开关，只看 FPS 就只留 FPS。以前是跟着页面四个分组一起开关，现在两套互不干扰。', 'realtime'],

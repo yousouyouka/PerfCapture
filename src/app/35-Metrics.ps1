@@ -16,7 +16,10 @@
 #   CallNtPowerInformation（有效频率）都 <1 ms，且与系统语言无关；CIM 只作兜底。
 
 $script:MetricsIntervalMs = 1000
-$script:MetricsRingSize = 120
+# 采样脚本会把一轮拆成 IntervalMs/250 个子步推送（这里 4 次/秒），所以缓冲点数要 ×4
+# 才能保持「约 2 分钟」的历史窗口；界面按 caps.ringSize 自适应，不用改前端常量。
+$script:MetricsPushPerSec = 4
+$script:MetricsRingSize = 120 * $script:MetricsPushPerSec
 $script:MetricsSamples = New-Object System.Collections.ArrayList
 $script:MetricsCaps = $null
 $script:MetricsWorker = $null
@@ -56,6 +59,29 @@ $fps = @{ proc = $null; ok = $false; pid = 0; target = ''; err = ''; cand = -1; 
           low1 = $null; dl = $null }
 # 窗口滑动记录必须是 List：数组是固定长度，RemoveAt 会抛「集合的大小是固定的」
 $fps.win = New-Object System.Collections.Generic.List[object]
+# 1% Low 的跨段窗口：累计最近约 6 秒的帧时间（200 FPS 下约 1200 帧），样本够了才有统计意义
+$fps.ftWin = New-Object System.Collections.Generic.List[double]
+$fps.ftWinSec = 0.0
+$fps.ftWinMaxSec = 6.0
+# 流式采样的水位与窗口：readPos 是已读到的字节位置，partial 是没写完的尾巴
+$fps.readPos = 0
+$fps.partial = ''
+$fps.headerRead = $false
+$fps.colCount = 0
+$fps.iFt = -1
+$fps.iDl = -1
+# FPS 用最近 1 秒的帧；RLAT 只留最近约 600 帧
+$fps.secWin = New-Object System.Collections.Generic.List[double]
+$fps.secWinSec = 0.0
+$fps.dlWin = New-Object System.Collections.Generic.List[double]
+# burst = 短窗口（默认）：实测 PresentMon 以独占方式打开 CSV，
+#         写入期间别的进程读不到内容（只能看到文件大小在涨），
+#         所以「常驻 + 增量读」这条路走不通，默认回到短窗口。
+# stream = 保留代码但不默认启用（见 Update-FpsStream）。
+$fps.mode = 'burst'
+$fps.streamFail = 0
+$fps.errFile = $null
+$fps.openFail = 0
 
 function Resolve-FpsTarget {
     param([int]$Fallback)
@@ -72,9 +98,9 @@ function Resolve-FpsTarget {
     return 0
 }
 
-function Stop-FpsBurst {
+function Stop-FpsStream {
     if ($fps.proc) { try { if (-not $fps.proc.HasExited) { Stop-Process -Id $fps.proc.Id -Force } } catch { } }
-    # 杀掉 PresentMon 不会自动移除它的 ETW 会话，顺手 stop 掉自己那一个（唯一名，不会误伤别人）
+    # 杀掉 presentmon 不会自动移除它的 ETW 会话，顺手 stop 掉自己那一个（唯一名，不会误伤别人）
     if ($fps.session) {
         try { & (Join-Path $env:SystemRoot 'System32\logman.exe') stop $fps.session -ets 2>&1 | Out-Null } catch { }
         $fps.session = ''
@@ -84,6 +110,21 @@ function Stop-FpsBurst {
     $fps.ok = $false
     $fps.pid = 0
     $fps.target = ''
+    # 换目标 / 重开流时，旧目标的帧不能掺进新窗口
+    $fps.readPos = 0
+    $fps.partial = ''
+    $fps.headerRead = $false
+}
+
+# 清空帧时间窗口：只在「换目标」时调用。流/burst 自己的重启不能清，
+# 否则 6 秒 1%L 窗口永远攒不满，1%L 就会时有时无。
+function Reset-FpsWindows {
+    if ($fps.secWin) { $fps.secWin.Clear(); $fps.secWinSec = 0.0 }
+    if ($fps.ftWin) { $fps.ftWin.Clear(); $fps.ftWinSec = 0.0 }
+    if ($fps.dlWin) { $fps.dlWin.Clear() }
+    $fps.value = $null
+    $fps.low1 = $null
+    $fps.dl = $null
 }
 
 # 开采集前清场：上一轮 PresentMon 被强杀会留下**卡死的 ETW 会话**，它占着 DxgKrnl 之后
@@ -101,6 +142,24 @@ function Clear-FpsSessions {
 }
 
 # 解析一个已经退出的 burst CSV：返回 帧数 / 窗口时长 / FPS / 1% Low / P95
+# 1% Low（单位 FPS）：把最近约 6 秒的帧时间合并后，取最慢 1% 的平均帧时间再取倒数。
+# 单段只有 1 秒：200 FPS 时 60–200 帧，段内 1% 只有 1–2 帧，算出来等于「这一秒最慢的帧」，
+# 每秒乱跳且系统性偏高 —— 那不能叫 1% Low。
+function Get-FpsLow1 {
+    param($FtList)
+    if (-not $FtList -or $FtList.Count -lt 20) { return $null }
+    $arr = $FtList.ToArray()
+    [System.Array]::Sort([double[]]$arr)
+    $total = $arr.Length
+    $n = [int][math]::Ceiling($total * 0.01)
+    if ($n -lt 1) { $n = 1 }
+    $sum = 0.0
+    for ($i = $total - $n; $i -lt $total; $i++) { $sum += $arr[$i] }
+    $slow = $sum / $n
+    if ($slow -le 0) { return $null }
+    return 1000.0 / $slow
+}
+
 function Get-BurstFrames {
     param([string]$Path)
     if (-not (Test-Path -LiteralPath $Path)) { return $null }
@@ -159,26 +218,270 @@ function Get-BurstFrames {
     $sorted = @($list | Sort-Object -Descending)
     $n1 = [math]::Max(1, [int][math]::Ceiling($sorted.Count * 0.01))
     $slow = ($sorted | Select-Object -First $n1 | Measure-Object -Average).Average
+    # low1 必须是 **FPS**。以前这里直接把平均帧时间（ms）当 low1 返回，前端按 FPS 显示，
+    # 等于把「20 ms」读成「20 FPS」——从 2.0.18 起就是错的，这也是「体感不准」的主因。
+    $low1Fps = $null
+    if ($slow -gt 0) { $low1Fps = 1000.0 / $slow }
     $p95 = $null
     $idx95 = [int][math]::Ceiling($sorted.Count * 0.05) - 1
     if ($idx95 -lt 0) { $idx95 = 0 }
     if ($idx95 -lt $sorted.Count) { $p95 = $sorted[$idx95] }
-    return @{ frames = $n; dur = $dur; fps = $val; low1 = $slow; p95 = $p95; dl = $dl; avgft = $avgFt }
+    return @{ frames = $n; dur = $dur; fps = $val; low1 = $low1Fps; p95 = $p95; dl = $dl; avgft = $avgFt; fts = $list }
 }
 
-function Start-FpsBurst {
+# ---------- 帧时间窗口（流式与回退两条路共用） ----------
+# 追加一批帧时间（毫秒），返回真正收下的帧数
+function Add-FpsFrames {
+    param($Fts)
+    if (-not $Fts) { return 0 }
+    $n = 0
+    foreach ($fv in $Fts) {
+        $d = [double]$fv
+        if ($d -le 0 -or $d -gt 5000) { continue }
+        [void]$fps.ftWin.Add($d)
+        [void]$fps.secWin.Add($d)
+        $fps.ftWinSec += ($d / 1000.0)
+        $fps.secWinSec += ($d / 1000.0)
+        $n++
+    }
+    return $n
+}
+
+# 裁剪窗口并重算 FPS / 1%L / RLAT（两个窗口的时长都以「帧时间之和」为准，不看墙钟）
+function Update-FpsDerived {
+    while ($fps.secWin.Count -gt 1 -and $fps.secWinSec -gt 1.0) {
+        $fps.secWinSec -= ([double]$fps.secWin[0] / 1000.0)
+        $fps.secWin.RemoveAt(0)
+    }
+    while ($fps.ftWin.Count -gt 1 -and $fps.ftWinSec -gt $fps.ftWinMaxSec) {
+        $fps.ftWinSec -= ([double]$fps.ftWin[0] / 1000.0)
+        $fps.ftWin.RemoveAt(0)
+    }
+    while ($fps.dlWin.Count -gt 600) { $fps.dlWin.RemoveAt(0) }
+    if ($fps.secWinSec -gt 0 -and $fps.secWin.Count -ge 2) {
+        $fps.value = [math]::Round($fps.secWin.Count / $fps.secWinSec, 1)
+    }
+    $fps.low1 = Get-FpsLow1 $fps.ftWin
+    if ($fps.dlWin.Count -gt 0) {
+        $dlS = 0.0
+        foreach ($d in $fps.dlWin) { $dlS += $d }
+        $fps.dl = [math]::Round($dlS / $fps.dlWin.Count, 2)
+    }
+    if ($null -ne $fps.value) {
+        $fps.lastOkAt = Get-Date
+        $fps.starve = 0
+    }
+}
+
+# ---------- 流式 FPS：常驻 presentmon + 增量读 CSV ----------
+# 旧做法每秒起一个 presentmon、--timed 让它自己退出、再整份解析 CSV：
+# 每次都要重建 ETW 会话，起动开销 0.3–0.8 s，读数延迟 1.5–2.5 s。
+# NVIDIA app 快，是因为它常驻一个 ETW 消费者持续收事件。这里改成同样思路：
+# presentmon 一直跑，我们每 tick 只读文件**新增的那一段**。
+function Start-FpsStream {
     param([int]$TargetPid)
-    Stop-FpsBurst
+    Stop-FpsStream
+    if (-not $PmExe -or -not $FpsCsv -or $TargetPid -le 0) { return }
+    if (-not (Test-Path -LiteralPath $PmExe)) { return }
+    try {
+        if (Test-Path -LiteralPath $FpsCsv) { Remove-Item -LiteralPath $FpsCsv -Force -ErrorAction SilentlyContinue }
+        $fps.session = 'PerfCaptureLive_' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
+        # 不传 --timed：一直采到我们主动停。
+        # 也不传 --terminate_on_proc_exit：实测它会一启动就退出（目标进程还没在 ETW 里
+        # 出现就被判成「已退出」），结果连 CSV 都不创建 —— 实时 FPS 因此一直是「—」。
+        # 目标退出改由采样循环自己检测（Get-Process 失败 → Stop-FpsStream）。
+        $pmArgs = @('--process_id', "$TargetPid", '--output_file', $FpsCsv,
+                    '--v2_metrics', '--no_console_stats',
+                    '--session_name', $fps.session, '--stop_existing_session')
+        # 把 presentmon 的 stderr 收下来：以后它再异常退出，日志里能看到真实原因
+        $fps.errFile = Join-Path $env:TEMP 'PerfCapture\presentmon-stderr.txt'
+        try { [IO.File]::WriteAllText($fps.errFile, '') } catch { $fps.errFile = $null }
+        if ($fps.errFile) {
+            $fps.proc = Start-Process -FilePath $PmExe -ArgumentList $pmArgs -PassThru -WindowStyle Hidden -RedirectStandardError $fps.errFile
+        } else {
+            $fps.proc = Start-Process -FilePath $PmExe -ArgumentList $pmArgs -PassThru -WindowStyle Hidden
+        }
+        $fps.started = Get-Date
+        $fps.ok = $true
+        $fps.pid = $TargetPid
+        $fps.readPos = 0
+        $fps.partial = ''
+        $fps.headerRead = $false
+        $fps.colCount = 0
+        $fps.iFt = -1
+        $fps.iDl = -1
+        # 不在这里清窗口：burst 每次重启 presentmon 都要重来一遍，
+        # 清掉就等于 6 秒 1%L 窗口永远攒不满（这正是 1%L 时有时无的原因）。
+        # 换目标时才清，见 Reset-FpsWindows 的调用点。
+        try { $fps.target = (Get-Process -Id $TargetPid -ErrorAction Stop).ProcessName } catch { $fps.target = '' }
+    } catch {
+        $fps.ok = $false
+        $fps.err = 'start: ' + $_.Exception.Message
+        $fps.proc = $null
+        $fps.pid = 0
+        $fps.backoff = 10
+    }
+}
+
+# 停摆保护：超过 N 秒没有新帧 → 读数值视为失效（不许把十分钟前的数字当现状）
+function Test-FpsStale {
+    param($State, [int]$LimitSec = 8)
+    if (-not $State -or -not $State.lastOkAt) { return $false }
+    return (((Get-Date) - $State.lastOkAt).TotalSeconds -gt $LimitSec)
+}
+
+# 把新增文本切成完整行；最后一段可能只写了一半，留到下次拼接
+function Split-FpsChunk {
+    param([string]$Text, [string]$Pending)
+    $all = [string]$Pending + [string]$Text
+    if (-not $all) { return @{ rows = @(); rest = '' } }
+    $lastNl = $all.LastIndexOf("`n")
+    if ($lastNl -lt 0) { return @{ rows = @(); rest = $all } }
+    $head = $all.Substring(0, $lastNl + 1)
+    $rest = $all.Substring($lastNl + 1)
+    $rows = @($head -split "`r?`n" | Where-Object { $_ -and $_.Trim() })
+    return @{ rows = $rows; rest = $rest }
+}
+
+# 每 tick 调用：读 CSV 新增部分 → 追加帧时间 → 重算 FPS / 1%L / RLAT
+function Update-FpsStream {
+    if (-not $fps.proc) { return }
+    $exited = $false
+    try { $fps.proc.Refresh(); $exited = $fps.proc.HasExited } catch { }
+
+    # 先把已落盘的部分读完 —— 即使进程刚退出也要读，别丢掉最后一截
+    $added = 0
+    try {
+        if (Test-Path -LiteralPath $FpsCsv) {
+            $len = (New-Object System.IO.FileInfo($FpsCsv)).Length
+            if ($len -lt $fps.readPos) { $fps.readPos = 0; $fps.partial = ''; $fps.headerRead = $false }
+            if ($len -gt $fps.readPos) {
+                $fs = [IO.File]::Open($FpsCsv, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+                try {
+                    [void]$fs.Seek($fps.readPos, [IO.SeekOrigin]::Begin)
+                    $want = [int][Math]::Min(($len - $fps.readPos), 1048576)
+                    $buf = New-Object byte[] $want
+                    $got = $fs.Read($buf, 0, $want)
+                    if ($got -gt 0) {
+                        $fps.readPos += $got
+                        $sp = Split-FpsChunk -Text ([Text.Encoding]::UTF8.GetString($buf, 0, $got)) -Pending $fps.partial
+                        $fps.partial = $sp.rest
+                        foreach ($row in $sp.rows) {
+                            $f = $row -split ','
+                            if (-not $fps.headerRead) {
+                                $fps.iFt = [array]::IndexOf($f, 'FrameTime')
+                                $fps.iDl = [array]::IndexOf($f, 'DisplayLatency')
+                                $fps.colCount = $f.Count
+                                $fps.headerRead = $true
+                                continue
+                            }
+                            if ($fps.colCount -le 0 -or $f.Count -ne $fps.colCount -or $fps.iFt -lt 0) { continue }
+                            $ft = 0.0
+                            if (-not [double]::TryParse($f[$fps.iFt], [ref]$ft)) { continue }
+                            if ($ft -le 0 -or $ft -gt 5000) { continue }
+                            $added++
+                            [void]$fps.ftWin.Add($ft)
+                            [void]$fps.secWin.Add($ft)
+                            $fps.ftWinSec += ($ft / 1000.0)
+                            $fps.secWinSec += ($ft / 1000.0)
+                            if ($fps.iDl -ge 0) {
+                                $dv = 0.0
+                                if ([double]::TryParse($f[$fps.iDl], [ref]$dv) -and $dv -ge 0) { [void]$fps.dlWin.Add($dv) }
+                            }
+                        }
+                    }
+                } finally { $fs.Dispose() }
+            }
+        }
+    } catch { }
+
+    # 裁剪 + 重算统一走公共函数（与回退路径同一套口径）
+    Update-FpsDerived
+    if ($added -gt 0) {
+        $fps.frames += $added
+        $fps.err = ''
+        $fps.backoff = 0
+        $fps.openFail = 0
+        $fps.lastDur = [math]::Round($fps.secWinSec, 2)
+    } elseif (-not $exited) {
+        # 进程还在、却一个字节都读不到：多半是 CSV 被独占锁住（旧注释里记过这种情况）。
+        # 连续 5 次就判定为「读不了」，切回短窗口 burst，别让 FPS 变成永远的「—」。
+        $fps.openFail++
+        if ($fps.openFail -ge 5) {
+            $fps.err = '采集流不可读（CSV 可能被独占），已切回短窗口模式'
+            $fps.mode = 'burst'
+            $fps.openFail = 0
+            Stop-FpsStream
+            return
+        }
+    }
+
+    if ($exited) {
+        $code = $null
+        try { $code = $fps.proc.ExitCode } catch { }
+        $fps.proc = $null
+        $fps.ok = $false
+        $fps.session = ''
+        # 把 presentmon 自己的 stderr 带出来，否则只剩「没有新帧」这种没信息量的话
+        $pmMsg = ''
+        try {
+            if ($fps.errFile -and (Test-Path -LiteralPath $fps.errFile)) {
+                $txt = (Get-Content -LiteralPath $fps.errFile -Raw -ErrorAction SilentlyContinue)
+                if ($txt) { $pmMsg = (($txt -replace '\s+', ' ').Trim()) }
+                if ($pmMsg.Length -gt 180) { $pmMsg = $pmMsg.Substring(0, 180) }
+            }
+        } catch { }
+        if ($code -eq 6) {
+            $fps.err = 'PresentMon 无法创建 ETW 会话（退出码 6）：需要以管理员身份运行 PerfCapture'
+            $fps.backoff = 15
+        } elseif ($null -ne $code -and $code -ne 0) {
+            $fps.err = ('presentmon 退出码 ' + $code + '（未提权或 ETW 会话被占用）' + $(if ($pmMsg) { '：' + $pmMsg } else { '' }))
+            $fps.backoff = 10
+        } elseif ($added -eq 0) {
+            # 启动了却一帧都没有：累计；连续 3 次就判定流式不可用，切回短窗口模式，
+            # 否则会陷进「每轮重启 → 立刻退出」的死循环（FPS 永远不显示）。
+            $fps.starve++
+            $fps.streamFail++
+            if ($fps.streamFail -ge 3) {
+                $fps.err = '流式采样连续 3 次拿不到数据，已切回短窗口模式' + $(if ($pmMsg) { '：' + $pmMsg } else { '' })
+                $fps.mode = 'burst'
+                $fps.streamFail = 0
+                $fps.backoff = 0
+            } else {
+                $fps.err = ('采集流启动后没有数据（第 {0} 次，提权={1}）' -f $fps.streamFail, $isAdm) + $(if ($pmMsg) { '：' + $pmMsg } else { '' })
+                $fps.backoff = 2
+            }
+        } else {
+            $fps.backoff = 0
+            $fps.streamFail = 0
+        }
+        return
+    }
+
+    # 文件长到 32 MB 就重建一次（200 FPS 约 9 分钟），避免无限增长
+    if ($fps.readPos -gt 33554432) { Start-FpsStream -TargetPid $fps.pid }
+}
+
+# ---------- 回退路径：短窗口 burst（CSV 被独占时的保险） ----------
+# 与流式路径共用 Add-FpsFrames / Update-FpsDerived，口径完全一致，
+# 区别只在于「每轮起一个 --timed 窗口、等它退出再整份解析」。
+function Start-FpsBurstWindow {
+    param([int]$TargetPid)
+    Stop-FpsStream
     if (-not $PmExe -or -not $FpsCsv -or $TargetPid -le 0) { return }
     if (-not (Test-Path -LiteralPath $PmExe)) { return }
     try {
         if (Test-Path -LiteralPath $FpsCsv) { Remove-Item -LiteralPath $FpsCsv -Force -ErrorAction SilentlyContinue }
         $fps.session = 'PerfCaptureLive_' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
         $pmArgs = @('--process_id', "$TargetPid", '--output_file', $FpsCsv,
-                    '--timed', "$($fps.burstSec)", '--terminate_after_timed',
+                    # 窗口必须用整数秒：实测 --timed 0.5 会让 PresentMon 一帧都不采（文件 0 字节），
+                    # 只能写 '1'。想更快出数得换采集通道，不能靠缩窗口。
+                    '--timed', '1', '--terminate_after_timed',
                     '--v2_metrics', '--no_console_stats',
                     '--session_name', $fps.session, '--stop_existing_session')
         $fps.proc = Start-Process -FilePath $PmExe -ArgumentList $pmArgs -PassThru -WindowStyle Hidden
+        # 让 presentmon 降到 BelowNormal：它只做 ETW 解析，不该和游戏抢 CPU 时间片
+        try { $fps.proc.PriorityClass = [System.Diagnostics.ProcessPriorityClass]::BelowNormal } catch { }
         $fps.started = Get-Date
         $fps.ok = $true
         $fps.pid = $TargetPid
@@ -192,73 +495,49 @@ function Start-FpsBurst {
     }
 }
 
-# 停摆保护：超过 N 秒没有一次成功窗口 → 读数值视为失效（不许把十分钟前的数字当现状）
-function Test-FpsStale {
-    param($State, [int]$LimitSec = 8)
-    if (-not $State -or -not $State.lastOkAt) { return $false }
-    return (((Get-Date) - $State.lastOkAt).TotalSeconds -gt $LimitSec)
-}
-
-# 结算一个已经结束的 burst：解析 → 入滑动窗口 → 给读数；失败写明现场并退避
-function Complete-FpsBurst {
+function Complete-FpsBurstWindow {
     if (-not $fps.proc) { return }
     $exited = $false
-    try { $fps.proc.Refresh(); $exited = $fps.proc.HasExited } catch { $exited = $false }
-    $age = 0.0
-    if ($fps.started) { $age = ((Get-Date) - $fps.started).TotalSeconds }
-    if (-not $exited -and $age -gt $fps.timeout) {
-        try { Stop-Process -Id $fps.proc.Id -Force } catch { }
-        $fps.err = 'burst 超时（' + [int]$age + ' s 未退出，已强杀）'
-        $fps.proc = $null
-        $fps.ok = $false
-        $fps.starve++
-        $fps.backoff = 5
-        return
-    }
+    try { $fps.proc.Refresh(); $exited = $fps.proc.HasExited } catch { }
     if (-not $exited) { return }
     $code = $null
     try { $code = $fps.proc.ExitCode } catch { }
     $r = Get-BurstFrames -Path $FpsCsv
     $fps.proc = $null
     $fps.ok = $false
-    # 这里**不再**调用 logman：--terminate_after_timed 会自己停掉会话，加上 --stop_existing_session
-    # 已足够。1.5.10 的教训：runspace 里每次 burst 都同步跑一次 logman，偶尔会卡死整个采样循环
-    # （表现就是 FPS 值冻在旧数、再也不更新）。会话清场只放在启动时和连续失败时做。
     $fps.session = ''
-    if ($r -and $r.frames -gt 0) {
-        # 注意：$fps.win 必须是 List[object]，不能用数组 += —— 数组是固定长度，
-        # RemoveAt 会抛「集合的大小是固定的」，1.5.10 的采样线程就是这么死的（读数冻住）
-        [void]$fps.win.Add(@([double]$r.frames, [double]$r.dur))
-        while ($fps.win.Count -gt 3) { $fps.win.RemoveAt(0) }
-        $fn = 0.0
-        $ft = 0.0
-        foreach ($w in $fps.win) { $fn += $w[0]; $ft += $w[1] }
-        if ($ft -gt 0) { $fps.value = [math]::Round($fn / $ft, 1) }
+    if ($r -and $r.fts -and $r.fts.Count -gt 0) {
+        [void](Add-FpsFrames $r.fts)
+        if ($r.dl -and $fps.dlWin) {
+            # burst 只有平均值，按值补进 RLAT 窗口（口径仍是「最近若干帧的平均」）
+            for ($i = 0; $i -lt [Math]::Min($r.frames, 60); $i++) { [void]$fps.dlWin.Add([double]$r.dl) }
+        }
+        Update-FpsDerived
         $fps.frames += $r.frames
-        $fps.lastDur = [math]::Round($r.dur, 2)
-        $fps.p95 = $r.p95
-        $fps.low1 = $r.low1
-        $fps.dl = $r.dl
-        $fps.starve = 0
-        $fps.emptyBursts = 0
         $fps.err = ''
-        $fps.lastOkAt = Get-Date
         $fps.backoff = 0
+        $fps.lastDur = [math]::Round($r.dur, 2)
     } else {
         $fps.starve++
-        $fps.emptyBursts++
         if ($code -eq 6) {
             $fps.err = 'PresentMon 无法创建 ETW 会话（退出码 6）：需要以管理员身份运行 PerfCapture'
             $fps.backoff = 15
         } elseif ($null -ne $code -and $code -ne 0) {
             $fps.err = ('presentmon 退出码 ' + $code + '（未提权或 ETW 会话被占用）')
             $fps.backoff = 10
-        } elseif ($fps.emptyBursts -ge 2) {
-            $fps.err = ('目标 {0}(pid {1}) 连续 {2} 个 2 秒窗口没有帧（提权={3}）' -f $fps.target, $fps.pid, $fps.emptyBursts, $isAdm)
+        } else {
+            $fps.err = ('目标 {0}(pid {1}) 这个窗口没有帧（提权={2}）' -f $fps.target, $fps.pid, $isAdm)
             $fps.backoff = 3
         }
-        # 连续 4 个空窗口：别再拿上一次的旧值骗人
-        if ($fps.emptyBursts -ge 4) { $fps.value = $null; $fps.low1 = $null; $fps.dl = $null; $fps.win.Clear() }
+        # 失败时清一次残留 ETW 会话（15 秒节流）。presentmon 被强杀会留下卡死的会话，
+        # 它占着 DxgKrnl 会让后续采集一帧都收不到（实测：丢 9 万条事件、0 帧）。
+        # logman query 本身有开销，所以只在失败时清、并且限频。
+        try {
+            if (((Get-Date) - $script:lastSessionClean).TotalSeconds -ge 15) {
+                $script:lastSessionClean = Get-Date
+                Clear-FpsSessions
+            }
+        } catch { }
     }
 }
 
@@ -272,6 +551,15 @@ try {
     Start-Sleep -Milliseconds 300
     [void]$cpuPwrCounter.NextValue()
 } catch { $cpuPwrCounter = $null }
+# GPU 采样状态：NVML 优先（<1 ms），不可用时回退 nvidia-smi；两者都按 2 轮一次降频
+# NVML 的类型在循环内才编译（与 PcMetrics 同一段），所以这里只置位，真正 Start 放在
+# GPU 采样段前做一次惰性初始化 —— 否则循环外判断时类型还不存在，永远回退 nvidia-smi。
+$gpuUseNvml = $false
+$gpuInit = $false
+$gpuTick = 0
+$gpuCache = @{}
+# 上次清理残留 ETW 会话的时间（失败时才清，且至少间隔 15 秒，避免 logman 本身变成开销）
+$script:lastSessionClean = Get-Date
 while ($true) {
     if ($Ctl -and $Ctl.stop) { break }
     try {
@@ -284,20 +572,28 @@ while ($true) {
         elseif ($cand -ne $fps.pid) {
             # 固定目标不设门限：用户在「目标进程」里点名了哪个进程，就立刻切过去。
             # 「等旧目标连续饿死才换」只适用于跟随前台 —— 那时旧目标还在出帧就不该乱切。
-            if ($FpsFixed) { Stop-FpsBurst; $wantPid = $cand }
+            if ($FpsFixed) { Stop-FpsStream; Reset-FpsWindows; $wantPid = $cand }
             elseif ($fps.hits -ge 3 -and $fps.starve -ge 3) { $wantPid = $cand }
         }
     }
-    # 目标已经退出：收掉窗口，别再追它
+    # 目标已经退出：收掉流，别再追它
     if ($wantPid -gt 0) {
-        try { [void](Get-Process -Id $wantPid -ErrorAction Stop) } catch { $wantPid = 0; Stop-FpsBurst }
+        try { [void](Get-Process -Id $wantPid -ErrorAction Stop) } catch { $wantPid = 0; Stop-FpsStream; Reset-FpsWindows }
     }
-    if ($fps.proc) {
-        Complete-FpsBurst
-    } elseif ($fps.backoff -gt 0) {
-        $fps.backoff--
-    } elseif ($wantPid -gt 0) {
-        Start-FpsBurst -TargetPid $wantPid
+    # 目标变了（跟随前台切换时常见）：重开流，两个进程的帧绝不能混在一个窗口里
+    if ($fps.proc -and $wantPid -gt 0 -and $fps.pid -ne $wantPid) { Stop-FpsStream; Reset-FpsWindows }
+    if ($fps.mode -eq 'burst') {
+        # 回退路径：等这一轮窗口自己退出，再整份解析（比流式慢，但一定拿得到数据）
+        if ($fps.proc) { Complete-FpsBurstWindow }
+        elseif ($fps.backoff -gt 0) { $fps.backoff-- }
+        elseif ($wantPid -gt 0) { Start-FpsBurstWindow -TargetPid $wantPid }
+    } else {
+        if (-not $fps.proc -and $wantPid -gt 0) {
+            if ($fps.backoff -gt 0) { $fps.backoff-- }
+            else { Start-FpsStream -TargetPid $wantPid }
+        }
+        # 每 tick 只读 CSV 里新增的那一段 —— 不再重起 presentmon
+        Update-FpsStream
     }
     } catch {
         # 任何一次异常都不许弄死整个采样线程（1.5.10 就是这么停摆的：FPS 值冻在旧数上）
@@ -426,25 +722,108 @@ if (-not ('PcMetrics' -as [type])) {
     ) -join "`n"
     try { Add-Type -TypeDefinition $cs -Language CSharp -ErrorAction Stop } catch { }
 }
+# ---- NVML：直接调驱动 DLL 取 GPU 指标（<1 ms，不再每秒 spawn nvidia-smi）----
+# nvidia-smi 每次 45–60 ms 的进程启动开销，在 240 FPS 下就是可见的尖峰。
+# nvml.dll 由 NVIDIA 驱动装到 System32，零分发成本；任何一项失败都回退 nvidia-smi。
+if (-not ('NvGpu' -as [type])) {
+    $nvcs = @(
+        'using System;'
+        'using System.Runtime.InteropServices;'
+        'public static class NvGpu {'
+        '    [DllImport("nvml.dll", EntryPoint = "nvmlInit_v2")] private static extern int Init();'
+        '    [DllImport("nvml.dll", EntryPoint = "nvmlDeviceGetCount_v2")] private static extern int GetCount(out uint n);'
+        '    [DllImport("nvml.dll", EntryPoint = "nvmlDeviceGetHandleByIndex_v2")] private static extern int GetHandle(uint i, out IntPtr h);'
+        '    [DllImport("nvml.dll", EntryPoint = "nvmlDeviceGetUtilizationRates")] private static extern int Util(IntPtr h, out UtilRate r);'
+        '    [DllImport("nvml.dll", EntryPoint = "nvmlDeviceGetTemperature")] private static extern int Temp(IntPtr h, int sensor, out uint t);'
+        '    [DllImport("nvml.dll", EntryPoint = "nvmlDeviceGetPowerUsage")] private static extern int Power(IntPtr h, out uint mw);'
+        '    [DllImport("nvml.dll", EntryPoint = "nvmlDeviceGetClockInfo")] private static extern int Clock(IntPtr h, int type, out uint mhz);'
+        '    [DllImport("nvml.dll", EntryPoint = "nvmlDeviceGetFanSpeed")] private static extern int Fan(IntPtr h, out uint pct);'
+        '    [DllImport("nvml.dll", EntryPoint = "nvmlDeviceGetMemoryInfo")] private static extern int Mem(IntPtr h, out MemInfo m);'
+        '    [StructLayout(LayoutKind.Sequential)] public struct UtilRate { public uint Gpu; public uint Memory; }'
+        '    [StructLayout(LayoutKind.Sequential)] public struct MemInfo { public ulong Total; public ulong Free; public ulong Used; }'
+        '    private static IntPtr dev = IntPtr.Zero;'
+        '    private static bool tried = false;'
+        '    public static bool Start() {'
+        '        if (tried) return dev != IntPtr.Zero;'
+        '        tried = true;'
+        '        try {'
+        '            if (Init() != 0) return false;'
+        '            uint n; if (GetCount(out n) != 0 || n < 1) return false;'
+        '            IntPtr h; if (GetHandle(0, out h) != 0) return false;'
+        '            dev = h;'
+        '            return true;'
+        '        } catch { return false; }'
+        '    }'
+        '    // 返回 gpu%, 图形频率, 显存频率, 温度, 功率W, 风扇%, VRAM已用MB, VRAM总量MB；取不到的项为 -1'
+        '    public static double[] Sample() {'
+        '        if (dev == IntPtr.Zero) return null;'
+        '        double gpu = -1, clk = -1, mclk = -1, tmp = -1, pwr = -1, fan = -1, vu = -1, vt = -1;'
+        '        try {'
+        '            UtilRate u; if (Util(dev, out u) == 0) gpu = u.Gpu;'
+        '            uint v;'
+        '            if (Clock(dev, 0, out v) == 0) clk = v;'
+        '            if (Clock(dev, 2, out v) == 0) mclk = v;'
+        '            if (Temp(dev, 0, out v) == 0) tmp = v;'
+        '            if (Power(dev, out v) == 0) pwr = v / 1000.0;'
+        '            if (Fan(dev, out v) == 0) fan = v;'
+        '            MemInfo m;'
+        '            if (Mem(dev, out m) == 0) { vu = Math.Round(m.Used / 1048576.0); vt = Math.Round(m.Total / 1048576.0); }'
+        '        } catch { }'
+        '        return new double[] { gpu, clk, mclk, tmp, pwr, fan, vu, vt };'
+        '    }'
+        '}'
+    ) -join "`n"
+    try { Add-Type -TypeDefinition $nvcs -Language CSharp -ErrorAction Stop } catch { }
+}
 
-# ---- GPU：一次 nvidia-smi 查询取多字段 ----
-if ($SmiPath -and (Test-Path -LiteralPath $SmiPath)) {
-    try {
-        $line = (& $SmiPath --query-gpu=utilization.gpu,clocks.current.graphics,clocks.current.memory,temperature.gpu,power.draw,fan.speed,memory.used,memory.total --format=csv,noheader,nounits 2>$null | Select-Object -First 1)
-        if ($line) {
-            $parts = @(([string]$line) -split ',' | ForEach-Object { $_.Trim() })
-            if ($parts.Count -ge 8) {
-                $out.gpu = ToNum $parts[0]
-                $out.gpuClock = ToNum $parts[1]
-                $out.gpuMemClock = ToNum $parts[2]
-                $out.gpuTemp = ToNum $parts[3]
-                $out.gpuPower = ToNum $parts[4]
-                $out.gpuFan = ToNum $parts[5]
-                $out.vramUsed = ToNum $parts[6]
-                $out.vramTotal = ToNum $parts[7]
+# ---- GPU：优先 NVML（<1 ms），回退 nvidia-smi；两者都每 2 轮采一次 ----
+# 降频理由：GPU 温度/功耗/频率在 1 秒尺度上几乎不变，2 秒采一次体感无差异，
+# 但把 nvidia-smi 的进程启动开销砍掉一半（若 NVML 不可用时的回退路径）。
+# 惰性初始化：这一行必须在 NvGpu 编译之后（编译在循环内的 PcMetrics 段）
+if (-not $gpuInit) {
+    $gpuInit = $true
+    if ('NvGpu' -as [type]) { try { $gpuUseNvml = [NvGpu]::Start() } catch { $gpuUseNvml = $false } }
+}
+$gpuTick++
+if ($gpuTick -eq 1 -or ($gpuTick % 2) -eq 1) {
+    $got = $false
+    if ($gpuUseNvml) {
+        try {
+            $snap = [NvGpu]::Sample()
+            if ($snap -and $snap.Length -ge 8) {
+                if ($snap[0] -ge 0) { $gpuCache['gpu'] = [math]::Round($snap[0], 0) }
+                if ($snap[1] -ge 0) { $gpuCache['gpuClock'] = [math]::Round($snap[1], 0) }
+                if ($snap[2] -ge 0) { $gpuCache['gpuMemClock'] = [math]::Round($snap[2], 0) }
+                if ($snap[3] -ge 0) { $gpuCache['gpuTemp'] = [math]::Round($snap[3], 0) }
+                if ($snap[4] -ge 0) { $gpuCache['gpuPower'] = [math]::Round($snap[4], 1) }
+                if ($snap[5] -ge 0) { $gpuCache['gpuFan'] = [math]::Round($snap[5], 0) }
+                if ($snap[6] -ge 0) { $gpuCache['vramUsed'] = [math]::Round($snap[6], 0) }
+                if ($snap[7] -ge 0) { $gpuCache['vramTotal'] = [math]::Round($snap[7], 0) }
+                $got = $true
             }
-        }
-    } catch { }
+        } catch { $got = $false }
+    }
+    if (-not $got -and $SmiPath -and (Test-Path -LiteralPath $SmiPath)) {
+        try {
+            $line = (& $SmiPath --query-gpu=utilization.gpu,clocks.current.graphics,clocks.current.memory,temperature.gpu,power.draw,fan.speed,memory.used,memory.total --format=csv,noheader,nounits 2>$null | Select-Object -First 1)
+            if ($line) {
+                $parts = @(([string]$line) -split ',' | ForEach-Object { $_.Trim() })
+                if ($parts.Count -ge 8) {
+                    $gpuCache['gpu'] = ToNum $parts[0]
+                    $gpuCache['gpuClock'] = ToNum $parts[1]
+                    $gpuCache['gpuMemClock'] = ToNum $parts[2]
+                    $gpuCache['gpuTemp'] = ToNum $parts[3]
+                    $gpuCache['gpuPower'] = ToNum $parts[4]
+                    $gpuCache['gpuFan'] = ToNum $parts[5]
+                    $gpuCache['vramUsed'] = ToNum $parts[6]
+                    $gpuCache['vramTotal'] = ToNum $parts[7]
+                }
+            }
+        } catch { }
+    }
+}
+foreach ($gk in 'gpu', 'gpuClock', 'gpuMemClock', 'gpuTemp', 'gpuPower', 'gpuFan', 'vramUsed', 'vramTotal') {
+    if ($gpuCache.ContainsKey($gk)) { $out[$gk] = $gpuCache[$gk] }
 }
 
 # ---- CPU 使用率：主路径 GetSystemTimes（<1 ms），失败再退回 CIM ----
@@ -500,8 +879,8 @@ if ($null -eq $out.ramTotal -and -not ('PcMetrics' -as [type])) {
     } catch { }
 }
 
-# ---- 实时 FPS：读数已在 Complete-FpsBurst 里算好（最近 3 个窗口按帧数加权）----
-# 窗口间歇期沿用上一次的值（否则每 2 秒闪一次「—」）；连续 4 个空窗口才会清成 null。
+# ---- 实时 FPS：Update-FpsStream 已算好（FPS 用最近 1 秒滑动窗口，1%L 用最近 ~6 秒）----
+# 两次推送之间沿用上一次的值；超过 8 秒没有新帧才清空（见下方 Test-FpsStale）。
 if ($null -ne $fps.value) { $out.fps = $fps.value }
 if ($cpuPwrCounter) {
     try {
@@ -517,8 +896,13 @@ if ($null -ne $fps.dl -and $null -ne $out.fps -and [double]$out.fps -gt 0) {
 }
 # 停摆保护：超过 8 秒没有一次成功窗口，就不许再显示旧值（否则用户看到的是十分钟前的数字）
     if (Test-FpsStale $fps) {
-        if ($null -ne $fps.value) { $fps.value = $null; $fps.low1 = $null; $fps.dl = $null; $fps.win.Clear() }
-        if (-not $fps.err) { $fps.err = '窗口停摆：超过 8 秒没有完成一次 burst' }
+        if ($null -ne $fps.value) {
+            $fps.value = $null; $fps.low1 = $null; $fps.dl = $null
+            $fps.secWin.Clear(); $fps.secWinSec = 0.0
+            $fps.ftWin.Clear(); $fps.ftWinSec = 0.0
+            $fps.dlWin.Clear()
+        }
+        if (-not $fps.err) { $fps.err = '流式采样停摆：超过 8 秒没有新帧' }
     }
 # 失败现场：只在「出过问题」时带上，宿主负责去重记日志（同一个错误不会每秒刷一条）
 if ($fps.err) {
@@ -526,8 +910,27 @@ if ($fps.err) {
     $out.fpsErr = ('目标 {0}(pid {1})：{2}（csv={3} 字节，提权={4}，窗口 {5} s，累计 {6} 帧）' -f
                    $fps.target, $fps.pid, $fps.err, $csvInfo, $isAdm, $fps.lastDur, $fps.frames)
 }
-$Queue.Enqueue([pscustomobject]$out)
-    Start-Sleep -Milliseconds $IntervalMs
+# 推送节奏：把一轮采样拆成若干子步，每步只刷新 FPS 相关字段再入队。
+# 宿主 Timer 是 250 ms 拉一次队列，所以入队频率就是界面刷新频率：
+# 原来一轮 1 秒只能推一次（叠加 burst 起动开销，读数延迟 1.5–2.5 s）；
+# 常驻 presentmon 之后只要把入队拆细，延迟就降到 0.25–0.5 s。
+$subSteps = [Math]::Max(1, [int][Math]::Floor($IntervalMs / 250))
+$stepMs = [int][Math]::Max(50, [Math]::Floor($IntervalMs / $subSteps))
+for ($k = 0; $k -lt $subSteps; $k++) {
+    if ($Ctl -and $Ctl.stop) { break }
+    if ($k -gt 0) {
+        Start-Sleep -Milliseconds $stepMs
+        try { Update-FpsStream } catch { }
+        $out.at = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+        $out.fps = $fps.value
+        $out.fpsLow1 = if ($null -ne $fps.low1) { [math]::Round([double]$fps.low1, 2) } else { $null }
+        $out.rlat = if ($null -ne $fps.dl) { [math]::Round([double]$fps.dl, 2) } else { $null }
+        $out.pcl = if ($null -ne $fps.dl -and $null -ne $out.fps -and [double]$out.fps -gt 0) { [math]::Round((1000.0 / [double]$out.fps) + [double]$fps.dl, 2) } else { $null }
+        $out.fpsTarget = $fps.target
+        $out.fpsErr = $fps.err
+    }
+    $Queue.Enqueue([pscustomobject]$out)
+}
 }
 
 # 采样循环退出：收掉自己起的 PresentMon 与临时 CSV，绝不留给下一次会话

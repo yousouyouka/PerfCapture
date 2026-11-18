@@ -13,7 +13,7 @@
   const fill = (tpl, params) => Object.keys(params).reduce((s, k) => s.split('{' + k + '}').join(params[k]), tpl);
   const clamp = (v) => (v < 0 ? 0 : v > 100 ? 100 : v);
   const VIEW_KEY = 'perf.realtime.view';
-  const WINDOW = 60;             // 曲线显示最近 60 点（约 1 分钟）
+  let WINDOW = 60;               // 曲线显示最近 N 个采样点；收到 caps 后按 ringSize/2 自适应（4 Hz 下 = 240 点 ≈ 1 分钟）
 
   const state = {
     caps: null,
@@ -424,6 +424,9 @@
       state.sample = msg.sample;
       state.history.push(msg.sample);
       const cap = (state.caps && state.caps.ringSize) || 120;
+      // 推送频率变了（2.0.25 起 4 Hz），窗口点数要跟着走，否则曲线只剩十几秒
+      const win = Math.max(60, Math.round(cap / 2));
+      if (win !== WINDOW) WINDOW = win;
       while (state.history.length > Math.max(cap, WINDOW)) state.history.shift();
       if (!state.cells.length) build(); else paint();
       setRunning(true);

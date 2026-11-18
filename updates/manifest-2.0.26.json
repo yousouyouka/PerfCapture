@@ -1,0 +1,38 @@
+{
+    "schema":  1,
+    "app":  "PerfCapture",
+    "channel":  "stable",
+    "version":  "2.0.26",
+    "date":  "2026-11-18",
+    "serial":  79,
+    "notes":  {
+                  "zh":  "实时监控降负载；修好 FPS 与 1%L 的三个 bug",
+                  "en":  "See the release notes in the app (What\u0027s new).",
+                  "ja":  "アプリ内の更新情報をご覧ください。"
+              },
+    "assets":  [
+                   {
+                       "kind":  "setup",
+                       "name":  "PerfCapture-Setup-2.0.26.exe",
+                       "size":  11959808,
+                       "sha256":  "51cc34f48d251c26e73bcca762c03600d80aca7e3f5d101189844bb2618d1e69",
+                       "urls":  [
+                                    "https://raw.githubusercontent.com/yousouyouka/PerfCapture/updates/bin/PerfCapture-Setup-2.0.26.exe",
+                                    "https://ghproxy.net/https://github.com/yousouyouka/PerfCapture/releases/download/v2.0.26/PerfCapture-Setup-2.0.26.exe",
+                                    "https://github.com/yousouyouka/PerfCapture/releases/download/v2.0.26/PerfCapture-Setup-2.0.26.exe"
+                                ]
+                   },
+                   {
+                       "kind":  "zip",
+                       "name":  "PerfCapture-2.0.26.zip",
+                       "size":  11805029,
+                       "sha256":  "63f213c640535055b15afb0cc33ddaa93fc5bdc2c501160c2dcb03f537a12ee5",
+                       "urls":  [
+                                    "https://cdn.jsdelivr.net/gh/yousouyouka/PerfCapture@updates/bin/PerfCapture-2.0.26.zip",
+                                    "https://raw.githubusercontent.com/yousouyouka/PerfCapture/updates/bin/PerfCapture-2.0.26.zip",
+                                    "https://ghproxy.net/https://github.com/yousouyouka/PerfCapture/releases/download/v2.0.26/PerfCapture-2.0.26.zip",
+                                    "https://github.com/yousouyouka/PerfCapture/releases/download/v2.0.26/PerfCapture-2.0.26.zip"
+                                ]
+                   }
+               ]
+}

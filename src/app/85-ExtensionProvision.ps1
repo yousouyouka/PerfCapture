@@ -226,7 +226,7 @@ function Get-SafeUrl([string]$Url) {
     return $Url
 }
 
-# 源清单：url 是首选，urls 是配置化备用镜像。同一地址只试一次，顺序即优先级。
+# 源清单：url 是首选，urls 是配置化备用镜像。同一地址只试一次，顺序即默认优先级。
 function Get-ProvisionSources {
     $out = New-Object System.Collections.Generic.List[string]
     foreach ($u in (@($Spec.url) + @($Spec.urls))) {
@@ -235,6 +235,70 @@ function Get-ProvisionSources {
         if (-not $out.Contains($s)) { $out.Add($s) }
     }
     return $out.ToArray()
+}
+
+# 探测排序（2.1.8）：并发向每个源发 `Range: bytes=0-0`，按首字节耗时排序。
+# 为什么要有这一步：跨境源「连不上 / 连得上但握手慢」时，用完整下载去逐个试要付出
+# 连接超时（8s）× N 的代价，用户看到的就是「转圈很久然后失败」。探测把这段压到一次 6 秒。
+# 全部失败的源保留在队尾：主源下到一半断了，仍可退回去试（此时它可能已经恢复）。
+# 返回 @{ order = 排好序的源; facts = 诊断事实 }。
+function Select-ProvisionSources([string[]]$Sources) {
+    $list = @($Sources | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+    $facts = New-Object System.Collections.Generic.List[string]
+    if ($list.Count -le 1) {
+        if ($list.Count -eq 1) { $facts.Add('probe ' + (Get-SafeUrl $list[0]) + ' -> skipped(only)') }
+        return @{ order = $list; facts = $facts }
+    }
+    $probeMs = [int]$Spec.probeTimeoutMs
+    if ($probeMs -lt 1000) { $probeMs = 6000 }
+    $client = $null
+    $cts = $null
+    $jobs = @()
+    try {
+        try { Add-Type -AssemblyName System.Net.Http -ErrorAction Stop } catch { return @{ order = $list; facts = $facts } }
+        $client = New-Object System.Net.Http.HttpClient
+        $client.Timeout = [TimeSpan]::FromMilliseconds($probeMs + 2000)
+        try { $client.DefaultRequestHeaders.UserAgent.ParseAdd('PerfCapture') } catch { }
+        $cts = New-Object System.Threading.CancellationTokenSource
+        $cts.CancelAfter($probeMs)
+        foreach ($s in $list) {
+            $sw = [System.Diagnostics.Stopwatch]::StartNew()
+            $task = $null
+            try {
+                $req = New-Object System.Net.Http.HttpRequestMessage([System.Net.Http.HttpMethod]::Get, $s)
+                $req.Headers.Range = New-Object System.Net.Http.Headers.RangeHeaderValue(0, 0)
+                $task = $client.SendAsync($req, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead, $cts.Token)
+            } catch { }
+            $jobs += [pscustomobject]@{ Url = [string]$s; Task = $task; Sw = $sw; Ms = -1; Ok = $false }
+        }
+        $tasks = @($jobs | Where-Object { $_.Task } | ForEach-Object { $_.Task })
+        if ($tasks.Count) { try { [void][System.Threading.Tasks.Task]::WaitAny([System.Threading.Tasks.Task[]]$tasks, $probeMs) } catch { } }
+        foreach ($j in $jobs) {
+            if (-not $j.Task) { continue }
+            try {
+                if ($j.Task.IsCompleted) {
+                    $resp = $j.Task.GetAwaiter().GetResult()
+                    if ($resp -and $resp.IsSuccessStatusCode) {
+                        $j.Ok = $true
+                        $j.Ms = [int]$j.Sw.ElapsedMilliseconds
+                    }
+                    try { $resp.Dispose() } catch { }
+                }
+            } catch { }
+            try { $j.Sw.Stop() } catch { }
+            $facts.Add('probe ' + (Get-SafeUrl $j.Url) + ' -> ' + $(if ($j.Ok) { ([string]$j.Ms + 'ms') } else { 'unreachable' }))
+        }
+    } catch {
+        $facts.Add('probe -> ' + $_.Exception.Message)
+    } finally {
+        try { if ($cts) { $cts.Dispose() } } catch { }
+        try { if ($client) { $client.Dispose() } } catch { }
+    }
+    $okList = @($jobs | Where-Object { $_.Ok } | Sort-Object -Property Ms | ForEach-Object { $_.Url })
+    $badList = @($jobs | Where-Object { -not $_.Ok } | ForEach-Object { $_.Url })
+    # 一个都没探通，不要直接判死：保持原顺序交给下载去试（探测本身也可能被中间设备拦掉）。
+    if (-not $okList.Count) { return @{ order = $list; facts = $facts } }
+    return @{ order = @($okList + $badList); facts = $facts }
 }
 
 function Send-DownloadProgress([int64]$Recv, [int64]$Total, [double]$Seconds) {
@@ -270,7 +334,10 @@ function Invoke-SourceOnce([string]$Url, [string]$Dest, [DateTime]$Deadline) {
     $req.UserAgent = 'PerfCapture'
     # 连接超时与总超时分离：慢网下大文件不该被「连接超时」误杀。
     $req.Timeout = [int][math]::Max(1000, [int]$Spec.connectTimeoutMs)
-    $req.ReadWriteTimeout = [int][math]::Max(5000, ([int]$Spec.readTimeoutSec * 1000))
+    # 读超时按「停滞」定义：单次 Read 超过 stallTimeoutSec 没有数据才算断流。
+    # 2.1.7 用的是 readTimeoutSec(30s)，接到一个只吐几十字节的连接上会白等 30 秒。
+    $stallSec = if ([int]$Spec.stallTimeoutSec -ge 5) { [int]$Spec.stallTimeoutSec } else { 20 }
+    $req.ReadWriteTimeout = [int]($stallSec * 1000)
     if ($existing -gt 0) { [void]$req.AddRange([int64]$existing) }
 
     $resp = $null
@@ -302,6 +369,16 @@ function Invoke-SourceOnce([string]$Url, [string]$Dest, [DateTime]$Deadline) {
     }
 
     $recv = $existing
+    # 预算按「剩余体积 / 最低可接受速度」推导（2.1.8）：固定 90 秒对 17 MB 的包只允许 ≥200 KB/s，
+    # 跨境链路掉到 150 KB/s 就必然失败。这里取 max(原预算, 剩余体积/128KBps×2)，慢但活着的连接能下完；
+    # 真正的「卡死」由 stallTimeoutSec 的单次读超时兜住，不会无限等。
+    $budgetDeadline = $Deadline
+    if ($total -gt $recv) {
+        $needSec = [int][math]::Ceiling(([double]($total - $recv)) / 131072.0) * 2
+        if ($needSec -lt 60) { $needSec = 60 }
+        $cand = [DateTime]::UtcNow.AddSeconds($needSec)
+        if ($cand -gt $budgetDeadline) { $budgetDeadline = $cand }
+    }
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
     $lastEmit = 0
     $fs = $null
@@ -313,7 +390,7 @@ function Invoke-SourceOnce([string]$Url, [string]$Dest, [DateTime]$Deadline) {
         $buf = New-Object byte[] 65536
         while ($true) {
             if (Test-ProvisionCancel) { throw 'cancelled' }
-            if ([DateTime]::UtcNow -gt $Deadline) { throw 'downloadTimeout' }
+            if ([DateTime]::UtcNow -gt $budgetDeadline) { throw 'downloadTimeout' }
             $n = $stream.Read($buf, 0, $buf.Length)
             if ($n -le 0) { break }
             $fs.Write($buf, 0, $n)
@@ -362,7 +439,10 @@ $targetExisted = $false
 $createdTarget = $false
 $startedProc   = $null
 $archivePath   = ''
-$partPath      = ''   # 下载临时文件；回滚必删，避免半截包被当成缓存
+$partPath      = ''   # 下载临时文件；默认回滚必删（半截包绝不能被当成缓存）
+# 但「全源都不可达」属于网络问题而非包问题：保留 .part，用户网络恢复后重试可以续传，
+# 不必把已经下了一大半的 18 MB 再走一遍。取消 / 哈希不符 / 安装失败仍然删。
+$keepPartOnFail = $false
 $workDir       = ''
 $actualSha     = ''
 $timeline      = New-Object System.Collections.Generic.List[string]
@@ -372,7 +452,9 @@ $diagFacts     = @{ installer = ''; installerExit = ''; runtime = '' }
 function Invoke-ProvisionRollback {
     try { if ($startedProc -and -not $startedProc.HasExited) { Stop-Process -Id $startedProc.Id -Force -ErrorAction SilentlyContinue } } catch { }
     try { if ($workDir -and (Test-Path -LiteralPath $workDir)) { Remove-Item -LiteralPath $workDir -Recurse -Force -ErrorAction SilentlyContinue } } catch { }
-    try { if ($partPath -and (Test-Path -LiteralPath $partPath)) { Remove-Item -LiteralPath $partPath -Force -ErrorAction SilentlyContinue } } catch { }
+    if (-not $keepPartOnFail) {
+        try { if ($partPath -and (Test-Path -LiteralPath $partPath)) { Remove-Item -LiteralPath $partPath -Force -ErrorAction SilentlyContinue } } catch { }
+    }
     # 回滚必须连系统级注册一起撤：安装阶段可能已经启动过一次并写入了 Vulkan 层，
     # 目录一删这些注册就指向不存在的 DLL，游戏的 Vulkan 初始化会直接失败。
     try {
@@ -421,6 +503,10 @@ try {
             Assert-NotCancelled
             $sources = @(Get-ProvisionSources)
             if (-not $sources.Count) { throw 'noSource' }
+            # 先探测再下载：把「逐个源各等一次连接超时」压成一次并发探测，快的源先上。
+            $probe = Select-ProvisionSources $sources
+            foreach ($f in @($probe.facts)) { if ($f) { $sourceLog.Add([string]$f) } }
+            $sources = @($probe.order)
             $ok = $false
             foreach ($src in $sources) {
                 $attempt = 0
@@ -434,13 +520,24 @@ try {
                     if ($r.message -eq 'cancelled') { throw 'cancelled' }
                     $sourceLog.Add((Get-SafeUrl $src) + ' -> ' + $r.status + ' / ' + $r.message)
                     if ($r.restart) { continue }   # 416 / Range 不可用：丢掉 .part 再来一次
+                    # 只有「连接阶段失败」值得原地重试一次（握手抖动）；
+                    # 断流/中途失败重试同一个源只是再等一个超时，直接换源才有意义。
+                    if ($r.message -match 'connectTimeout|refused|无法连接|actively refused' -and $attempt -lt 2) { continue }
                     break
                 }
                 if ($ok) { break }
             }
             if (-not $ok) {
-                $tried = $sourceLog.Count
-                return Fail-Stage 'download' ('已尝试 ' + $tried + ' 个源：' + (($sourceLog | Select-Object -Last 4) -join '；'))
+                # 全源失败 = 网络问题：保留 .part 让用户重试时能续传（不是包有问题）。
+                $keepPartOnFail = $true
+                $attempts = @($sourceLog | Where-Object { $_ -notmatch '^probe ' })
+                $probes = @($sourceLog | Where-Object { $_ -match '^probe ' })
+                $detail = '已尝试 ' + $attempts.Count + ' 个源：' + ($attempts -join '；')
+                if ($probes.Count) { $detail += '（探测：' + ($probes -join '；') + '）' }
+                if ([string]$Spec.pageUrl) {
+                    $detail += '。可在扩展卡片点「手动导入」选择自己下载的安装包，或打开官方下载页'
+                }
+                return Fail-Stage 'download' $detail
             }
             Move-Item -LiteralPath $partPath -Destination $archivePath -Force
         } elseif ([string]$Spec.sourceKind -eq 'file' -and [bool]$Spec.allowLocalSource) {
@@ -642,9 +739,17 @@ function New-ExtensionProvisionSpec {
         sha256 = [string]$p.sha256
         maxBytes = if ($p.maxBytes) { [int64]$p.maxBytes } else { 134217728 }
         timeoutSec = if ($p.timeoutSec) { [int]$p.timeoutSec } else { 60 }
-        connectTimeoutSec = if ($p.connectTimeoutSec) { [int]$p.connectTimeoutSec } else { 8 }
+        connectTimeoutSec = if ($p.connectTimeoutSec) { [int]$p.connectTimeoutSec } else { 15 }
         readTimeoutSec = if ($p.readTimeoutSec) { [int]$p.readTimeoutSec } else { 30 }
+        # 停滞判据：单次 Read 超过这个秒数没有数据就换源（与「总预算」是两件事）。
+        # 老配置只有 readTimeoutSec 时用它兜底，但不超过默认值——2.1.7 的 30 秒正是在只吐几十字节的
+        # 半死连接上白等的时间。新配置写 stallTimeoutSec 即可。
+        stallTimeoutSec = if ($p.stallTimeoutSec) { [int]$p.stallTimeoutSec } elseif ($p.readTimeoutSec) { [int][math]::Min(20, [int]$p.readTimeoutSec) } else { 20 }
+        # 探测预算：并发试每个源的首字节，超过这个时间还没回头的视为不可用
+        probeTimeoutMs = if ($p.probeTimeoutMs) { [int]$p.probeTimeoutMs } else { 6000 }
         progressIntervalMs = if ($p.progressIntervalMs) { [int]$p.progressIntervalMs } else { 200 }
+        # 官方下载页：网络彻底不通时给用户一条人走的路（手动下载 → 手动导入）
+        pageUrl = [string]$p.pageUrl
         installerRelative = [string]$p.installerRelative
         installerSha256 = [string]$p.installerSha256
         installerKind = if ($p.installerKind) { [string]$p.installerKind } else { 'nsis' }
@@ -702,7 +807,9 @@ function Drain-ExtProvQueue {
 
 # ---------- 异步启动 ----------
 function Start-ExtensionProvision {
-    param([string]$Id, [string]$Mode = 'oneclick')   # install / oneclick / enable / restore
+    # PackagePath：用户手动选择的本地安装包（网络不可达时的兜底）。给了就走本地源，
+    # 仍然要过注册表里那份 SHA-256 —— 手动导入不等于放宽校验。
+    param([string]$Id, [string]$Mode = 'oneclick', [string]$PackagePath = '')   # install / oneclick / enable / restore / import
     $e = Get-ExtensionEntry $Id
     if (-not $e -or -not $e.available) { Send-ExtensionError $Id 'notAvailable'; return $false }
     if ($script:ExtProvCtx) {
@@ -713,6 +820,13 @@ function Start-ExtensionProvision {
     catch {
         Send-ExtensionError $Id ('packageInvalid:' + $_.Exception.Message)
         return $false
+    }
+    if ($PackagePath) {
+        if (-not (Test-Path -LiteralPath $PackagePath)) { Send-ExtensionError $Id 'localPackageMissing'; return $false }
+        $spec.sourceKind = 'file'
+        $spec.allowLocalSource = $true
+        $spec.url = [System.IO.Path]::GetFullPath($PackagePath)
+        $spec.urls = @()
     }
 
     # 每次新供应都重置取消信号：上一轮取消不能污染这一轮。

@@ -160,7 +160,8 @@
 }
 .ext-meta .ext-meta-row { display: flex; gap: 0.35rem; }
 .ext-meta .ext-meta-k { color: var(--faint); }
-.ext-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.7rem; }
+/* 失败态有「重试 / 手动导入 / 官方下载页 / 卸载」四个动作，窄卡片要能折行 */
+.ext-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.5rem; margin-top: 0.7rem; }
 .ext-actions .btn { padding: 0.34rem 0.9rem; font-size: 0.75rem; }
 
 /* ── 空状态：沿用问卷页 / 实时监控的虚线占位观感 ── */

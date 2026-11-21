@@ -761,13 +761,17 @@ if ($updPs -notmatch 'api\.github\.com') { Bad '清单缺 api.github.com 第三�
 if ($updPs -notmatch 'RSAKeyValue') { Bad '没有内置验签公钥' }
 if ($updPs -match 'PRIVATE KEY|private-key|PRIVATEKEY') { Bad '70-Updates.ps1 里疑似写了私钥' }
 if ($updPs -notmatch "UpdateAutoCheckDelayMs = 12000") { Bad '自动检查不是启动后 12 秒' }
-# 1.4.1 加固契约：逐源验签回退 + 重定向复核 + 边下边算哈希 + 取消 + 停滞看门狗 + 路径限制
+# 1.4.1 加固契约：逐源验签回退 + 重定向复核 + 整包哈希 + 取消 + 停滞看门狗 + 路径限制
 if ($updPs -notmatch 'sigFail') { Bad '取清单脚本缺逐源验签标记 sigFail（镜像错配时无法换源）' }
 if ($updPs -notmatch 'Test-Sig') { Bad '取清单脚本没有内联验签（无法逐源回退）' }
 if ($updPs -notmatch 'RequestMessage\.RequestUri') { Bad '没有按最终地址复核白名单（重定向可绕过）' }
-if ($updPs -notmatch 'TransformBlock') { Bad '下载没有边下边算 SHA-256' }
+# 2.1.8：跨源续传后必须对**整个文件**重算哈希（边下边算在断点续传下无法成立）
+if ($updPs -notmatch 'Get-FileHash -LiteralPath \$OutPath') { Bad '下载完成后没有整包复算 SHA-256' }
 if ($updPs -notmatch 'CancellationTokenSource') { Bad '下载不支持取消（无法中断）' }
-if ($updPs -notmatch 'TotalSeconds -gt 60') { Bad '没有下载停滞看门狗' }
+if ($updPs -notmatch 'TotalSeconds -gt 45') { Bad '没有下载停滞看门狗' }
+if ($updPs -notmatch 'PartPath') { Bad '更新下载没有 .part 续传文件' }
+if ($updPs -notmatch '\$ProbeMs') { Bad '更新下载没有源探测预算（会逐个源等超时）' }
+if ($provPs -notmatch 'Select-ProvisionSources') { Bad '扩展供应层没有源探测（多源仍逐个等超时）' }
 if (-not $updPs.Contains('StartsWith($root')) { Bad '运行安装包没有限制在下载目录内' }
 if ($updPs -notmatch 'UpdateDelayTimer') { Bad '自动检查的延时计时器没有纳入管理（可能重复检查）' }
 if ($capPs -notmatch "'checkUpdate'") { Bad '60-Capture.ps1 没登记 checkUpdate 命令' }
@@ -906,6 +910,20 @@ $extPs = Get-Content (Join-Path $root 'src\app\80-Extensions.ps1') -Raw -Encodin
 if ($extPs -notmatch "'cancelExtensionProvision'") { Bad '80-Extensions.ps1 缺 cancelExtensionProvision 命令路由（E2）' }
 # 白名单漏登记 = 前端按钮点了会被「不支持的命令」拒掉，必须一起查
 if ($capPs -notmatch "'cancelExtensionProvision'") { Bad '60-Capture.ps1 命令白名单缺 cancelExtensionProvision（取消按钮会被拒）' }
+
+# 2.1.8：网络不可达时的手动导入（选包 / 导入 / 打开下载页）三条链路必须齐全
+foreach ($need in 'Select-ProvisionSources', 'stallTimeoutSec', 'probeTimeoutMs', 'pageUrl', 'keepPartOnFail') {
+    if ($provPs -notmatch [regex]::Escape($need)) { Bad "85-ExtensionProvision.ps1 缺 $need（2.1.8 下载可达性）" }
+}
+foreach ($need in "'pickExtensionPackage'", "'importExtensionPackage'", "'openExtensionPage'") {
+    if ($extPs -notmatch [regex]::Escape($need)) { Bad "80-Extensions.ps1 缺 $need（手动导入）" }
+    if ($capPs -notmatch [regex]::Escape($need)) { Bad "60-Capture.ps1 缺 $need（按钮会被「不支持的命令」拒掉）" }
+}
+if ($extPs -notmatch 'Test-ExtensionPackageFile') { Bad '80-Extensions.ps1 缺本地包预检 Test-ExtensionPackageFile' }
+$extCfg = Get-Content (Join-Path $root 'extensions.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+$rtssPkg = @($extCfg.extensions | Where-Object { $_.id -eq 'rtss-shm' })[0].package
+if (@($rtssPkg.urls).Count -lt 2) { Bad "RTSS 只配了 $(@($rtssPkg.urls).Count) 个下载源（官方源不可达时无退路）" }
+if (-not $rtssPkg.pageUrl) { Bad 'RTSS 没配官方下载页（手动导入时打不开）' }
 
 
 # ---------- 6. 运行时依赖 ----------

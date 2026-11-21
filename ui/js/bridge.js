@@ -76,6 +76,9 @@ function handleMessage(msg) {
     case 'extensionState': if (window.PerfExtensionsUI) window.PerfExtensionsUI.state(msg); break;
     case 'extensionError': if (window.PerfExtensionsUI) window.PerfExtensionsUI.error(msg); break;
     case 'extensionProgress': if (window.PerfExtensionsUI) window.PerfExtensionsUI.progress(msg); break;
+    // 2.1.8：手动导入——宿主弹完文件框后把选中的路径回传，前端据此发起导入
+    case 'extensionPackagePicked': if (window.PerfExtensionsUI) window.PerfExtensionsUI.picked(msg); break;
+    case 'extensionPackagePickCancelled': if (window.PerfExtensionsUI) window.PerfExtensionsUI.pickCancelled(msg); break;
     case 'fpsSource': if (window.PerfExtensionsUI) window.PerfExtensionsUI.apply(null, msg.source); break;
     case 'error': addLog('[错误] ' + msg.text, 'ln-warn'); setStatus(msg.text || '出错'); break;
     default: break;

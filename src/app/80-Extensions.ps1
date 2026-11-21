@@ -907,6 +907,61 @@ function Uninstall-ExtensionCore([string]$Id) {
     return $true
 }
 
+# ---------- 手动导入（2.1.8）：网络彻底不通时的唯一兜底 ----------
+# 只做三件事：弹文件选择框、按注册表里的 SHA-256 预检、把手选路径交给同一条供应流水线。
+# 刻意不在这里解包/安装：失败与回滚必须仍走 worker 那一条路径，避免两套语义。
+function Select-ExtensionPackageFile([string]$Id) {
+    $e = Get-ExtensionEntry $Id
+    if (-not $e) { Send-ExtensionError $Id 'notAvailable'; return }
+    $dlg = New-Object System.Windows.Forms.OpenFileDialog
+    $dlg.Title = '选择扩展安装包'
+    $dlg.Filter = '安装包 (*.zip;*.exe)|*.zip;*.exe|所有文件 (*.*)|*.*'
+    $dlg.CheckFileExists = $true
+    $dlg.Multiselect = $false
+    try {
+        if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+            Send-ToUi @{ type = 'extensionPackagePicked'; id = $Id; path = $dlg.FileName; name = (Split-Path -Leaf $dlg.FileName) }
+        } else {
+            Send-ToUi @{ type = 'extensionPackagePickCancelled'; id = $Id }
+        }
+    } finally {
+        $dlg.Dispose()
+    }
+}
+
+# 预检：文件存在、大小不超过 maxBytes、SHA-256 与注册表一致。
+# 预检失败不启动供应（省掉一次「装到一半才报哈希不符」），但结论与 worker 的判定口径完全一致。
+function Test-ExtensionPackageFile([string]$Id, [string]$Path) {
+    $e = Get-ExtensionEntry $Id
+    if (-not $e -or -not $e.package) { return @{ ok = $false; reason = 'notAvailable'; detail = '' } }
+    if (-not $Path -or -not (Test-Path -LiteralPath $Path)) { return @{ ok = $false; reason = 'localPackageMissing'; detail = [string]$Path } }
+    $maxBytes = if ($e.package.maxBytes) { [int64]$e.package.maxBytes } else { 134217728 }
+    $size = 0
+    try { $size = (Get-Item -LiteralPath $Path).Length } catch { return @{ ok = $false; reason = 'localPackageMissing'; detail = [string]$Path } }
+    if ($size -le 0) { return @{ ok = $false; reason = 'localPackageMissing'; detail = '文件为空' } }
+    if ($size -gt $maxBytes) { return @{ ok = $false; reason = 'archiveTooLarge'; detail = "$size > $maxBytes" } }
+    $want = ([string]$e.package.sha256).ToUpperInvariant()
+    if ($want -match '^[0-9A-F]{64}$') {
+        $actual = ''
+        try { $actual = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToUpperInvariant() } catch { }
+        if ($actual -ne $want) {
+            return @{ ok = $false; reason = 'hashMismatch'; detail = ('期望 ' + $want.Substring(0, 12) + '…，实际 ' + $(if ($actual) { $actual.Substring(0, 12) + '…' } else { '读取失败' }) + '；请选择与当前版本匹配的压缩包') }
+        }
+    }
+    return @{ ok = $true; reason = ''; detail = '' }
+}
+
+function Import-ExtensionPackage([string]$Id, [string]$Path) {
+    $check = Test-ExtensionPackageFile $Id $Path
+    if (-not $check.ok) {
+        Write-AppLog ("手动导入被拒绝（$($check.reason)）: $Path") 'WARN'
+        Send-ExtensionError $Id $check.reason $check.detail
+        return
+    }
+    Write-AppLog ("手动导入安装包: $Path")
+    [void](Start-ExtensionProvision $Id 'import' $Path)
+}
+
 # ---------- 命令分发（由 60-Capture.ps1 的 Handle-UiMessage 调用） ----------
 # 注意：oneClickEnableExtension 必须走 Enable-ExtensionCore，不能直接进 Start-ExtensionProvision。
 # 后者是无条件完整供应（下载→校验→解包→静默安装→配置→启动），对「已装副本」等于重装一次：
@@ -924,6 +979,15 @@ function Invoke-ExtensionCommand($Msg) {
         # 与失败共用同一条回滚路径，不会留下半个目录或半个 .part。
         'cancelExtensionProvision' { [void](Stop-ExtensionProvision) }
         'uninstallExtension'       { [void](Uninstall-ExtensionCore ([string]$Msg.id)) }
+        # 手动导入（网络不可达兜底）：选包 → 预检哈希 → 走同一条供应流水线
+        'pickExtensionPackage'     { Select-ExtensionPackageFile ([string]$Msg.id) }
+        'importExtensionPackage'   { Import-ExtensionPackage ([string]$Msg.id) ([string]$Msg.path) }
+        'openExtensionPage'        {
+            $e = Get-ExtensionEntry ([string]$Msg.id)
+            $u = if ($e -and $e.package) { [string]$e.package.pageUrl } else { '' }
+            if ($u -match '^https://') { try { Start-Process $u } catch { Write-AppLog ('打开下载页失败: ' + $_.Exception.Message) 'WARN' } }
+            else { Send-ExtensionError ([string]$Msg.id) 'noPageUrl' }
+        }
         default                    { Send-ExtensionError '' 'unknown' }
     }
 }

@@ -7,7 +7,9 @@ $script:KnownCommands = @('ready', 'refreshProcs', 'saveSettings', 'openReports'
     'metricsStart', 'metricsStop', 'metricsTarget', 'overlayToggle', 'overlayShow', 'overlayHide', 'overlayConfig',
     'listExtensions', 'installExtension', 'enableExtension', 'disableExtension', 'uninstallExtension', 'refreshExtensionStatus', 'oneClickEnableExtension',
     # E2（2.1.7）：供应中「取消」——只置取消信号，回滚由 worker 完成
-    'cancelExtensionProvision')
+    'cancelExtensionProvision',
+    # 2.1.8：网络不可达时的手动导入（选包 / 导入）与官方下载页
+    'pickExtensionPackage', 'importExtensionPackage', 'openExtensionPage')
 
 function Handle-UiMessage($msg) {
     if ($null -eq $msg -or -not $msg.cmd) { return }
@@ -36,7 +38,7 @@ function Handle-UiMessage($msg) {
         return
     }
     # 扩展中心命令（宿主侧在 80-Extensions.ps1）
-    if ($msg.cmd -in @('listExtensions', 'installExtension', 'enableExtension', 'disableExtension', 'uninstallExtension', 'refreshExtensionStatus', 'oneClickEnableExtension', 'cancelExtensionProvision')) {
+    if ($msg.cmd -in @('listExtensions', 'installExtension', 'enableExtension', 'disableExtension', 'uninstallExtension', 'refreshExtensionStatus', 'oneClickEnableExtension', 'cancelExtensionProvision', 'pickExtensionPackage', 'importExtensionPackage', 'openExtensionPage')) {
         try { Invoke-ExtensionCommand $msg }
         catch { Write-AppLog ('扩展命令执行失败: ' + $_.Exception.Message) 'WARN' }
         return

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "note": "扩展注册表 = 宿主侧唯一事实来源。available=false 表示尚未发布：宿主拒绝其安装/启用请求并回 extensionError(notAvailable)，绝不假装安装成功。available=true 表示已发布可装。status 由注册表 + 持久化配置 + 依赖探测实时计算，前端只展示宿主下发结果。package 字段描述由扩展中心自己下载/校验/静默安装/配置/启动的托管副本：版本、URL、SHA-256、安装参数、进程路径全部写在这里，代码不硬编码；本机预装的同类软件一律无视。lifecycle.managed=true 的扩展由 PerfCapture 按需拉起，不设 Windows 开机自启，关闭时结束自有进程。mode=external-shm 只表示数据通道是共享内存，shmName 为对象名。package 的可选字段（全部配置化，代码不硬编码）：urls（备用镜像数组，按顺序回退）、connectTimeoutSec / readTimeoutSec / progressIntervalMs（连接超时 / 读超时 / 进度回推间隔）、installerKind（nsis / inno / msi / script，决定启动方式）、installSuccessCodes（可接受的退出码，留空按类型默认）、elevateInstall（不写则由安装器类型决定）、configFiles[].verify（写后回读校验，默认开）。",
+  "note": "扩展注册表 = 宿主侧唯一事实来源。available=false 表示尚未发布：宿主拒绝其安装/启用请求并回 extensionError(notAvailable)，绝不假装安装成功。available=true 表示已发布可装。status 由注册表 + 持久化配置 + 依赖探测实时计算，前端只展示宿主下发结果。package 字段描述由扩展中心自己下载/校验/静默安装/配置/启动的托管副本：版本、URL、SHA-256、安装参数、进程路径全部写在这里，代码不硬编码；本机预装的同类软件一律无视。lifecycle.managed=true 的扩展由 PerfCapture 按需拉起，不设 Windows 开机自启，关闭时结束自有进程。mode=external-shm 只表示数据通道是共享内存，shmName 为对象名。package 的可选字段（全部配置化，代码不硬编码）：urls（备用镜像数组，按顺序回退）、connectTimeoutSec / progressIntervalMs（连接超时 / 进度回推间隔；readTimeoutSec 仅为老配置兼容，已由 stallTimeoutSec 取代）、installerKind（nsis / inno / msi / script，决定启动方式）、installSuccessCodes（可接受的退出码，留空按类型默认）、elevateInstall（不写则由安装器类型决定）、configFiles[].verify（写后回读校验，默认开）、stallTimeoutSec（单次读多久没数据算断流，默认 20）、probeTimeoutMs（并发探测各源首字节的预算，默认 6000）、pageUrl（官方下载页，供手动导入兜底时打开）。",
   "extensions": [
     {
       "id": "rtss-shm",
@@ -33,13 +33,21 @@
         "sourceKind": "http",
         "allowLocalSource": false,
         "url": "https://ftp.nluug.nl/pub/games/PC/guru3d/afterburner/[Guru3D]-RTSSSetup737Build28314.zip",
-        "urls": [],
+        "urls": [
+          "https://cdn.jsdelivr.net/gh/yousouyouka/PerfCapture@updates/bin/RTSSSetup737Build28314.zip",
+          "https://raw.githubusercontent.com/yousouyouka/PerfCapture/updates/bin/RTSSSetup737Build28314.zip",
+          "https://ghproxy.net/https://github.com/yousouyouka/PerfCapture/releases/download/rtss-7.3.7/RTSSSetup737Build28314.zip",
+          "https://github.com/yousouyouka/PerfCapture/releases/download/rtss-7.3.7/RTSSSetup737Build28314.zip"
+        ],
+        "pageUrl": "https://www.guru3d.com/download/rtss-rivatuner-statistics-server-download/",
         "sha256": "9B084A8CB3E53EC1A673894D0B66E22B16C9FD8785636B020B2D422F3F2A820E",
         "archiveName": "RTSS-7.3.7.zip",
         "maxBytes": 67108864,
-        "timeoutSec": 90,
-        "connectTimeoutSec": 8,
+        "timeoutSec": 180,
+        "connectTimeoutSec": 15,
         "readTimeoutSec": 30,
+        "stallTimeoutSec": 20,
+        "probeTimeoutMs": 6000,
         "progressIntervalMs": 200,
         "installerRelative": "RTSSSetup737.exe",
         "installerSha256": "",

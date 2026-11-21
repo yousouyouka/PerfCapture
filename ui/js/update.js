@@ -35,6 +35,14 @@
   };
   const setStatus = (s) => { if (statusEl) statusEl.textContent = s; };
   const bannerHead = () => fill(tx('update.banner', '有新版本 v{v}'), { v: info.version || '' });
+  const fmtBytes = (b) => {
+    const n0 = Number(b);
+    if (!(n0 > 0)) return '';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let n = n0; let i = 0;
+    while (n >= 1024 && i < units.length - 1) { n /= 1024; i += 1; }
+    return (i === 0 ? String(Math.round(n)) : n.toFixed(1)) + ' ' + units[i];
+  };
 
   function showBanner(text, mainLabel, skipVisible) {
     banner.hidden = false;
@@ -118,12 +126,24 @@
         tryPrompt();
         break;
       }
-      case 'downloading':
-        setStatus(fill(tx('update.downloading', '正在下载… {pct}%'), { pct: info.progress || 0 }));
-        showBanner(bannerHead(), fill(tx('update.downloading', '正在下载… {pct}%'), { pct: info.progress || 0 }), false);
-        setProgress(info.progress || 0, true);
-        btnMain.disabled = true;
+      case 'downloading': {
+        // 速度与剩余时间由宿主按采样算好后下发；拿不到就只显示百分比，不编数字。
+        const pct = info.progress || 0;
+        let extra = '';
+        const bps = Number(info.bps) || 0;
+        if (bps > 0) {
+          const speed = fmtBytes(bps) + '/s';
+          const eta = Number(info.eta) > 0
+            ? fill(tx('update.etaSeconds', '剩余 {s} 秒'), { s: info.eta })
+            : tx('update.etaUnknown', '剩余时间未知');
+          extra = fill(tx('update.speedEta', ' · {speed} · {eta}'), { speed: speed, eta: eta });
+        }
+        const line = fill(tx('update.downloading', '正在下载… {pct}%'), { pct: pct }) + extra;
+        setStatus(line);
+        showBanner(line, tx('update.cancel', '取消'), false);
+        setProgress(pct, true);
         break;
+      }
       case 'verifying':
         hideBanner();
         setStatus(tx('update.verifying', '正在校验完整性…'));
@@ -171,6 +191,9 @@
     if (phase === 'available') {
       goSettings();                     // 选下载就切到设置页（进度条在「检查更新」下方）
       send({ cmd: 'downloadUpdate', name: info.name, sha256: info.sha256, size: info.size, urls: info.urls || [] });
+    } else if (phase === 'downloading') {
+      // 下载中这个按钮就是「取消」：宿主取消后会把 .part 一起删掉并回到 idle。
+      send({ cmd: 'cancelUpdate' });
     } else if (phase === 'ready') {
       // 横幅上的「运行安装包」：只起安装程序（宿主不退出）；弹窗里的「立即更新」才会装完退出
       send({ cmd: 'runUpdateInstaller', path: info.path, sha256: info.sha256 });

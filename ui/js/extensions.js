@@ -74,6 +74,10 @@
     cancelled:           'extensions.reason.cancelled',
     // 2.1.4：关闭时自有运行时没清干净（例如残留注入器），如实告知而不是写「影响已清除」。
     stopIncomplete:      'extensions.reason.stopIncomplete',
+    // 2.1.8：手动导入（本地包）相关的三种确定性原因
+    localPackageMissing: 'extensions.reason.localPackageMissing',
+    archiveTooLarge:     'extensions.reason.archiveTooLarge',
+    noPageUrl:           'extensions.reason.noPageUrl',
     unknown:             'extensions.reason.unknown'
   };
   // 宿主下发的关闭后提示：restartTarget=注入已移除，需重启游戏恢复图形选项；
@@ -159,6 +163,28 @@
     return b;
   }
 
+  /* 手动导入（2.1.8）：官方镜像不可达时的兜底。宿主弹文件框 → 回传路径 → 直接走同一条供应流水线。 */
+  function importButton(id) {
+    const b = el('button', 'btn', tx('extensions.importPackage', '手动导入'));
+    b.type = 'button';
+    b.title = tx('extensions.importHint', '自己下载好安装包后从这里选择，软件会按官方哈希校验');
+    if (busy[id]) b.disabled = true;
+    b.addEventListener('click', () => {
+      if (busy[id]) return;
+      toast = null;
+      send({ cmd: 'pickExtensionPackage', id });
+    });
+    return b;
+  }
+
+  function pageButton(id) {
+    const b = el('button', 'btn', tx('extensions.openPage', '官方下载页'));
+    b.type = 'button';
+    b.title = tx('extensions.openPageHint', '用浏览器打开官方下载页；下载好后回到这里点「手动导入」');
+    b.addEventListener('click', () => { send({ cmd: 'openExtensionPage', id }); });
+    return b;
+  }
+
   function actionsFor(s) {
     const box = el('div', 'ext-actions');
     if (!s.available) {
@@ -170,7 +196,8 @@
     }
     switch (s.status) {
       case 'notInstalled':
-        box.appendChild(action(tx('extensions.oneClick', '一键启用'), 'oneClickEnableExtension', s.id, true)); break;
+        box.appendChild(action(tx('extensions.oneClick', '一键启用'), 'oneClickEnableExtension', s.id, true));
+        box.appendChild(importButton(s.id)); break;
       case 'installed':
         box.appendChild(action(tx('extensions.oneClick', '一键启用'), 'oneClickEnableExtension', s.id, true));
         box.appendChild(action(tx('extensions.uninstall', '卸载'), 'uninstallExtension', s.id)); break;
@@ -180,6 +207,9 @@
       case 'unsupported':
       case 'failed':
         box.appendChild(action(tx('extensions.retry', '重试启用'), 'oneClickEnableExtension', s.id, true));
+        box.appendChild(importButton(s.id));
+        // 下载失败多半是镜像不可达：给一条「用浏览器自己下」的路，浏览器可能走系统代理而 .NET 不走。
+        box.appendChild(pageButton(s.id));
         box.appendChild(action(tx('extensions.uninstall', '卸载'), 'uninstallExtension', s.id)); break;
     }
     return box;
@@ -373,7 +403,17 @@
       render();
       // 失败后回读真实状态，避免界面停在旧状态（例如供应失败却显示已启用）
       send({ cmd: 'listExtensions' });
-    }
+    },
+    /* 宿主选完本地安装包：直接发起导入，不再二次确认（文件是用户刚亲手选的）。 */
+    picked(msg) {
+      if (!msg || !msg.id || !msg.path) return;
+      toast = null;
+      busy[msg.id] = 'starting';
+      progress[msg.id] = 0;
+      send({ cmd: 'importExtensionPackage', id: msg.id, path: msg.path });
+      render();
+    },
+    pickCancelled() { /* 用户取消选择：什么都不做 */ }
   };
   window.PerfExtensionsUI = api;
 

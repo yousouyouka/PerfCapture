@@ -222,68 +222,167 @@ return [pscustomobject]@{
 '@
 
 $script:UpdateDownloadScript = @'
-param($Url, $OutPath, $MaxBytes, $ExpectedSize, $AllowedHosts, $Token)
+param($Urls, $OutPath, $PartPath, $MaxBytes, $ExpectedSize, $AllowedHosts, $Token, $ProbeMs, $StallSec)
+# 2.1.8 下载引擎：探测排序 → 多源接力（.part 续传）→ 整体 SHA-256。
+# 与扩展供应层同一套策略：先并发试首字节，慢源/死源不再各消耗一次完整超时；
+# 换源不丢进度（.part 保留，新源用 Range 续），最终仍以清单里的整包哈希为准。
 function Test-Host($uri) {
     try { return ($AllowedHosts -contains $uri.Host.ToLowerInvariant()) } catch { return $false }
 }
-function Fail([string]$code) {
-    if ($OutPath -and (Test-Path -LiteralPath $OutPath)) { Remove-Item -LiteralPath $OutPath -Force -ErrorAction SilentlyContinue }
-    return [pscustomobject]@{ ok = $false; err = $code; sha256 = ''; size = 0 }
-}
-$http = New-Object System.Net.Http.HttpClient
-$http.Timeout = [TimeSpan]::FromSeconds(180)
-try { $http.DefaultRequestHeaders.UserAgent.ParseAdd('PerfCapture/1.4') } catch {}
-$sha = $null
-try {
-    $resp = $http.GetAsync($Url, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
-    if (-not $resp.IsSuccessStatusCode) { return (Fail ('HTTP ' + [int]$resp.StatusCode)) }
-    if (-not (Test-Host $resp.RequestMessage.RequestUri)) { return (Fail 'REDIRECT') }
-    $declared = $resp.Content.Headers.ContentLength
-    if ($ExpectedSize -gt 0 -and $declared -and $declared -ne $ExpectedSize) { return (Fail ('SIZE ' + $declared)) }
-    if ($MaxBytes -gt 0 -and $declared -and $declared -gt $MaxBytes) { return (Fail 'TOO_LARGE') }
-
-    $in = $resp.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
-    $dir = Split-Path -Parent $OutPath
-    if ($dir -and -not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
-    $out = [IO.File]::Open($OutPath, [IO.FileMode]::Create, [IO.FileAccess]::Write)
-    $total = [long]0
-    $sha = [System.Security.Cryptography.SHA256]::Create()
-    $buf = New-Object byte[] 65536
-    $async = $true
-    $canCancel = $false
-    try { $canCancel = $Token.CanBeCanceled } catch { }
-    try {
-        while ($true) {
-            if ($canCancel -and $Token.IsCancellationRequested) { throw 'CANCELLED' }
-            $n = 0
-            if ($async -and $canCancel) {
-                try { $n = $in.ReadAsync($buf, 0, $buf.Length, $Token).GetAwaiter().GetResult() }
-                catch [System.NotSupportedException] { $async = $false; $n = $in.Read($buf, 0, $buf.Length) }
-            } else {
-                $n = $in.Read($buf, 0, $buf.Length)
-            }
-            if ($n -le 0) { break }
-            $total += $n
-            if ($MaxBytes -gt 0 -and $total -gt $MaxBytes) { throw 'TOO_LARGE' }
-            [void]$sha.TransformBlock($buf, 0, $n, $buf, 0)
-            $out.Write($buf, 0, $n)
-        }
-        [void]$sha.TransformFinalBlock($buf, 0, 0)
-        $hex = (($sha.Hash) | ForEach-Object { $_.ToString('x2') }) -join ''
-    } finally {
-        try { $out.Close() } catch { }
-        try { $in.Dispose() } catch { }
-        if ($sha) { try { $sha.Dispose() } catch { } }
+$log = New-Object System.Collections.Generic.List[string]
+function Fail([string]$code, [bool]$keepPart = $false) {
+    # 全源失败时保留 .part：下次重试/重启后能接着下（大小与整包哈希仍会兜底校验）。
+    if (-not $keepPart) {
+        try { if ($PartPath -and (Test-Path -LiteralPath $PartPath)) { Remove-Item -LiteralPath $PartPath -Force -ErrorAction SilentlyContinue } } catch { }
     }
-    if ($ExpectedSize -gt 0 -and $total -ne $ExpectedSize) { return (Fail ('SIZE ' + $total)) }
-    return [pscustomobject]@{ ok = $true; err = ''; sha256 = $hex; size = $total }
-} catch {
-    $msg = (($_.Exception.Message -split "`r?`n")[0])
-    if ($_.Exception -is [System.OperationCanceledException]) { $msg = 'CANCELLED' }
-    if (Test-Path -LiteralPath $OutPath) { Remove-Item -LiteralPath $OutPath -Force -ErrorAction SilentlyContinue }
-    if ($sha) { try { $sha.Dispose() } catch { } }
-    return [pscustomobject]@{ ok = $false; err = $msg; sha256 = ''; size = 0 }
+    return [pscustomobject]@{ ok = $false; err = $code; sha256 = ''; size = 0; url = ''; log = @($log) }
 }
+$ordered = @($Urls | Where-Object { $_ })
+
+# ---------- 1. 探测：并发 Range 0-0，按首字节耗时排队 ----------
+if ($ordered.Count -gt 1) {
+    $http = $null
+    $cts = $null
+    try {
+        try { Add-Type -AssemblyName System.Net.Http -ErrorAction Stop } catch { throw 'nohttp' }
+        $http = New-Object System.Net.Http.HttpClient
+        $http.Timeout = [TimeSpan]::FromMilliseconds([int]$ProbeMs + 2000)
+        try { $http.DefaultRequestHeaders.UserAgent.ParseAdd('PerfCapture/2.1') } catch { }
+        $cts = New-Object System.Threading.CancellationTokenSource
+        $cts.CancelAfter([int]$ProbeMs)
+        $jobs = @()
+        foreach ($u in $ordered) {
+            $w = [Diagnostics.Stopwatch]::StartNew()
+            $t = $null
+            try {
+                $rq = New-Object System.Net.Http.HttpRequestMessage([System.Net.Http.HttpMethod]::Get, [string]$u)
+                $rq.Headers.Range = New-Object System.Net.Http.Headers.RangeHeaderValue(0, 0)
+                $t = $http.SendAsync($rq, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead, $cts.Token)
+            } catch { }
+            $jobs += [pscustomobject]@{ Url = [string]$u; Task = $t; Sw = $w; Ms = -1; Ok = $false }
+        }
+        $tasks = @($jobs | Where-Object { $_.Task } | ForEach-Object { $_.Task })
+        if ($tasks.Count) { try { [void][System.Threading.Tasks.Task]::WaitAny([System.Threading.Tasks.Task[]]$tasks, [int]$ProbeMs) } catch { } }
+        foreach ($j in $jobs) {
+            if ($j.Task) {
+                try {
+                    if ($j.Task.IsCompleted) {
+                        $rs = $j.Task.GetAwaiter().GetResult()
+                        if ($rs -and $rs.IsSuccessStatusCode) { $j.Ok = $true; $j.Ms = [int]$j.Sw.ElapsedMilliseconds }
+                        if ($rs) { $rs.Dispose() }
+                    }
+                } catch { }
+            }
+            try { $j.Sw.Stop() } catch { }
+            $log.Add('probe ' + $j.Url + ' -> ' + $(if ($j.Ok) { [string]$j.Ms + 'ms' } else { 'unreachable' }))
+        }
+        $good = @($jobs | Where-Object { $_.Ok } | Sort-Object -Property Ms | ForEach-Object { $_.Url })
+        $bad = @($jobs | Where-Object { -not $_.Ok } | ForEach-Object { $_.Url })
+        if ($good.Count) { $ordered = @($good + $bad) }
+    } catch {
+    } finally {
+        try { if ($cts) { $cts.Dispose() } } catch { }
+        try { if ($http) { $http.Dispose() } } catch { }
+    }
+}
+
+# ---------- 2. 多源接力：续传写入 .part，失败换源继续 ----------
+$ok = $false
+$usedUrl = ''
+foreach ($u in $ordered) {
+    if ($Token -and $Token.IsCancellationRequested) { return (Fail 'CANCELLED') }
+    $existing = 0
+    try { if (Test-Path -LiteralPath $PartPath) { $existing = [int64](Get-Item -LiteralPath $PartPath).Length } } catch { $existing = 0 }
+    if ($ExpectedSize -gt 0 -and $existing -ge $ExpectedSize) { break }
+    $req = [System.Net.HttpWebRequest]::Create([string]$u)
+    $req.Method = 'GET'
+    $req.AllowAutoRedirect = $true
+    $req.UserAgent = 'PerfCapture/2.1'
+    $req.Timeout = 20000
+    $req.ReadWriteTimeout = [int]([math]::Max(5, [int]$StallSec) * 1000)
+    if ($existing -gt 0) { [void]$req.AddRange([int64]$existing) }
+    $resp = $null
+    try { $resp = $req.GetResponse() }
+    catch [System.Net.WebException] {
+        $st = 0
+        try { if ($_.Exception.Response) { $st = [int]$_.Exception.Response.StatusCode } } catch { }
+        if ($st -eq 416) { try { Remove-Item -LiteralPath $PartPath -Force -ErrorAction SilentlyContinue } catch { } }
+        $log.Add($u + ' -> ' + $st + ' / connect-or-stall')
+        continue
+    } catch {
+        $log.Add($u + ' -> ' + (($_.Exception.Message -split "`r?`n")[0]))
+        continue
+    }
+    $fs = $null
+    $stream = $null
+    try {
+        if (-not (Test-Host $resp.ResponseUri)) { $log.Add($u + ' -> redirect ' + $resp.ResponseUri.Host); continue }
+        $code = [int]$resp.StatusCode
+        $append = ($code -eq 206 -and $existing -gt 0)
+        if (-not $append) {
+            $existing = 0
+            try { if (Test-Path -LiteralPath $PartPath) { Remove-Item -LiteralPath $PartPath -Force -ErrorAction SilentlyContinue } } catch { }
+        }
+        $len = [int64]$resp.ContentLength
+        $total = if ($len -ge 0) { $len + $existing } else { [int64]0 }
+        if ($ExpectedSize -gt 0 -and $total -gt 0 -and $total -ne $ExpectedSize) {
+            $log.Add($u + ' -> size ' + $total + ' != ' + $ExpectedSize); continue
+        }
+        if ($MaxBytes -gt 0 -and $total -gt $MaxBytes) { return (Fail 'TOO_LARGE') }
+        $mode = if ($append) { [IO.FileMode]::Append } else { [IO.FileMode]::Create }
+        $fs = [IO.File]::Open($PartPath, $mode, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        $stream = $resp.GetResponseStream()
+        $buf = New-Object byte[] 65536
+        $recv = $existing
+        while ($true) {
+            if ($Token -and $Token.IsCancellationRequested) { throw 'CANCELLED' }
+            $n = $stream.Read($buf, 0, $buf.Length)
+            if ($n -le 0) { break }
+            $fs.Write($buf, 0, $n)
+            $recv += $n
+            if ($MaxBytes -gt 0 -and $recv -gt $MaxBytes) { throw 'TOO_LARGE' }
+        }
+        $fs.Flush()
+        $fs.Dispose(); $fs = $null
+        $stream.Dispose(); $stream = $null
+        $resp.Close()
+        $got = [int64]0
+        try { $got = (Get-Item -LiteralPath $PartPath).Length } catch { $got = $recv }
+        if ($ExpectedSize -gt 0 -and $got -ne $ExpectedSize) {
+            $log.Add($u + ' -> incomplete ' + $got + '/' + $ExpectedSize)
+            continue
+        }
+        $ok = $true
+        $usedUrl = [string]$u
+        break
+    } catch {
+        $msg = [string]$_.Exception.Message
+        if ($msg -eq 'TOO_LARGE' -or $msg -eq 'CANCELLED') {
+            try { if ($fs) { $fs.Dispose() } } catch { }
+            try { if ($stream) { $stream.Dispose() } } catch { }
+            return (Fail $msg)
+        }
+        $log.Add($u + ' -> ' + (($msg -split "`r?`n")[0]))
+    } finally {
+        try { if ($fs) { $fs.Dispose() } } catch { }
+        try { if ($stream) { $stream.Dispose() } } catch { }
+        try { if ($resp) { $resp.Close() } } catch { }
+    }
+}
+if (-not $ok) { return (Fail 'NO_SOURCE' $true) }
+
+# ---------- 3. 收尾：.part 转正 + 整体哈希 ----------
+try {
+    if (Test-Path -LiteralPath $OutPath) { Remove-Item -LiteralPath $OutPath -Force -ErrorAction SilentlyContinue }
+    Move-Item -LiteralPath $PartPath -Destination $OutPath -Force
+} catch {
+    return (Fail ('MOVE ' + (($_.Exception.Message -split "`r?`n")[0])))
+}
+$size = 0
+try { $size = (Get-Item -LiteralPath $OutPath).Length } catch { }
+$hex = ''
+try { $hex = (Get-FileHash -LiteralPath $OutPath -Algorithm SHA256).Hash.ToLowerInvariant() } catch { }
+return [pscustomobject]@{ ok = $true; err = ''; sha256 = $hex; size = $size; url = $usedUrl; log = @($log) }
 '@
 
 # ---------- 检查更新（异步） ----------
@@ -434,8 +533,20 @@ function Start-UpdateDownload {
     $dir = Join-Path $env:TEMP 'PerfCapture\updates'
     if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     $out = Join-Path $dir $safe
+    $part = $out + '.part'
+    # .part 续传：上一轮下到一半的文件保留，只要没超过期望体积就接着用；
+    # 最终仍有整包 SHA-256 兜底，续出来的字节不对会被删掉重来。
+    try {
+        if (Test-Path -LiteralPath $part) {
+            $plen = (Get-Item -LiteralPath $part).Length
+            if ($Size -gt 0 -and $plen -ge $Size) { Remove-Item -LiteralPath $part -Force }
+        }
+    } catch { }
     if (Test-Path $out) { Remove-Item $out -Force -ErrorAction SilentlyContinue }
-    $allowed = @($Urls | Where-Object { Test-UpdateHost $_ })
+    $allowed = @()
+    foreach ($u in @($Urls)) {
+        if ($u -and (Test-UpdateHost $u) -and ($allowed -notcontains $u)) { $allowed += [string]$u }
+    }
     if (-not $allowed.Count) {
         $script:UpdateState = 'error'
         Send-UpdateState @{ state = 'error'; detail = 'url'; hint = 'update.hint.offline' }
@@ -445,22 +556,26 @@ function Start-UpdateDownload {
     $cts = New-Object System.Threading.CancellationTokenSource
     $ps = [PowerShell]::Create()
     [void]$ps.AddScript($script:UpdateDownloadScript)
-    [void]$ps.AddParameter('Url', $allowed[0])
+    [void]$ps.AddParameter('Urls', $allowed)
     [void]$ps.AddParameter('OutPath', $out)
+    [void]$ps.AddParameter('PartPath', $part)
     [void]$ps.AddParameter('MaxBytes', $script:UpdateMaxAssetBytes)
     [void]$ps.AddParameter('ExpectedSize', $Size)
     [void]$ps.AddParameter('AllowedHosts', $script:UpdateAllowedHosts)
     [void]$ps.AddParameter('Token', $cts.Token)
+    # 探测 6 秒定序、单次读 12 秒无数据即换源（更新包 12 MB，12 秒没有任何字节就说明这条连接废了）；
+    # 45 秒宿主看门狗 ≈ 6s 探测 + 3 个源各 12s，不会在正常换源途中误杀。
+    [void]$ps.AddParameter('ProbeMs', 6000)
+    [void]$ps.AddParameter('StallSec', 12)
     $handle = $ps.BeginInvoke()
     $script:UpdateState = 'downloading'
     $script:UpdateCtx = @{
-        Kind = 'download'; PS = $ps; Handle = $handle; Out = $out
-        Sha = $Sha256; Size = $Size; Url = $allowed[0]
-        Rest = @($allowed | Select-Object -Skip 1)
-        Cts = $cts; LastBytes = 0; LastAt = (Get-Date)
+        Kind = 'download'; PS = $ps; Handle = $handle; Out = $out; Part = $part
+        Sha = $Sha256; Size = $Size; Url = $allowed[0]; Urls = $allowed
+        Cts = $cts; LastBytes = 0; LastAt = (Get-Date); Samples = $null
     }
     Send-UpdateState @{ state = 'downloading'; progress = 0; name = $safe; source = $allowed[0] }
-    Write-AppLog ("开始下载更新: $($allowed[0])")
+    Write-AppLog ("开始下载更新（$($allowed.Count) 个源）: " + ($allowed -join ' | '))
 
     Stop-UpdateTimer
     $timer = New-Object System.Windows.Forms.Timer
@@ -487,20 +602,18 @@ function Complete-UpdateDownload {
     if ($err) {
         if ($err -eq 'CANCELLED') {
             if (Test-Path -LiteralPath $Ctx.Out) { Remove-Item -LiteralPath $Ctx.Out -Force -ErrorAction SilentlyContinue }
+            if ($Ctx.Part -and (Test-Path -LiteralPath $Ctx.Part)) { Remove-Item -LiteralPath $Ctx.Part -Force -ErrorAction SilentlyContinue }
             Write-AppLog '用户取消了下载'
             $script:UpdateState = 'idle'
             Send-UpdateState @{ state = 'idle'; detail = 'cancelled' }
             return
         }
-        # 当前源失败：还有备用源就换下一个，否则报错
-        if ($Ctx.Rest -and $Ctx.Rest.Count) {
-            Write-AppLog ("下载失败（$err），换备用源: $($Ctx.Rest[0])") 'WARN'
-            Start-UpdateDownload -Name (Split-Path $Ctx.Out -Leaf) -Urls $Ctx.Rest -Sha256 $Ctx.Sha -Size $Ctx.Size
-            return
-        }
-        Write-AppLog ('下载失败: ' + $err) 'WARN'
+        # 换源在 worker 内部完成（同一个 .part 接力），这里只负责如实汇报每个源的结果。
+        $trail = ''
+        if ($res -and $res.log) { $trail = '；' + (@($res.log) -join '；') }
+        Write-AppLog ('下载失败: ' + $err + $trail) 'WARN'
         $script:UpdateState = 'error'
-        Send-UpdateState @{ state = 'error'; detail = $err; hint = 'update.hint.download' }
+        Send-UpdateState @{ state = 'error'; detail = $err; hint = 'update.hint.download'; sources = $trail.TrimStart('；') }
         return
     }
 
@@ -522,12 +635,8 @@ function Complete-UpdateDownload {
     }
     if (-not ($okSize -and $okHash)) {
         Remove-Item -LiteralPath $Ctx.Out -Force -ErrorAction SilentlyContinue
-        # 镜像可能缓存了旧文件：只要还有备用源就换一个再试，别让用户白等
-        if ($Ctx.Rest -and $Ctx.Rest.Count) {
-            Write-AppLog '本地校验不通过，换备用源重试' 'WARN'
-            Start-UpdateDownload -Name (Split-Path $Ctx.Out -Leaf) -Urls $Ctx.Rest -Sha256 $Ctx.Sha -Size $Ctx.Size
-            return
-        }
+        # 校验不过说明字节不可信：连 .part 一起删，下次从头下（不能拿半截包续一个可能已换版的镜像）。
+        if ($Ctx.Part -and (Test-Path -LiteralPath $Ctx.Part)) { Remove-Item -LiteralPath $Ctx.Part -Force -ErrorAction SilentlyContinue }
         $script:UpdateState = 'error'
         Send-UpdateState @{ state = 'error'; detail = 'integrity'; hint = 'update.hint.tampered' }
         return
@@ -535,7 +644,7 @@ function Complete-UpdateDownload {
 
     $script:UpdateState = 'ready'
     Send-UpdateState @{ state = 'ready'; name = (Split-Path $Ctx.Out -Leaf); path = $Ctx.Out; sha256 = $Ctx.Sha }
-    Write-AppLog ("更新包已下载并通过本地校验: $($Ctx.Out)")
+    Write-AppLog ("更新包已下载并通过本地校验: $($Ctx.Out)（源 " + [string]$res.url + "）")
 }
 
 # ---------- 计时器总入口 ----------
@@ -561,26 +670,42 @@ function Invoke-UpdateTick {
 
     if ($ctx.Kind -eq 'download') {
         $len = 0
-        try { if (Test-Path -LiteralPath $ctx.Out) { $len = (Get-Item -LiteralPath $ctx.Out).Length } } catch { }
+        # 进度读 .part：下载期间数据只写 .part，完成后 worker 才把它转正。
+        try {
+            if ($ctx.Part -and (Test-Path -LiteralPath $ctx.Part)) { $len = (Get-Item -LiteralPath $ctx.Part).Length }
+            elseif (Test-Path -LiteralPath $ctx.Out) { $len = (Get-Item -LiteralPath $ctx.Out).Length }
+        } catch { }
         if ($len -ne $ctx.LastBytes) { $ctx.LastBytes = $len; $ctx.LastAt = Get-Date }
         $pct = 0
         if ($ctx.Size -gt 0) { $pct = [int][Math]::Min(99, [Math]::Floor(100.0 * $len / $ctx.Size)) }
-        Send-UpdateState @{ state = 'downloading'; progress = $pct; received = $len; size = $ctx.Size; name = (Split-Path $ctx.Out -Leaf) }
+        # 速度/剩余时间：用最近若干次采样的增量算，单次抖动不会让数字乱跳。
+        if (-not $ctx.Samples) { $ctx.Samples = New-Object System.Collections.Generic.Queue[object] }
+        $ctx.Samples.Enqueue(@((Get-Date), $len))
+        while ($ctx.Samples.Count -gt 9) { [void]$ctx.Samples.Dequeue() }
+        $bps = 0
+        $eta = -1
+        if ($ctx.Samples.Count -gt 1) {
+            $first = @($ctx.Samples.Peek())
+            $dt = ((Get-Date) - $first[0]).TotalSeconds
+            if ($dt -gt 0.8) {
+                $delta = $len - [long]$first[1]
+                if ($delta -gt 0) { $bps = [int64]($delta / $dt) }
+            }
+        }
+        if ($bps -gt 0 -and $ctx.Size -gt $len) { $eta = [int][Math]::Ceiling(($ctx.Size - $len) / [double]$bps) }
+        Send-UpdateState @{ state = 'downloading'; progress = $pct; received = $len; size = $ctx.Size; bps = $bps; eta = $eta; name = (Split-Path $ctx.Out -Leaf) }
         if ($ctx.Handle.IsCompleted) { Complete-UpdateDownload -Ctx $ctx; return }
-        # 停滞看门狗：60 秒没有新增字节就放弃这个源（避免卡死在半开的连接上）
-        if (((Get-Date) - $ctx.LastAt).TotalSeconds -gt 60) {
-            Write-AppLog '下载停滞超过 60 秒，放弃当前源' 'WARN'
+        # 停滞看门狗：45 秒没有任何新增（探测 6s + 单次读 20s 都在其内）就整体放弃。
+        # 换源由 worker 内部用同一个 .part 接力完成，这里只在「连 worker 都卡住」时兜底。
+        if (((Get-Date) - $ctx.LastAt).TotalSeconds -gt 45) {
+            Write-AppLog '下载停滞超过 45 秒，放弃本次下载' 'WARN'
             try { $ctx.Cts.Cancel() } catch { }
             try { $ctx.PS.Stop() } catch { }
             try { $ctx.PS.Dispose() } catch { }
             $script:UpdateCtx = $null
             Stop-UpdateTimer
-            if ($ctx.Rest -and $ctx.Rest.Count) {
-                Start-UpdateDownload -Name (Split-Path $ctx.Out -Leaf) -Urls $ctx.Rest -Sha256 $ctx.Sha -Size $ctx.Size
-            } else {
-                $script:UpdateState = 'error'
-                Send-UpdateState @{ state = 'error'; detail = 'stalled'; hint = 'update.hint.download' }
-            }
+            $script:UpdateState = 'error'
+            Send-UpdateState @{ state = 'error'; detail = 'stalled'; hint = 'update.hint.download' }
         }
         return
     }
@@ -703,10 +828,10 @@ function Invoke-UpdateCommand {
                 try { if ($script:UpdateCtx.Cts) { $script:UpdateCtx.Cts.Cancel() } } catch { }
                 try { $script:UpdateCtx.PS.Stop() } catch { }
                 try { $script:UpdateCtx.PS.Dispose() } catch { }
-                # 取消后不留半截文件，免得用户误点「运行安装包」
+                # 取消后不留半截文件（含 .part），免得下次续到一个用户以为已取消的包上
                 try {
-                    if ($script:UpdateCtx.Out -and (Test-Path -LiteralPath $script:UpdateCtx.Out)) {
-                        Remove-Item -LiteralPath $script:UpdateCtx.Out -Force -ErrorAction SilentlyContinue
+                    foreach ($p in @($script:UpdateCtx.Out, $script:UpdateCtx.Part)) {
+                        if ($p -and (Test-Path -LiteralPath $p)) { Remove-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue }
                     }
                 } catch { }
                 $script:UpdateCtx = $null

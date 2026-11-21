@@ -491,6 +491,7 @@
   let cfg = {
     anchor: 'tr', px: 100, py: 0, x: -1, y: -1,
     opacity: 0, fontSize: 'normal', fontColor: 'white', layout: 'linear',
+    locked: false,
     hotkey: { ctrl: true, alt: true, shift: false, key: 'M' },
     items: ['fps', 'gpuutil', 'gputemp', 'gpupower', 'ram'],
     visible: false
@@ -589,6 +590,7 @@
     const hc = byId('ovHotCtrl'); if (hc) hc.checked = !!cfg.hotkey.ctrl;
     const ha = byId('ovHotAlt'); if (ha) ha.checked = !!cfg.hotkey.alt;
     const hs = byId('ovHotShift'); if (hs) hs.checked = !!cfg.hotkey.shift;
+    const lk = byId('ovLockDrag'); if (lk) lk.checked = !!cfg.locked;
     if (keySel) keySel.value = cfg.hotkey.key || 'M';
     const btn = byId('btnOverlay');
     if (btn) btn.textContent = cfg.visible ? tx('realtime.overlayOff', '关闭浮窗') : tx('realtime.overlayOn', '开启浮窗');
@@ -666,6 +668,12 @@
   });
   if (keySel) keySel.addEventListener('change', () => { cfg.hotkey.key = keySel.value || 'M'; push(); });
 
+  /* 拖动锁：勾上就立刻生效（0 延迟），不必等防抖——用户勾完马上会去试能不能拖 */
+  const lockDragEl = byId('ovLockDrag');
+  if (lockDragEl) {
+    lockDragEl.addEventListener('change', () => { cfg.locked = !!lockDragEl.checked; push(0); });
+  }
+
   /* 宿主回报后回填（拖动改变 x/y 也会走到这里） */
   window.PerfOverlayUi = {
     sync(o) {
@@ -678,6 +686,7 @@
         fontSize: o.fontSize || 'normal',
         fontColor: o.fontColor || 'white',
         layout: o.layout || 'linear',
+        locked: !!o.locked,
         hotkey: o.hotkey || { ctrl: true, alt: true, shift: false, key: 'M' },
         items: (o.items && o.items.length) ? o.items.filter((k) => lockedKeys.indexOf(k) < 0) : ['fps', 'gpuutil', 'gputemp', 'gpupower', 'ram'],
         visible: !!o.visible

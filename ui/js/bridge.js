@@ -45,6 +45,8 @@ function handleMessage(msg) {
       if (s.language) { state.language = s.language; setLanguage(s.language); }
       if (window.PerfUpdate) window.PerfUpdate.init(s.updateCheck);
       if (msg.procs) setProcs(msg.procs);
+      /* 扩展中心状态随 init 下发；宿主侧是唯一事实来源，前端不再只靠本地镜像 */
+      if (msg.extensions && window.PerfExtensionsUI) window.PerfExtensionsUI.apply(msg.extensions, msg.fpsSource);
       applyTranslations();
       break;
     }
@@ -70,6 +72,11 @@ function handleMessage(msg) {
     case 'metricSample': if (window.PerfRealtime) window.PerfRealtime.handle(msg); break;
     case 'metricsCaps': if (window.PerfRealtime) window.PerfRealtime.handle(msg); break;
     case 'overlayState': if (window.PerfRealtime) window.PerfRealtime.handle(msg); break;
+    case 'extensions': if (window.PerfExtensionsUI) window.PerfExtensionsUI.apply(msg.extensions, msg.fpsSource); break;
+    case 'extensionState': if (window.PerfExtensionsUI) window.PerfExtensionsUI.state(msg); break;
+    case 'extensionError': if (window.PerfExtensionsUI) window.PerfExtensionsUI.error(msg); break;
+    case 'extensionProgress': if (window.PerfExtensionsUI) window.PerfExtensionsUI.progress(msg); break;
+    case 'fpsSource': if (window.PerfExtensionsUI) window.PerfExtensionsUI.apply(null, msg.source); break;
     case 'error': addLog('[错误] ' + msg.text, 'ln-warn'); setStatus(msg.text || '出错'); break;
     default: break;
   }

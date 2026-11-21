@@ -14,6 +14,9 @@ function New-DefaultConfig {
         updateCheck = @{ auto = $true; lastCheckAt = ''; skippedVersion = '' }
         # 浮窗：items 是 16 项逐项勾选（老配置的 metrics 四族会一次性迁移过来，见 55-Overlay.ps1）
         overlay     = @{ visible = $false; x = -1; y = -1; opacity = 0; collapsed = $false; anchor = 'tr'; px = 100; py = 0; fontSize = 'normal'; fontColor = 'white'; layout = 'linear'; items = @('fps', 'gpuutil', 'gputemp', 'gpupower', 'ram'); hotkey = @{ ctrl = $true; alt = $true; shift = $false; key = 'M' } }
+        # 扩展中心：id -> 状态对象（status/reason/installedAt/updatedAt）。老配置没有就空表。
+        # 键是扩展 id，不是固定字段——载入侧必须整块遍历属性，别只挑几个键（overlay 整块丢失的教训）。
+        extensions  = @{}
     }
 }
 
@@ -96,6 +99,21 @@ if (Test-Path $script:CfgPath) {
             # 否则用户以前选的四族会被新版本的默认 6 项顶掉。
             if ($null -ne $j.overlay.metrics -and $null -eq $j.overlay.items) {
                 if ($script:Cfg.overlay -is [hashtable]) { [void]$script:Cfg.overlay.Remove('items') }
+            }
+        }
+        # 扩展状态：整块遍历属性（每个 id 一项），不做固定键挑选——否则新增扩展装过一次后重启就丢。
+        # ConvertFrom-Json 对空对象返回 PSCustomObject，要把每个属性拷进 hashtable 供 80-Extensions 用。
+        if ($null -ne $j.extensions) {
+            foreach ($ek in $j.extensions.PSObject.Properties) {
+                $v = $ek.Value
+                # 状态对象可能带嵌套属性，转成 hashtable 保留（status / reason / installedAt / updatedAt）
+                if ($v -is [pscustomobject]) {
+                    $h = @{}
+                    foreach ($vp in $v.PSObject.Properties) { $h[$vp.Name] = $vp.Value }
+                    $script:Cfg.extensions[$ek.Name] = $h
+                } else {
+                    $script:Cfg.extensions[$ek.Name] = $v
+                }
             }
         }
         Write-AppLog ('配置已载入: ' + $script:CfgPath)

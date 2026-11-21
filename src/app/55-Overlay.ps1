@@ -18,6 +18,9 @@ $script:OverlayDragOffset = $null
 $script:OverlayHotkeyWasDown = $false
 $script:OverlayControls = $null
 $script:OverlayStyle = $null
+# 拖动锁：开启后鼠标按下不再进入拖动分支（点字、划选都不会挪动窗口）。
+# 位置仍可通过设置页的预设 / 滑杆 / 像素坐标改，锁的只是「误拖」这条路径。
+$script:OverlayLocked = $false
 
 # ── 浮窗可显示的 16 项（键名与 35-Metrics 采样字段一一对应）──
 # group：显示分组（FPS / GPU / CPU / 延迟 / RAM）
@@ -71,7 +74,7 @@ function Get-OverlayCfg {
     $def = [ordered]@{
         visible = $false; x = -1; y = -1; opacity = 0; collapsed = $false
         anchor = 'tr'; px = 100; py = 0
-        fontSize = 'normal'; fontColor = 'white'; layout = 'linear'
+        fontSize = 'normal'; fontColor = 'white'; layout = 'linear'; locked = $false
     }
     foreach ($k in $def.Keys) { if ($null -eq $o.$k) { $o.$k = $def[$k] } }
     if (-not $o.hotkey) { $o.hotkey = @{ ctrl = $true; alt = $true; shift = $false; key = 'M' } }
@@ -105,6 +108,9 @@ function Get-OverlayCfg {
     if ($o.fontSize -notin @('small', 'normal', 'large')) { $o.fontSize = 'normal' }
     if ($o.fontColor -notin @('white', 'green', 'red', 'blue')) { $o.fontColor = 'white' }
     if ($o.layout -notin @('linear', 'stacked')) { $o.layout = 'linear' }
+    # 拖动锁：JSON 里可能是 true/false/"true"/1，统一收成布尔；缺省视为不锁。
+    $lk = $o.locked
+    $o.locked = if ($lk -is [bool]) { $lk } elseif ($null -eq $lk) { $false } else { ([string]$lk) -match '^(?i)(true|1|yes|on)$' }
     return $o
 }
 
@@ -179,6 +185,7 @@ function Build-OverlayForm {
     $style = Get-OverlayStyle $cfg
     $script:OverlayStyle = $style
     $script:OverlayCollapsed = [bool]$cfg.collapsed
+    $script:OverlayLocked = [bool]$cfg.locked
 
     $f = New-Object System.Windows.Forms.Form
     $f.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
@@ -226,8 +233,11 @@ function Build-OverlayForm {
     }
 
     # 拖动 / 双击收起（挂到窗体与每个标签上，否则点在字上拖不动）
+    # 锁定后 MouseDown 直接返回：既不置 dragging，也不记录偏移，鼠标怎么划窗口都不动。
+    # 双击收起仍然可用——那是显式操作，不会因为鼠标划过就误触。
     $dragStart = {
         param($sender, $e)
+        if ($script:OverlayLocked) { return }
         if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
             $script:OverlayDragging = $true
             $script:OverlayDragOffset = $e.Location
@@ -239,6 +249,7 @@ function Build-OverlayForm {
     }
     $dragMove = {
         param($sender, $e)
+        if ($script:OverlayLocked) { return }
         if ($script:OverlayDragging -and $script:OverlayForm) {
             $pt = [System.Windows.Forms.Cursor]::Position
             $script:OverlayForm.Location = New-Object System.Drawing.Point(
@@ -247,6 +258,7 @@ function Build-OverlayForm {
     }
     $dragEnd = {
         param($sender, $e)
+        if ($script:OverlayLocked) { $script:OverlayDragging = $false; return }
         if ($script:OverlayDragging) {
             $script:OverlayDragging = $false
             Save-OverlayPosition
@@ -532,6 +544,7 @@ function Send-OverlayState {
             fontSize = [string]$cfg.fontSize
             fontColor = [string]$cfg.fontColor
             layout = [string]$cfg.layout
+            locked = [bool]$cfg.locked
             items = @($cfg.items)
             itemKeys = @($script:OverlayItemKeys)
             itemLocked = @($script:OverlayLockedKeys)
@@ -565,6 +578,12 @@ function Apply-OverlayConfig {
     if ($In.fontSize -in @('small', 'normal', 'large')) { $cfg.fontSize = [string]$In.fontSize }
     if ($In.fontColor -in @('white', 'green', 'red', 'blue')) { $cfg.fontColor = [string]$In.fontColor }
     if ($In.layout -in @('linear', 'stacked')) { $cfg.layout = [string]$In.layout }
+    # 拖动锁：只接受明确的布尔语义，非法值保持原样（不多做猜测）；改了要重建窗体让处理器读新值。
+    if ($null -ne $In.locked) {
+        $raw = $In.locked
+        if ($raw -is [bool]) { $cfg.locked = $raw }
+        elseif (([string]$raw) -match '^(?i)(true|1|yes|on|false|0|no|off)$') { $cfg.locked = ([string]$raw) -match '^(?i)(true|1|yes|on)$' }
+    }
     if ($null -ne $In.items) {
         $ik = @(@($In.items) | ForEach-Object { ([string]$_).ToLower() } | Where-Object { $script:OverlaySelectableKeys -contains $_ } | Select-Object -Unique)
         # 允许只留一项，但**不允许全空**：全空时浮窗会变成一块空白，比不显示更糟

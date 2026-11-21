@@ -19,6 +19,9 @@ foreach ($f in @(
     '55-Overlay.ps1',
     '60-Capture.ps1',
     '70-Updates.ps1',
+    'rtss-shm.ps1',
+    '80-Extensions.ps1',
+    '85-ExtensionProvision.ps1',
     '90-Main.ps1'
 )) {
     $full = Join-Path $appDir $f

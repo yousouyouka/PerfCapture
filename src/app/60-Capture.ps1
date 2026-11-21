@@ -4,7 +4,10 @@
 # 白名单：只接受约定的命令；未知命令记日志并回传错误，绝不抛异常打断消息泵
 $script:KnownCommands = @('ready', 'refreshProcs', 'saveSettings', 'openReports', 'export', 'exportHtml', 'exportPng', 'exportDiag', 'start', 'stop',
     'checkUpdate', 'downloadUpdate', 'cancelUpdate', 'openUpdatePage', 'runUpdateInstaller', 'applyUpdate', 'openUpdateFolder', 'skipUpdateVersion', 'setUpdateAuto',
-    'metricsStart', 'metricsStop', 'metricsTarget', 'overlayToggle', 'overlayShow', 'overlayHide', 'overlayConfig')
+    'metricsStart', 'metricsStop', 'metricsTarget', 'overlayToggle', 'overlayShow', 'overlayHide', 'overlayConfig',
+    'listExtensions', 'installExtension', 'enableExtension', 'disableExtension', 'uninstallExtension', 'refreshExtensionStatus', 'oneClickEnableExtension',
+    # E2（2.1.7）：供应中「取消」——只置取消信号，回滚由 worker 完成
+    'cancelExtensionProvision')
 
 function Handle-UiMessage($msg) {
     if ($null -eq $msg -or -not $msg.cmd) { return }
@@ -32,6 +35,12 @@ function Handle-UiMessage($msg) {
         catch { Write-AppLog ('浮窗命令执行失败: ' + $_.Exception.Message) 'WARN' }
         return
     }
+    # 扩展中心命令（宿主侧在 80-Extensions.ps1）
+    if ($msg.cmd -in @('listExtensions', 'installExtension', 'enableExtension', 'disableExtension', 'uninstallExtension', 'refreshExtensionStatus', 'oneClickEnableExtension', 'cancelExtensionProvision')) {
+        try { Invoke-ExtensionCommand $msg }
+        catch { Write-AppLog ('扩展命令执行失败: ' + $_.Exception.Message) 'WARN' }
+        return
+    }
     try {
         switch ($msg.cmd) {
             'ready' {
@@ -43,6 +52,9 @@ function Handle-UiMessage($msg) {
                 # 指标字典（含「暂不可用」与原因）随 init 下发：报告与详细说明都据此渲染
                 $mdoc = Get-MetricsDoc
                 if ($mdoc) { $init.metrics = $mdoc }
+                # 扩展中心状态随 init 下发（UI 首屏即拿到真实状态；无注册表时是空数组）
+                $init.extensions = @(Get-ExtensionStates)
+                $init.fpsSource = $script:ActiveFpsSource
                 Send-ToUi $init
                 # 上次退出时浮窗是开着的就恢复（位置/透明度都从配置读）
                 if (Get-Command Restore-OverlayIfNeeded -ErrorAction SilentlyContinue) { Restore-OverlayIfNeeded }
@@ -50,6 +62,9 @@ function Handle-UiMessage($msg) {
                 Send-Log '> PerfCapture 就绪 · PresentMon ETW 零注入' 'ln-accent'
                 Send-Log ('  引擎: ' + [IO.Path]::GetFileName($script:Engine))
                 Send-Log ('  采集项: ' + $(if ($opts) { @($opts.options).Count.ToString() + ' 项来自 capture-options.json' } else { '内置清单（未找到 capture-options.json）' }))
+                $extStates = @(Get-ExtensionStates)
+                $extReady = @($extStates | Where-Object { $_.available }).Count
+                Send-Log ('  扩展中心: ' + $extStates.Count + ' 项（可安装 ' + $extReady + ' / 规划中 ' + ($extStates.Count - $extReady) + '）')
                 # 字体缺失回落：assets 里没有方正兰亭圆时，CSS 字体栈会退到 Microsoft YaHei UI
                 $ttf = Join-Path $script:AssetDir '方正兰亭圆_GBK_中粗.ttf'
                 if (Test-Path $ttf) {

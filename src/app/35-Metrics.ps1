@@ -40,7 +40,10 @@ $script:MetricsFpsErrAt = $null
 
 # ---------- 一轮采样（runspace 里执行；单引号 here-string，禁止变量展开） ----------
 $script:MetricsSampleScript = @'
-param($SmiPath, $Queue, $IntervalMs, $Ctl, $PmExe, $FpsCsv, $FpsPid, $FpsFixed)
+param($SmiPath, $Queue, $IntervalMs, $Ctl, $PmExe, $FpsCsv, $FpsPid, $FpsFixed, $RtssReaderCode)
+
+# 批次 D：在本 runspace 内定义 RTSS 读取器（源码由宿主以参数传入，避免跨作用域依赖）。
+if ($RtssReaderCode) { . ([scriptblock]::Create($RtssReaderCode)) }
 
 # ---- 实时 FPS：PresentMon burst（短窗口采集 → 进程退出后解析）----
 # 为什么不能「边采边读」：PresentMon 用 --output_file 时是**独占**打开（FileShare.None），
@@ -563,6 +566,43 @@ $script:lastSessionClean = Get-Date
 while ($true) {
     if ($Ctl -and $Ctl.stop) { break }
     try {
+    # ---- 批次 D：数据源仲裁 ----
+    # 当前 FPS 源是外部共享内存扩展时，读 RTSS 出数，且绝不启动 PresentMon（ETW 会话全局互斥）。
+    # 读失败分两类：待机（暂无活跃游戏）只报 N/A；真故障才请求宿主回退，不把「没开游戏」当成坏扩展。
+    $fpsSrc = if ($Ctl) { [string]$Ctl.fpsSource } else { 'presentmon' }
+    if ($fpsSrc -and $fpsSrc -ne 'presentmon') {
+        if ($fps.proc) { Stop-FpsStream }   # 切源瞬间：停掉上一源残留的 PresentMon
+        $snap = $null
+        if (Get-Command Get-RtssFrameSnapshot -ErrorAction SilentlyContinue) {
+            $snap = Get-RtssFrameSnapshot
+        }
+        if ($snap -and $snap.ok) {
+            $fps.value = $snap.fps
+            $fps.low1 = $snap.fpsLow1
+            $fps.target = $snap.processName
+            $fps.err = ''
+            $fps.lastOkAt = Get-Date
+            # 高频数据源：帧时间窗口同步一份，供 1% Low / P95 口径与上报一致
+            $fps.ftWin.Clear()
+            [void]$fps.ftWin.Add([double]$snap.frameTimeUs)
+        } else {
+            $fps.value = $null
+            $fps.low1 = $null
+            $why = if ($snap -and $snap.reason) { $snap.reason } else { 'readerMissing' }
+            # 故障口径由宿主（80-Extensions 的 ShmBrokenReasons）经 Ctl 注入，避免两处各维护一份列表。
+            # 未注入时保守按故障处理：宁可回退，也不让界面停在假的「已接管」。
+            $brokenReasons = if ($Ctl -and $Ctl.brokenReasons) { @($Ctl.brokenReasons) } else { @($why) }
+            if ($brokenReasons -contains $why) {
+                $fps.err = ('扩展数据源 {0} 读取失败：{1}' -f $fpsSrc, $why)
+                if ($Ctl) { $Ctl.fpsRequestFallback = $true }
+            } else {
+                # 待机：RTSS 正常、只是当前没有游戏在采集。显示 N/A，不报错、不回退、不关扩展。
+                $fps.err = ''
+            }
+        }
+        # 数据源标记随 sample 上报，报告/界面据此标注来源，不假装亚秒级
+        $fps.sourceTag = $fpsSrc
+    } else {
     # 目标选择：优先跟随前台，但**只在当前目标没在出帧时才换**（alt-tab 到浏览器就换目标会让帧数永远攒不起来）
     $cand = Resolve-FpsTarget -Fallback $FpsPid
     if ($cand -ne $fps.cand) { $fps.cand = $cand; $fps.hits = 0 } else { $fps.hits++ }
@@ -595,6 +635,8 @@ while ($true) {
         # 每 tick 只读 CSV 里新增的那一段 —— 不再重起 presentmon
         Update-FpsStream
     }
+    $fps.sourceTag = 'presentmon'
+    }   # end else (PresentMon 基线)
     } catch {
         # 任何一次异常都不许弄死整个采样线程（1.5.10 就是这么停摆的：FPS 值冻在旧数上）
         $fps.err = 'tick: ' + $_.Exception.Message
@@ -611,6 +653,7 @@ $out = [ordered]@{
     fps = $null; fpsLow1 = $null; rlat = $null; pcl = $null; cpuPower = $null
     fpsTarget = $fps.target
     fpsErr = $fps.err
+    fpsSource = if ($fps.sourceTag) { $fps.sourceTag } else { 'presentmon' }
 }
 function ToNum($v) {
     if ($null -eq $v) { return $null }
@@ -1038,13 +1081,25 @@ function Start-MetricsWorker {
         [void]$ps.AddParameter('SmiPath', $script:MetricsSmiPath)
         [void]$ps.AddParameter('Queue', $script:MetricsQueue)
         [void]$ps.AddParameter('IntervalMs', $script:MetricsIntervalMs)
-        if (-not $script:MetricsCtl) { $script:MetricsCtl = @{ stop = $false } }
+        if (-not $script:MetricsCtl) { $script:MetricsCtl = @{ stop = $false; fpsSource = 'presentmon'; fpsRequestFallback = $false } }
         $script:MetricsCtl.stop = $false
+        $script:MetricsCtl.fpsRequestFallback = $false
+        # 数据源仲裁：把当前 FPS 源同步进采样 runspace（hashtable 是跨 runspace 共享引用）。
+        $src0 = 'presentmon'
+        try { if ($script:ActiveFpsSource) { $src0 = $script:ActiveFpsSource } } catch { }
+        $script:MetricsCtl.fpsSource = $src0
+        # 待机/故障口径只在 80-Extensions 定义一份，这里注入采样 runspace，
+        # 免得「没开游戏」被采样侧当成故障、进而把扩展自动关掉。
+        try {
+            if ($script:ShmBrokenReasons) { $script:MetricsCtl.brokenReasons = @($script:ShmBrokenReasons) }
+        } catch { }
         [void]$ps.AddParameter('Ctl', $script:MetricsCtl)
         [void]$ps.AddParameter('PmExe', $script:MetricsPmPath)
         [void]$ps.AddParameter('FpsCsv', $script:MetricsFpsCsv)
         [void]$ps.AddParameter('FpsPid', $script:MetricsFpsPid)
         [void]$ps.AddParameter('FpsFixed', [bool]$script:MetricsFpsFixed)
+        # 批次 D：把读取器源码作为参数传入，采样脚本在自身作用域点源定义函数。
+        [void]$ps.AddParameter('RtssReaderCode', $script:RtssReaderSource)
         $handle = $ps.BeginInvoke()
         $script:MetricsWorker = @{ PS = $ps; Handle = $handle; Started = (Get-Date) }
         Write-AppLog '监控采样线程已启动（常驻 runspace）'
@@ -1073,6 +1128,22 @@ function Stop-MetricsWorker {
 
 function Invoke-MetricsTick {
     if (-not $script:MetricsRunning) { return }
+    # 批次 D：采样线程报告扩展数据源读失败 → 自动回退到 presentmon 零注入基线。
+    # 用 try 包住 Set-FpsSource（它在 80-Extensions.ps1 里，加载顺序在本文件之后）。
+    if ($script:MetricsCtl -and $script:MetricsCtl.fpsRequestFallback) {
+        $script:MetricsCtl.fpsRequestFallback = $false
+        try {
+            $cur = 'presentmon'
+            try { if ($script:ActiveFpsSource) { $cur = $script:ActiveFpsSource } } catch { }
+            if ($cur -ne 'presentmon' -and (Get-Command Disable-ExtensionCore -ErrorAction SilentlyContinue)) {
+                # 完整关闭：断 IPC + 回退源 + 持久化 + 回推 UI，状态如实变为「已安装未启用」
+                [void](Disable-ExtensionCore $cur)
+            } elseif (Get-Command Set-FpsSource -ErrorAction SilentlyContinue) {
+                [void](Set-FpsSource 'presentmon')
+            }
+            Write-AppLog '扩展数据源读取失败，已自动回退到 PresentMon 基线（功能不退化，来源已如实标注）' 'WARN'
+        } catch { Write-AppLog ('数据源回退失败: ' + $_.Exception.Message) 'WARN' }
+    }
     # 采样线程死了就报一次，别静默
     # 采样线程死了就**重启**（1.5.10 的教训：原来直接停掉，于是 FPS 永远冻在旧数上）
     if ($script:MetricsWorker -and $script:MetricsWorker.Handle.IsCompleted) {

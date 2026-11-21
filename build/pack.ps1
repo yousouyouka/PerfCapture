@@ -46,6 +46,7 @@ $required = @(
     'deps-inbox\说明.txt',
     'capture-options.json',
     'capture-metrics.json',
+    'extensions.json',
     'build\launcher.cs',
     'build\setup-core.cs',
     'build\setup-ui.cs',
@@ -77,7 +78,7 @@ foreach ($d in $dirs) {
     robocopy (Join-Path $root $d) (Join-Path $stage $d) /E /NFL /NDL /NJH /NJS /NP | Out-Null
     if ($LASTEXITCODE -ge 8) { throw "复制 $d 失败 (robocopy $LASTEXITCODE)" }
 }
-    foreach ($f in 'PerfCapture.cmd', 'README.md', 'CHANGELOG.md', 'AGENTS.md', 'VERSION', 'capture-options.json', 'capture-metrics.json') {
+    foreach ($f in 'PerfCapture.cmd', 'README.md', 'CHANGELOG.md', 'AGENTS.md', 'VERSION', 'capture-options.json', 'capture-metrics.json', 'extensions.json') {
     $src = Join-Path $root $f
     if (Test-Path $src) { Copy-Item $src $stage -Force }
 }

@@ -18,20 +18,20 @@ $structure = @(
     'src\PerfCapture.ps1',
     'src\app\00-Prelude.ps1', 'src\app\05-Paths.ps1', 'src\app\10-Bootstrap.ps1',
     'src\app\15-Logging.ps1', 'src\app\20-Settings.ps1', 'src\app\30-Tools.ps1', 'src\app\35-Metrics.ps1', 'src\app\55-Overlay.ps1',
-    'src\app\40-Bridge.ps1', 'src\app\50-Host.ps1', 'src\app\60-Capture.ps1', 'src\app\90-Main.ps1',
+    'src\app\40-Bridge.ps1', 'src\app\50-Host.ps1', 'src\app\60-Capture.ps1', 'src\app\rtss-shm.ps1', 'src\app\80-Extensions.ps1', 'src\app\85-ExtensionProvision.ps1', 'src\app\90-Main.ps1',
     'src\engine\Measure-GamePerf.ps1',
     'ui\index.html',
     'ui\css\tokens.css', 'ui\css\layout.css', 'ui\css\components.css',
-    'ui\css\terminal.css', 'ui\css\report.css', 'ui\css\popup.css', 'ui\css\updates.css', 'ui\css\survey.css', 'ui\css\realtime.css',
+    'ui\css\terminal.css', 'ui\css\report.css', 'ui\css\popup.css', 'ui\css\updates.css', 'ui\css\survey.css', 'ui\css\extensions.css', 'ui\css\realtime.css',
     'ui\js\util.js', 'ui\js\i18n.js', 'ui\js\capture-options.js', 'ui\js\bridge.js',
     'ui\js\theme.js', 'ui\js\popup.js', 'ui\js\terminal.js', 'ui\js\ui-state.js',
     'ui\js\report.js', 'ui\js\collapse.js', 'ui\js\split.js',
     'ui\js\sidebar.js', 'ui\js\settings.js', 'ui\js\main.js',
-    'ui\js\updates-data.js', 'ui\js\updates.js', 'ui\js\survey-data.js', 'ui\js\survey.js', 'ui\js\realtime.js',
+    'ui\js\updates-data.js', 'ui\js\updates.js', 'ui\js\survey-data.js', 'ui\js\survey.js', 'ui\js\extensions-data.js', 'ui\js\extensions.js', 'ui\js\realtime.js',
     'assets\app-icon.ico', 'assets\app-icon.png',
     'lib\Microsoft.Web.WebView2.Core.dll', 'lib\Microsoft.Web.WebView2.WinForms.dll', 'lib\WebView2Loader.dll',
     'tools\presentmon.exe',
-    'deps\deps.json', 'deps-inbox\说明.txt', 'capture-options.json'
+    'deps\deps.json', 'deps-inbox\说明.txt', 'capture-options.json', 'capture-metrics.json', 'extensions.json'
 )
 foreach ($p in $structure) {
     if (-not (Test-Path (Join-Path $root $p))) { Bad "缺少 $p" }
@@ -344,6 +344,7 @@ $navBlock = [regex]::Match($idx, '(?s)<nav class="sidebar-nav">.*?</nav>').Value
 $navPages = [regex]::Matches($navBlock, 'data-page="([a-z]+)"') | ForEach-Object { $_.Groups[1].Value }
 if ($navPages.Count -lt 4) { Bad "侧边栏只有 $($navPages.Count) 项（应有采集 / 实时监控 / 更新公告 / 设置）" }
 elseif ($navPages[1] -ne 'realtime' -or $navPages[2] -ne 'updates') { Bad "侧边栏顺序不对：$($navPages -join ' → ')" }
+if ($navPages -notcontains 'extensions') { Bad '侧边栏缺扩展中心入口（应在 survey 与 settings 之间）' }
 if ($navBlock -match 'nav-badge') { Bad '侧边栏里还挂着「待开发」徽标（应只在实时监控页里）' }
 if ($navBlock -match '待开发') { Bad '侧边栏文字里出现了「待开发」' }
 # 底部两组：功能区与底部组必须分开，底部组里放更新公告 + 设置 + 版本号
@@ -377,7 +378,10 @@ if ($dataJs -notmatch 'window\.PerfUpdates') { Bad 'updates-data.js 缺 window.P
 if ($dataJs -notmatch 'window\.PerfUpdateVersions') { Bad 'updates-data.js 缺 window.PerfUpdateVersions' }
 if ($dataJs -match "time:\s*'") { Bad '更新公告数据里还有 time 字段（应只写日期）' }
 if ($dataJs -match 'approx') { Bad '更新公告数据里还有 approx（约等于时间已取消）' }
-$verList = [regex]::Matches($dataJs, "version:\s*'([0-9.]+)',\s*date:") | ForEach-Object { $_.Groups[1].Value }
+# 版本线（主.次）只在 PerfUpdateVersions 数组里校验；条目号（主.次.补丁）在 PerfUpdates 里。
+# 两类号码必须分开排序 —— 混在一起会把「2.0.27 之后接 2.1 版本线」误判成乱序。
+$vlBlock = [regex]::Match($dataJs, '(?s)window\.PerfUpdateVersions\s*=\s*\[.*?\];').Value
+$verList = [regex]::Matches($vlBlock, "version:\s*'([0-9]+\.[0-9]+)'") | ForEach-Object { $_.Groups[1].Value }
 if ($verList.Count -lt 4) { Bad "版本记录至少应有四条（1.1 起），实际 $($verList.Count) 条" }
 elseif (($verList -join ',') -ne (($verList | Sort-Object -Descending { [version]($_ + '.0') }) -join ',')) {
     Bad "版本记录顺序不对（应新→旧）：$($verList -join ' , ')"
@@ -386,7 +390,8 @@ if ($verList -notcontains '1.5' -and $verFile -match '^1\.5\.') { Bad '1.5 版�
 if ($dataJs -notmatch "version: '1\.4', date: '2026-11-16'") { Bad '1.4 版本线的发布日期不是 2026-11-16' }
 if ($dataJs -notmatch "version: '1\.3', date: '2026-11-15'") { Bad '1.3 版本线的发布日期不是 2026-11-15' }
 if ($dataJs -notmatch [regex]::Escape("version: '$verFile'")) { Bad "updates-data.js 里没有当前版本 $verFile 的条目" }
-$entryVers = [regex]::Matches($dataJs, "version: '(\d+\.\d+)\.\d+'") | ForEach-Object { $_.Groups[1].Value }
+$upBlock = [regex]::Match($dataJs, '(?s)window\.PerfUpdates\s*=\s*\[.*?\n\];').Value
+$entryVers = [regex]::Matches($upBlock, "version: '(\d+\.\d+)\.\d+'") | ForEach-Object { $_.Groups[1].Value }
 if ($entryVers.Count -lt 4) { Bad "条目版本号不够（应为 1.1.x / 1.2.x 多条），实际 $($entryVers.Count)" }
 # 版本线列表必须覆盖所有条目（新增版本线时忘记登记会在这里被抓住）
 if (($entryVers | Where-Object { $verList -notcontains $_ }).Count) {
@@ -562,8 +567,8 @@ if ($iSurveyData -lt 0 -or $iSurveyJs -lt 0) { Bad 'index.html 未加载 survey-
 elseif ($iSurveyData -gt $iSurveyJs) { Bad 'survey-data.js 必须在 survey.js 之前加载' }
 # 侧边栏顺序：性能采集 → 实时监控 → 更新公告 → 问卷调查 → 设置
 $navOrder = [regex]::Matches($navBlock, 'data-page="([a-z]+)"') | ForEach-Object { $_.Groups[1].Value }
-if (($navOrder -join ',') -ne 'capture,realtime,updates,survey,settings') { Bad "侧边栏顺序不对：$($navOrder -join ' → ')" }
-else { Ok "侧边栏顺序：问卷调查在更新公告下面" }
+if (($navOrder -join ',') -ne 'capture,realtime,updates,survey,extensions,settings') { Bad "侧边栏顺序不对：$($navOrder -join ' → ')" }
+else { Ok "侧边栏顺序：扩展中心在问卷调查与设置之间" }
 # 无问卷必须显示「暂无问卷」：数据初始为空数组，渲染层给空状态
 if ($surveyData -notmatch 'window\.PerfSurveys = \[\]') { Bad 'survey-data.js 初始应为空数组（无问卷时显示暂无问卷）' }
 foreach ($need in 'surveyList', 'surveyCount', '__refreshSurvey', 'survey-card', 'survey-empty', 'survey-status', 'survey-actions') {
@@ -578,6 +583,170 @@ foreach ($sk in 'nav.survey', 'survey.title', 'survey.lead', 'survey.count', 'su
     $n = ([regex]::Matches($i18nText, [regex]::Escape("'" + $sk + "':"))).Count
     if ($n -lt 3) { Bad "i18n 中 $sk 只有 $n 种语言（需 3）" }
 }
+
+# ---------- 5l. 扩展中心页（批次 B：UI 骨架 + 状态展示，不接宿主） ----------
+$extJs = Get-Content (Join-Path $root 'ui\js\extensions.js') -Raw -Encoding UTF8
+$extData = Get-Content (Join-Path $root 'ui\js\extensions-data.js') -Raw -Encoding UTF8
+if ($idx -notmatch '<section class="page" data-page="extensions"') { Bad 'index.html 缺少扩展中心页面' }
+if ($idx -notmatch 'data-i18n="nav\.extensions"') { Bad 'index.html 侧边栏缺扩展中心项' }
+if ($idx -notmatch 'css/extensions\.css') { Bad 'index.html 未加载 extensions.css' }
+$iExtData = $idx.IndexOf('js/extensions-data.js')
+$iExtJs = $idx.IndexOf('js/extensions.js')
+if ($iExtData -lt 0 -or $iExtJs -lt 0) { Bad 'index.html 未加载 extensions-data.js / extensions.js' }
+elseif ($iExtData -gt $iExtJs) { Bad 'extensions-data.js 必须在 extensions.js 之前加载' }
+# WebView2 UDF 持久缓存：同 URL 的旧 HTML/JS 会让扩展中心停在批次 B 的「暂无扩展」。
+# 扩展相关资源必须带缓存版本查询串，宿主导航 URL 也必须带同一版本。
+foreach ($asset in 'css/extensions.css', 'js/i18n.js', 'js/bridge.js', 'js/extensions-data.js', 'js/extensions.js') {
+    if ($idx -notmatch ([regex]::Escape($asset) + '\?v=' + [regex]::Escape($verFile))) {
+        Bad "扩展中心资源 $asset 缺 ?v=$verFile（WebView2 会读到旧缓存）"
+    }
+}
+$hostText = Get-Content (Join-Path $root 'src\app\50-Host.ps1') -Raw -Encoding UTF8
+if ($hostText -notmatch ("UiCacheKey = '" + [regex]::Escape($verFile) + "'")) { Bad "50-Host.ps1 的 UI 缓存版本不是 $verFile" }
+if ($hostText -notmatch "ui/index\.html\?v=' \+") { Bad '50-Host.ps1 导航 URL 未带缓存版本查询串' }
+foreach ($need in 'extensionsList', 'extensionsCount', 'extAreas', 'extFilters', 'extOnlyInstalled', 'extRefresh', 'extRiskBanner', '__refreshExtensions', 'ext-card', 'ext-status', 'extensions-empty') {
+    if ($extJs -notmatch [regex]::Escape($need) -and $idx -notmatch [regex]::Escape($need)) { Bad "扩展中心缺 $need" }
+}
+if ($extData -notmatch 'window\.PerfExtensions') { Bad 'extensions-data.js 缺 window.PerfExtensions' }
+# 状态展示必须覆盖状态模型的各态；本批次全部 planned（不做假开关）
+foreach ($st in 'planned', 'notInstalled', 'installed', 'enabled', 'unsupported', 'failed') {
+    if ($extJs -notmatch [regex]::Escape($st)) { Bad "extensions.js 缺状态 $st" }
+}
+if ($extJs -notmatch 'PerfExtensionsUI') { Bad 'extensions.js 未暴露 PerfExtensionsUI（批次 C 宿主消息入口）' }
+if ($i18nText -notmatch '__refreshExtensions') { Bad 'i18n.js 语言切换后没有重画扩展中心页' }
+foreach ($sk in 'nav.extensions', 'extensions.title', 'extensions.lead', 'extensions.risk', 'extensions.count',
+              'extensions.install', 'extensions.notReady', 'extensions.emptyTitle', 'extensions.emptyHint',
+              'extensions.status.planned', 'extensions.field.metrics', 'extensions.cat.all') {
+    $n = ([regex]::Matches($i18nText, [regex]::Escape("'" + $sk + "':"))).Count
+    if ($n -lt 3) { Bad "i18n 中 $sk 只有 $n 种语言（需 3）" }
+}
+Ok '扩展中心：页面 / 资源顺序 / 状态模型 / 宿主消息入口 / 三语文案齐全'
+
+# ---------- 5l-C. 扩展中心宿主侧（批次 C：注册表 + 状态机 + 真关闭 + 桥接） ----------
+$extHostPs = Get-Content (Join-Path $root 'src\app\80-Extensions.ps1') -Raw -Encoding UTF8
+$entryPs   = Get-Content (Join-Path $root 'src\PerfCapture.ps1') -Raw -Encoding UTF8
+$setPs     = Get-Content (Join-Path $root 'src\app\20-Settings.ps1') -Raw -Encoding UTF8
+# 数组契约：Get-ExtensionStates 不能 return ,$array，否则调用方 @() 会二次包装成 JSON 嵌套数组
+if ($extHostPs -match '(?m)^\s*return ,\s*\$out\.ToArray\(\)\s*$') { Bad 'Get-ExtensionStates 仍用 return ,$array（会让 extensions 变成嵌套数组）' }
+$regJson   = Get-Content (Join-Path $root 'extensions.json') -Raw -Encoding UTF8
+$reg       = $regJson | ConvertFrom-Json
+# 注册表：结构与「如实发布」（批次 D 起 RTSS 为首个 available=true 的真实扩展）
+if (@($reg.extensions).Count -lt 1) { Bad 'extensions.json 没有任何扩展条目' }
+$published = @($reg.extensions | Where-Object { $_.available -eq $true })
+if ($published.Count -ne 1 -or $published[0].id -ne 'rtss-shm') {
+    Bad "available=true 的扩展应恰为 rtss-shm（批次 D），实际：$($published.id -join ',')"
+}
+if ($published.Count -eq 1 -and ($published[0].mode -ne 'external-shm' -or -not $published[0].shmName)) {
+    Bad 'RTSS 应为 external-shm 模式且声明 shmName（不捆绑 payload）'
+}
+foreach ($f in 'id', 'name', 'category', 'available', 'detect', 'payload') {
+    if ($null -eq $reg.extensions[0].$f) { Bad "扩展注册表首条缺字段 $f" }
+}
+# 宿主模块：状态机 + 细分失败 + 真关闭四步 + 白名单六命令
+foreach ($need in 'Get-ExtensionRegistry', 'Get-ExtensionStates', 'Get-ExtensionStateFor',
+                  'Test-ExtensionDependency', 'Invoke-ExtensionCommand', 'Set-FpsSource',
+                  'Install-ExtensionCore', 'Enable-ExtensionCore', 'Disable-ExtensionCore', 'Uninstall-ExtensionCore',
+                  'Stop-ExtensionProcess', 'Stop-AllExtensionProcesses', 'Send-ExtensionError') {
+    if ($extHostPs -notmatch [regex]::Escape($need)) { Bad "80-Extensions.ps1 缺函数 $need" }
+}
+foreach ($st in 'planned', 'notInstalled', 'installed', 'enabled', 'unsupported', 'failed') {
+    if ($extHostPs -notmatch [regex]::Escape("'" + $st + "'")) { Bad "宿主状态机缺状态 $st" }
+}
+# 真关闭必须做到：断 IPC → 终止进程 → 数据源回退 → 持久化 → 回推
+$dis = [regex]::Match($extHostPs, 'function Disable-ExtensionCore[\s\S]*?\r?\n}').Value
+foreach ($step in 'ExtIpc.Remove', 'Stop-ExtensionProcess', "Set-FpsSource 'presentmon'", 'Set-ExtensionPersistState', 'Send-ExtensionState') {
+    if ($dis -notmatch [regex]::Escape($step)) { Bad "真关闭 Disable-ExtensionCore 缺步骤: $step" }
+}
+# 命令白名单（2.0.23 metricsTarget 教训：没进白名单的命令会被拒）
+foreach ($cmd in 'listExtensions', 'installExtension', 'enableExtension', 'disableExtension', 'uninstallExtension', 'refreshExtensionStatus', 'oneClickEnableExtension') {
+    if ($capPs -notmatch [regex]::Escape("'" + $cmd + "'")) { Bad "60-Capture.ps1 白名单缺 $cmd" }
+    if ($extHostPs -notmatch [regex]::Escape("'" + $cmd + "'")) { Bad "80-Extensions.ps1 分发缺 $cmd" }
+}
+if ($entryPs -notmatch '80-Extensions\.ps1') { Bad 'PerfCapture.ps1 未登记 80-Extensions.ps1（dot-source 列表）' }
+if ($entryPs -notmatch 'rtss-shm\.ps1') { Bad 'PerfCapture.ps1 未登记 rtss-shm.ps1（dot-source 列表）' }
+elseif ($entryPs -notmatch 'rtss-shm\.ps1[\s\S]*80-Extensions\.ps1') { Bad 'rtss-shm.ps1 必须在 80-Extensions.ps1 之前加载（依赖探测要用到读取器）' }
+if ($entryPs -notmatch '80-Extensions\.ps1[\s\S]*85-ExtensionProvision\.ps1') { Bad 'PerfCapture.ps1 必须在 80-Extensions.ps1 之后加载 85-ExtensionProvision.ps1' }
+
+# ---------- 5l-E. 批次 E：配置驱动、一键供应、自启与回滚守卫 ----------
+$provPs = Get-Content (Join-Path $root 'src\app\85-ExtensionProvision.ps1') -Raw -Encoding UTF8
+foreach ($need in 'Start-ExtensionProvision', 'Complete-ExtensionProvision', 'Start-EnabledExtensions',
+                 'Invoke-ProvisionRollback', 'hashMismatch', 'shmNotReady', 'ConcurrentQueue',
+                 'Start-ProvisionProcess', 'Fail-Stage', 'uacCancelled', 'cacheHit', 'installSuccessCodes') {
+    if ($provPs -notmatch [regex]::Escape($need)) { Bad "85-ExtensionProvision.ps1 缺关键实现：$need" }
+}
+# E1（2.1.2）：空 ArgumentList 曾让真机每次安装都回滚；源码级钉死统一启动器与缓存语义。
+if ($provPs -match 'Start-Process -FilePath \$cmd -ArgumentList \$pargs') { Bad '供应层仍在给 Start-Process 传空参数列表' }
+if ($provPs -notmatch 'archivePath \+ ''\.part''') { Bad '下载未走 .part 临时文件，半截包可能污染缓存' }
+if ($provPs -notmatch "Fail-Stage 'start'") { Bad '启动阶段未走阶段化异常包装' }
+if ($extHostPs -notmatch 'detail = \$Detail') { Bad 'Send-ExtensionError 未把 detail 下发前端' }
+# 供应层不得硬编码第三方下载信息：URL / 哈希 / 版本只能来自 extensions.json。
+foreach ($hard in 'ftp.nluug.nl', '9B084A8CB3E', 'RTSSSetup737') {
+    if ($provPs -match [regex]::Escape($hard)) { Bad "85-ExtensionProvision.ps1 硬编码了注册表信息：$hard" }
+}
+$mainPs = Get-Content (Join-Path $root 'src\app\90-Main.ps1') -Raw -Encoding UTF8
+if ($mainPs -notmatch 'Start-EnabledExtensions') { Bad '90-Main.ps1 缺启动自启钩子' }
+if ($mainPs -notmatch 'Stop-AllExtensionProcesses') { Bad '90-Main.ps1 缺退出清理钩子' }
+$pubPkg = @($published | Where-Object { $_.package -and $_.package.kind -eq 'nsis-zip' })
+if ($pubPkg.Count -ne 1) { Bad '已发布扩展只有一个，且必须声明 package（nsis-zip）' }
+else {
+    $pkg = $pubPkg[0].package
+    foreach ($fk in 'version', 'url', 'sha256', 'installerRelative', 'installArgs', 'processCommand', 'verifyTimeoutMs') {
+        if (-not $pkg.$fk) { Bad "RTSS package 缺字段：$fk" }
+    }
+    if ($pkg.sha256 -notmatch '^[0-9A-Fa-f]{64}$') { Bad 'RTSS package.sha256 不是 64 位十六进制' }
+    if (-not [bool]$pkg.elevateInstall) { Bad 'RTSS package.elevateInstall 应为 true（用户已接受一次 UAC）' }
+    if ([bool]$pkg.allowLocalSource) { Bad '生产 package.allowLocalSource 必须为 false（本地源仅供探针）' }
+}
+if ($regJson -notmatch '"lifecycle"') { Bad 'extensions.json 缺 lifecycle（自启/自有进程边界）' }
+# 读取器：纯 .NET，不硬编码 app 数组位置，口径从帧时间缓冲自算，失败细分
+$readerPs = Get-Content (Join-Path $root 'src\app\rtss-shm.ps1') -Raw -Encoding UTF8
+foreach ($need in 'MemoryMappedFile', 'dwAppArrOffset', 'RtssReaderSource', 'Get-RtssFrameSnapshot', 'fpsLow1', 'shmNotFound', 'staleData') {
+    if ($readerPs -notmatch [regex]::Escape($need)) { Bad "rtss-shm.ps1 缺关键实现：$need" }
+}
+if ($readerPs -notmatch '1000000\.0 / \$slowAvgUs') { Bad '1% Low 未按项目口径（最慢1%平均帧时间取倒数）计算' }
+# 签名是官方 C 多字符常量 'RTSS'（MSVC = 0x52545353）。曾写成内存字节序 0x53535452，
+# 结果真机读到正确数据也判 badSignature，用户看到「版本不兼容」。
+if ($readerPs -notmatch '0x52545353') { Bad '读取器未按官方多字符常量 0x52545353 校验签名' }
+if ($readerPs -notmatch '\$sigAccepted') { Bad '读取器未同时接受兼容签名写法（0x53535452）' }
+# 待机 vs 故障：noEntry/noFrames/staleData 属正常待机，判成 failed 会让数据源永远切不过去。
+$idleBlock = [regex]::Match($extHostPs, '\$script:ShmIdleReasons\s*=\s*@\(([^)]*)\)')
+if (-not $idleBlock.Success -or $idleBlock.Groups[1].Value -notmatch 'noEntry') { Bad '缺待机口径 ShmIdleReasons（noEntry/noFrames/staleData）' }
+$brokenBlock = [regex]::Match($extHostPs, '\$script:ShmBrokenReasons\s*=\s*@\(([\s\S]*?)\)\r?\n')
+if (-not $brokenBlock.Success) { Bad '缺故障口径 ShmBrokenReasons' }
+elseif ($brokenBlock.Groups[1].Value -match 'noEntry') { Bad 'noEntry 被误列入故障口径（会重现「不是可用数据源」）' }
+if ($extHostPs -notmatch 'Test-ExtensionShmBroken \$dep\.shmState') { Bad '状态机未用统一故障口径判断 failed' }
+# 供应层运行态校验必须复用同一读取器，并把不兼容单独报出来。
+if ($provPs -notmatch 'RtssReaderCode') { Bad '供应层未复用宿主的共享内存读取器（会重复维护结构常量）' }
+if ($provPs -notmatch 'shmIncompatible') { Bad '供应层未把结构不兼容单独细分（shmIncompatible）' }
+# 已安装副本的复用入口：没有它，每次启动都会重跑安装器并再弹一次 UAC。
+if ($provPs -notmatch 'function Start-ExtensionCopy') { Bad '供应层缺复用已安装副本入口（每次启动都会重装）' }
+# 采样侧也必须按同一口径区分待机与故障：否则「没开游戏」会触发回退，而回退会真的关掉扩展。
+$metricsPs = Get-Content (Join-Path $root 'src\app\35-Metrics.ps1') -Raw -Encoding UTF8
+if ($metricsPs -notmatch 'brokenReasons') { Bad '采样侧未区分待机与故障（没开游戏会把扩展自动关掉）' }
+$mainPs = Get-Content (Join-Path $root 'src\app\90-Main.ps1') -Raw -Encoding UTF8
+if ($mainPs -notmatch 'Stop-AllExtensionProcesses') { Bad '90-Main.ps1 退出时未清理扩展进程（会留孤儿）' }
+# 持久化整块遍历（overlay 教训）
+if ($setPs -notmatch '\$j\.extensions\.PSObject\.Properties') { Bad '20-Settings.ps1 未按属性整块遍历 extensions（会丢状态）' }
+# 桥接：UI 收三种宿主消息 + 三命令回推
+foreach ($h in "case 'extensions'", "case 'extensionState'", "case 'extensionError'") {
+    if ($brJs -notmatch [regex]::Escape($h)) { Bad "bridge.js 缺宿主消息 $h" }
+}
+foreach ($api in 'apply(', 'state(', 'error(') {
+    if ($extJs -notmatch [regex]::Escape($api)) { Bad "extensions.js 缺宿主入口 $api" }
+}
+# i18n 三语新键（启用 / 关闭 / 卸载 / 细分失败原因）
+foreach ($sk in 'extensions.enable', 'extensions.disable', 'extensions.uninstall',
+              'extensions.reason.notAvailable', 'extensions.reason.dependencyMissing',
+              'extensions.oneClick', 'extensions.progress', 'extensions.stage.download',
+              'extensions.reason.hashMismatch', 'extensions.reason.shmNotReady',
+              'extensions.reason.startFailed', 'extensions.reason.downloadFailed',
+              'extensions.reason.extractFailed', 'extensions.reason.configureFailed',
+              'extensions.reason.verifyRuntimeFailed', 'extensions.reason.uacCancelled',
+              'extensions.copyDiagnostics') {
+    $n = ([regex]::Matches($i18nText, [regex]::Escape("'" + $sk + "':"))).Count
+    if ($n -lt 3) { Bad "i18n 中 $sk 只有 $n 种语言（需 3）" }
+}
+Ok '扩展中心宿主侧：注册表 / 状态机 / 真关闭四步 / 白名单六命令 / 桥接三消息齐全'
 
 # ---------- 5m. 检查更新（多源 + 验签 + 本地校验） ----------
 $updPs = Get-Content (Join-Path $root 'src\app\70-Updates.ps1') -Raw -Encoding UTF8
@@ -618,7 +787,14 @@ if (Test-Path $manPath) {
     try { $man = (Get-Content $manPath -Raw -Encoding UTF8) | ConvertFrom-Json } catch { }
     if (-not $man) { Bad 'updates\latest.json 不是合法 JSON' }
     else {
-        if ($man.version -ne $verFile) { Bad "清单版本 $($man.version) 与 VERSION $verFile 不一致" }
+        # 开发期 VERSION 领先于已发布清单是正常状态（批次未发版）；清单只在 pack.ps1 发版时重生成。
+        # 清单版本落后 → Warn 提醒待发版；清单版本超前 → Bad（VERSION 回退属异常）。
+        if ($man.version -ne $verFile) {
+            try {
+                if ([version]$man.version -gt [version]$verFile) { Bad "清单版本 $($man.version) 超前于 VERSION $verFile（版本回退？）" }
+                else { Warn "清单版本 $($man.version) 落后于 VERSION $verFile（未发版，发版时跑 pack.ps1 重生成）" }
+            } catch { Bad "清单版本 $($man.version) 与 VERSION $verFile 不一致" }
+        }
         if (-not $man.serial) { Bad '清单缺 serial（防重放）' }
         if (-not $man.assets -or @($man.assets).Count -lt 1) { Bad '清单没有 assets' }
         else {
@@ -655,10 +831,14 @@ if ($metPs -notmatch 'cpuTemp = \$false') { Bad 'CPU 温度占位没有关掉（
 if ($metPs -notmatch 'GetSystemTimes|GlobalMemoryStatusEx') { Bad '缺少 Win32 只读采集（P/Invoke）' }
 if ($metPs -notmatch 'PdhAddEnglishCounterW') { Bad 'CPU 频率没有走 PDH 英文计数器（本地化系统会读不到）' }
 if ($metPs -match 'CpuMhz\(\)') { Bad '旧的 CallNtPowerInformation 频率口径又回来了（本机只给 2007/2501 粗值）' }
-# 零注入 / 无驱动：不许出现任何注入或传感器驱动依赖
-foreach ($forbidden in 'RTSS', 'RivaTuner', 'OpenHardwareMonitor', 'LibreHardwareMonitor', 'inpainted', 'SetWindowsHookEx', 'WriteProcessMemory') {
+# 内置采样引擎不依赖外部注入/传感器驱动（RTSS 经扩展中心 opt-in，读共享内存，
+# 只在 80-Extensions/rtss-shm 侧出现；35-Metrics 里只允许「数据源仲裁」注释提及，不得直连）。
+foreach ($forbidden in 'OpenHardwareMonitor', 'LibreHardwareMonitor', 'inpainted', 'SetWindowsHookEx', 'WriteProcessMemory') {
     if ($metPs -match [regex]::Escape($forbidden)) { Bad "35-Metrics.ps1 里出现了不该有的依赖：$forbidden" }
 }
+# RTSS 相关只允许出现在「数据源仲裁/扩展源」注释里，不允许出现 OpenFileMapping/PInvoke 直连
+if ($metPs -match 'OpenFileMapping|MemoryMappedFile.*RTSS|RivaTuner') { Bad '35-Metrics.ps1 不应直连 RTSS 共享内存（应经 80-Extensions 的 Get-RtssFrameSnapshot）' }
+if ($metPs -notmatch 'fpsSource') { Bad '35-Metrics.ps1 缺 fpsSource 数据源仲裁字段' }
 # 内嵌采样脚本要能单独解析
 $ms = [regex]::Match($metPs, "(?s)\`$script:MetricsSampleScript = @'\r?\n(.*?)\r?\n'@")
 if (-not $ms.Success) { Bad '取不到内嵌采样脚本' }
@@ -708,6 +888,24 @@ foreach ($key in 'realtime.view.chart', 'realtime.row.maxclock', 'realtime.overl
     if ($i18nText -notmatch [regex]::Escape("'" + $key + "'")) { Bad "i18n 缺 $key" }
 }
 if ($capPs -notmatch "'overlayToggle'") { Bad '60-Capture.ps1 没登记 overlayToggle 命令' }
+# 2.1.7：浮窗拖动锁（用户要求「可禁用鼠标拖动」）
+# 三条一起查：宿主有锁变量并真的在拖动处理器里判、界面有开关、前端绑定并回传。
+if ($ovPs -notmatch 'OverlayLocked') { Bad '55-Overlay.ps1 缺拖动锁状态（OverlayLocked）' }
+if ($ovPs -notmatch 'if \(\$script:OverlayLocked\) \{ return \}') { Bad '拖动处理器没有判拖动锁' }
+if ($ovPs -notmatch 'locked = \[bool\]') { Bad 'overlayState 没有回传 locked' }
+if ($idx -notmatch 'id="ovLockDrag"') { Bad 'index.html 缺「禁用鼠标拖动」开关' }
+if ($rtJs -notmatch 'ovLockDrag') { Bad 'realtime.js 没有绑定拖动锁开关' }
+
+# 2.1.7：扩展供应 E2（下载体验）/ E3（安装确认）的关键实现不许被回退掉
+$provPs = Get-Content (Join-Path $root 'src\app\85-ExtensionProvision.ps1') -Raw -Encoding UTF8
+foreach ($need in 'Get-InstallerPlan', 'Invoke-SourceOnce', 'Send-DownloadProgress', 'Stop-ExtensionProvision', 'Save-ProvisionDiagnostics', 'Get-ShmFacts') {
+    if ($provPs -notmatch [regex]::Escape($need)) { Bad "85-ExtensionProvision.ps1 缺 $need（E2/E3）" }
+}
+if ($provPs -notmatch 'cancelSignal') { Bad '供应层缺取消信号（E2）' }
+$extPs = Get-Content (Join-Path $root 'src\app\80-Extensions.ps1') -Raw -Encoding UTF8
+if ($extPs -notmatch "'cancelExtensionProvision'") { Bad '80-Extensions.ps1 缺 cancelExtensionProvision 命令路由（E2）' }
+# 白名单漏登记 = 前端按钮点了会被「不支持的命令」拒掉，必须一起查
+if ($capPs -notmatch "'cancelExtensionProvision'") { Bad '60-Capture.ps1 命令白名单缺 cancelExtensionProvision（取消按钮会被拒）' }
 
 
 # ---------- 6. 运行时依赖 ----------

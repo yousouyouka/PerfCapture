@@ -1,0 +1,248 @@
+/* 扩展中心：排版沿用更新公告 / 问卷（页头 + 工具栏 + 主区列表），配色与圆角走 tokens。
+   批次 B 只做 UI 骨架与状态展示（无真实扩展、不接宿主）；操作按钮一律置灰，
+   避免做出「点了没反应」的假开关。 */
+
+.extensions-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* ── 页头（与更新公告 / 问卷同尺寸） ── */
+.extensions-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 0.85rem 1rem;
+  box-shadow: var(--shadow);
+}
+.extensions-eyebrow {
+  display: block;
+  font-size: 0.62rem;
+  letter-spacing: 0.18em;
+  color: var(--faint);
+  text-transform: uppercase;
+}
+.extensions-title-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0.55rem;
+  margin: 0.15rem 0 0.2rem;
+}
+.extensions-title-line h1 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 400;
+  color: var(--text-strong);
+}
+.extensions-count {
+  font-size: 0.66rem;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 99px;
+  padding: 0.08rem 0.5rem;
+  white-space: nowrap;
+}
+.extensions-header p { margin: 0; font-size: 0.72rem; color: var(--muted); }
+
+/* ── 风险横幅：沿用 update-banner 的中性提示，不做劝退式警告 ── */
+#extRiskBanner { line-height: 1.7; }
+#extRiskBanner .update-banner-text { flex: 1 1 auto; }
+
+/* ── 工具栏：类别筛选 / 只看已安装 / 刷新状态 ── */
+.extensions-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+.extensions-areas, .extensions-filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.extensions-areas button, .extensions-filters button {
+  font-family: inherit;
+  font-size: 0.66rem;
+  font-weight: 400;
+  color: var(--muted);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.25rem 0.65rem;
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.extensions-areas button:hover, .extensions-filters button:hover { border-color: var(--line-strong); color: var(--text); }
+.extensions-areas button.is-active, .extensions-filters button.is-active {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 32%, transparent);
+}
+.extensions-toolbar .ext-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.66rem;
+  color: var(--muted);
+  cursor: pointer;
+}
+.extensions-toolbar .btn { padding: 0.28rem 0.8rem; font-size: 0.68rem; }
+
+/* ── 列表 ── */
+.extensions-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 0.35rem;
+}
+#extensionsList { display: flex; flex-direction: column; gap: 0.7rem; }
+
+/* 卡片：标题 + 状态徽标 → 说明 → 元信息 → 动作 */
+.ext-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.8rem 0.95rem;
+  box-shadow: var(--shadow);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.ext-card:hover { border-color: var(--line-strong); box-shadow: var(--shadow-hover); }
+.ext-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+.ext-card-head h2 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--text-strong);
+}
+.ext-card-ver { font-size: 0.62rem; color: var(--faint); margin-left: 0.4rem; font-variant-numeric: tabular-nums; }
+.ext-status {
+  flex: 0 0 auto;
+  font-size: 0.62rem;
+  border-radius: 99px;
+  padding: 0.08rem 0.5rem;
+  white-space: nowrap;
+}
+.ext-status.is-planned, .ext-status.is-notinstalled { color: var(--faint); background: var(--tile); }
+.ext-status.is-installed { color: var(--muted); background: var(--tile); }
+.ext-status.is-enabled { color: var(--accent); background: var(--accent-soft); }
+.ext-status.is-unsupported, .ext-status.is-failed { color: var(--warn); background: var(--tile); }
+
+.ext-desc { margin: 0.4rem 0 0.5rem; font-size: 0.76rem; line-height: 1.7; color: var(--text); }
+.ext-note {
+  margin: 0 0 0.5rem;
+  font-size: 0.66rem;
+  line-height: 1.6;
+  color: var(--warn);
+}
+/* 关闭后的操作提示（需重启游戏 / 仍有残留）：不是故障，用弱化强调色，避免与失败红混淆。 */
+.ext-note.is-info { color: var(--accent); }
+.ext-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.9rem;
+  font-size: 0.66rem;
+  line-height: 1.7;
+  color: var(--muted);
+}
+.ext-meta .ext-meta-row { display: flex; gap: 0.35rem; }
+.ext-meta .ext-meta-k { color: var(--faint); }
+.ext-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.7rem; }
+.ext-actions .btn { padding: 0.34rem 0.9rem; font-size: 0.75rem; }
+
+/* ── 空状态：沿用问卷页 / 实时监控的虚线占位观感 ── */
+.extensions-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  min-height: 9rem;
+  padding: 2.2rem 1rem;
+  text-align: center;
+  color: var(--faint);
+  background: var(--tile);
+  border: 1px dashed var(--line-strong);
+  border-radius: 14px;
+}
+.extensions-empty strong { font-size: 0.86rem; font-weight: 400; color: var(--muted); }
+.extensions-empty p { margin: 0; font-size: 0.72rem; line-height: 1.7; }
+
+/* ── 批次 E：一键启用阶段进度（亮/暗都走 tokens） ── */
+.ext-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 0.7rem;
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+.ext-progress-text { line-height: 1.5; }
+.ext-progress-bar {
+  height: 4px;
+  border-radius: 99px;
+  background: var(--tile);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+.ext-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 99px;
+  transition: width 0.18s linear;
+}
+/* 「正在启动 / 正在关闭」是瞬时状态，没有真实百分比：用流动亮条表示进行中，
+   不摆一条会误导人的假进度。 */
+.ext-progress.is-indeterminate .ext-progress-fill {
+  animation: ext-indeterminate 1.1s ease-in-out infinite;
+}
+@keyframes ext-indeterminate {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ext-progress.is-indeterminate .ext-progress-fill { animation: none; }
+}
+/* E2：供应中可取消。按钮自己一行、左对齐，不和进度文字抢宽度。 */
+.ext-progress .ext-cancel {
+  align-self: flex-start;
+  margin-top: 0.1rem;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.66rem;
+}
+
+/* E1：失败原因下的阶段原文与复制入口（亮/暗都只用 tokens） */
+.ext-error {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-bottom: 0.7rem;
+  padding: 0.55rem 0.7rem;
+  background: var(--tile);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+}
+.ext-error-detail {
+  margin: 0;
+  max-height: 7rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.64rem;
+  line-height: 1.6;
+  color: var(--faint);
+}
+.ext-error .btn { align-self: flex-start; }

@@ -22,7 +22,6 @@ foreach ($f in @(
     '68-UpdateWrapper.ps1',
     '70-Updates.ps1',
     'rtss-shm.ps1',
-    'hwinfo-shm.ps1',
     '80-Extensions.ps1',
     '85-ExtensionProvision.ps1',
     '90-Main.ps1'

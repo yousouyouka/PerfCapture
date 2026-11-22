@@ -29,20 +29,6 @@ window.PerfExtensions = [
     status: 'notInstalled'
   },
   {
-    id: 'hwinfo-shm',
-    name: 'HWiNFO 共享内存读数',
-    desc: '读取本机 HWiNFO 共享内存中的帧率与传感器项。若其帧率来自 RTSS，则继承相同的兼容性说明与关闭兜底。',
-    category: 'datasource',
-    metrics: ['FPS', 'CPU 温度', 'GPU 温度'],
-    depends: '用户自装 HWiNFO',
-    size: '极小（只读共享内存）',
-    permission: '无需管理员 / 驱动',
-    platform: 'Windows · 全平台',
-    cost: '低',
-    source: '第三方工具 · 用户自装',
-    status: 'planned'
-  },
-  {
     id: 'frameview',
     name: 'NVIDIA FrameView 适配',
     desc: '经由厂商官方接口提供帧率与帧时间。仅限 NVIDIA 显卡，授权条款待评估。',

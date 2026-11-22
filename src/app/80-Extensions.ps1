@@ -48,7 +48,8 @@ function Get-ExtensionRegistry {
                 available = [bool]$e.available
                 mode      = if ($e.mode) { [string]$e.mode } else { 'payload' }
                 shmName   = if ($e.shmName) { [string]$e.shmName } else { '' }
-                # 外部共享内存读取器：rtss（默认，兼容旧配置）/ hwinfo。决定依赖探测与采样用哪个读取器。
+                # 外部共享内存读取器：rtss（默认）。新增读取器时在 extensions.json 声明新 id，
+                # 宿主的分派函数与采样侧各加一个分支，不动其它扩展。
                 shmReader = if ($e.shmReader) { [string]$e.shmReader } else { 'rtss' }
                 detectProcess = $dproc
                 payload   = if ($e.payload) { [string]$e.payload } else { '' }
@@ -125,17 +126,13 @@ function Clear-ExtensionPersistState([string]$Id) {
     try { Save-Config } catch { Write-AppLog ('扩展状态清除失败: ' + $_.Exception.Message) 'WARN' }
 }
 
-# ---------- 外部共享内存读取器分派（rtss / hwinfo，配置化，不硬编码扩展类型）----------
-# 注册表声明 shmReader，宿主与采样 runspace 都按这个函数选读取器；
-# 未声明时按 rtss 兼容旧配置。任一步失败都返回 ok=false + reason，绝不返回 0 冒充。
+# ---------- 外部共享内存读取器分派（目前仅 rtss，配置化，不硬编码扩展类型）----------
+# 注册表声明 shmReader，宿主与采样 runspace 都按这个字段选读取器；
+# 未声明时按 rtss 兼容旧配置。新增读取器：extensions.json 声明新 id，此处与采样侧各加一个分支。
+# 任一步失败都返回 ok=false + reason，绝不返回 0 冒充。
 function Get-ExtensionShmSnapshot($Entry, [string]$ShmName = '') {
     if (-not $Entry) { return $null }
     $nm = if ($ShmName) { $ShmName } else { [string]$Entry.shmName }
-    $reader = if ($Entry.shmReader) { [string]$Entry.shmReader } else { 'rtss' }
-    if ($reader -eq 'hwinfo') {
-        if (Get-Command Get-HwinfoFrameSnapshot -ErrorAction SilentlyContinue) { return Get-HwinfoFrameSnapshot $nm }
-        return [pscustomobject]@{ ok = $false; reason = 'readerMissing'; detail = ''; fps = $null; fpsLow1 = $null; frameTimeUs = $null; sampleCount = 0; processName = ''; source = 'hwinfo-shm' }
-    }
     if (Get-Command Get-RtssFrameSnapshot -ErrorAction SilentlyContinue) { return Get-RtssFrameSnapshot -ShmName $nm }
     return [pscustomobject]@{ ok = $false; reason = 'readerMissing'; detail = ''; fps = $null; fpsLow1 = $null; frameTimeUs = $null; sampleCount = 0; processName = ''; source = 'rtss-shm' }
 }
@@ -194,9 +191,9 @@ function Test-ExtensionDependency($Entry) {
 # 待机：RTSS 服务在跑、共享内存可读，只是当前没有被统计的游戏（noEntry/noFrames/staleData）。
 #       这不是故障：用户完全可以先启用扩展、再开游戏。判成 failed 会导致数据源永远切不过去。
 # 故障：结构不兼容（签名/版本/布局）、读取异常、对象或依赖消失。
-# noReadings：HWiNFO 共享内存对象在但还没发布读数（用户刚开共享内存），与 RTSS 待机同义。
+# noReadings：共享内存对象在但还没发布读数（用户刚开共享内存），与 noEntry 同义。
 $script:ShmIdleReasons   = @('noEntry', 'noFrames', 'staleData', 'noReadings')
-# versionMismatch：HWiNFO 结构版本不认识（RTSS 对应 oldVersion），同属结构不兼容。
+# versionMismatch：外部读取器无法识别结构版本（RTSS 对应 oldVersion），同属结构不兼容。
 $script:ShmBrokenReasons = @('badSignature', 'oldVersion', 'badLayout', 'readException',
                              'shmNotFound', 'shmOpenFailed', 'readerMissing',
                              'versionMismatch')
@@ -337,7 +334,7 @@ function Set-FpsSource([string]$Source) {
         $script:MetricsCtl.fpsSource = $Source
         # 顺带同步故障口径：采样侧据此区分「待机」与「真故障」。
         $script:MetricsCtl.brokenReasons = @($script:ShmBrokenReasons)
-        # 告诉采样侧该用哪个共享内存读取器（rtss / hwinfo）；缺省 rtss 兼容旧配置。
+        # 告诉采样侧该用哪个共享内存读取器（当前仅 rtss）；缺省 rtss 兼容旧配置。
         $srcEntry = if ($Source -ne 'presentmon') { Get-ExtensionEntry $Source } else { $null }
         $script:MetricsCtl.shmReader = if ($srcEntry -and $srcEntry.shmReader) { [string]$srcEntry.shmReader } else { 'rtss' }
     }

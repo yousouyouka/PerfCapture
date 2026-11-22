@@ -40,11 +40,15 @@ $script:MetricsFpsErrAt = $null
 
 # ---------- 一轮采样（runspace 里执行；单引号 here-string，禁止变量展开） ----------
 $script:MetricsSampleScript = @'
-param($SmiPath, $Queue, $IntervalMs, $Ctl, $PmExe, $FpsCsv, $FpsPid, $FpsFixed, $RtssReaderCode)
+param($SmiPath, $Queue, $IntervalMs, $Ctl, $PmExe, $FpsCsv, $FpsPid, $FpsFixed, $RtssReaderCode, $VendorReaderCode, $ThrottleReaderCode)
 
 # 批次 D：在本 runspace 内定义外部共享内存读取器（源码由宿主以参数传入，避免跨作用域依赖）。
 # 目前只有 RTSS 读取器；新增读取器时在此注入其源码，并在下面的分派处按 Ctl.shmReader 加分支。
 if ($RtssReaderCode) { . ([scriptblock]::Create($RtssReaderCode)) }
+# 平台规则 / 厂商温度 / 事件日志降频：三个模块都无 UI 与日志依赖，可直接在本 runspace 定义。
+# 顺序不能反：vendor-sensor 依赖 platform-rules 的 Get-PlatformProfile。
+if ($VendorReaderCode) { . ([scriptblock]::Create($VendorReaderCode)) }
+if ($ThrottleReaderCode) { . ([scriptblock]::Create($ThrottleReaderCode)) }
 
 # ---- 实时 FPS：PresentMon burst（短窗口采集 → 进程退出后解析）----
 # 为什么不能「边采边读」：PresentMon 用 --output_file 时是**独占**打开（FileShare.None），
@@ -649,7 +653,8 @@ while ($true) {
     }
 $out = [ordered]@{
     at = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
-    cpu = $null; cpuMhz = $null; cpuMhzMax = $null
+    cpu = $null; cpuMhz = $null; cpuMhzMax = $null; cpuTemp = $null; cpuTempSource = ''
+    cpuThrottle = $null; cpuThrottleOk = $null; cpuThrottleCount = 0; cpuThrottleReason = ''; cpuThrottleSeconds = $null
     gpu = $null; gpuClock = $null; gpuMemClock = $null; gpuTemp = $null; gpuPower = $null; gpuFan = $null
     vramUsed = $null; vramTotal = $null
     ramUsed = $null; ramTotal = $null
@@ -906,6 +911,31 @@ if ($null -eq $out.cpuMhz -and -not ('PcMetrics' -as [type])) {
     } catch { }
 }
 
+# ---- CPU 温度：厂商固件通道（当前仅联想，只读 WMI；见《数据源与平台覆盖规则.md》§3）----
+# 采不到就是 $null，界面显示「—」；不用 0 或推算值顶替。
+try {
+    if (Get-Command Get-VendorCpuTempSnapshot -ErrorAction SilentlyContinue) {
+        $vt = Get-VendorCpuTempSnapshot
+        if ($vt -and $vt.ok -and $null -ne $vt.value) {
+            $out.cpuTemp = [int]$vt.value
+            $out.cpuTempSource = [string]$vt.source
+        }
+    }
+} catch { }
+# ---- CPU 降频：Windows 事件日志 Event 37（30 s 缓存，采样每秒调用也不会重复查询）----
+try {
+    if (Get-Command Get-CpuThrottleState -ErrorAction SilentlyContinue) {
+        $th = Get-CpuThrottleState -WindowSeconds 120
+        if ($th) {
+            $out.cpuThrottleOk = [bool]$th.ok
+            $out.cpuThrottle = [bool]$th.limited
+            $out.cpuThrottleCount = [int]$th.count
+            $out.cpuThrottleSeconds = $th.maxSeconds
+            $out.cpuThrottleReason = [string]$th.reason
+        }
+    }
+} catch { }
+
 # ---- 内存（MB）：主路径 GlobalMemoryStatusEx，失败再退回 CIM ----
 if ('PcMetrics' -as [type]) {
     try {
@@ -1030,11 +1060,14 @@ function Get-MetricsCapabilities {
         # 实时 FPS：样本里 fps 非空才算可用；fpsTarget 是当前盯着的进程名
         fps = $false
         fpsTarget = ''
-        # 本轮不做，占位：将来由「可选传感器组件」置 true
-        cpuTemp = $false
+        # CPU 温度：$null=未探测；true=这台机器读到过（厂商固件通道，仅联想）
+        cpuTemp = $null
+        cpuTempSource = ''
         cpuFan = $false
         diskTemp = $false
         sensorPack = $false
+        # 降频：$null=未探测；true=日志可读（是否受限看样本 cpuThrottle）
+        cpuThrottle = $null
         # 元信息
         intervalMs = $script:MetricsIntervalMs
         ringSize = $script:MetricsRingSize
@@ -1065,15 +1098,32 @@ function Update-MetricsCapsFromSample($s) {
     $c.cpu = ($null -ne $s.cpu)
     $c.cpuMhz = ($null -ne $s.cpuMhz)
     $c.cpuMhzMax = ($null -ne $s.cpuMhzMax)
+    # 温度：读到过就记住「这台机器有」，偶发读失败只让值为 null，不改能力结论
+    if ($null -ne $s.cpuTemp) { $c.cpuTemp = $true }
+    if ($s.cpuTempSource) { $c.cpuTempSource = [string]$s.cpuTempSource }
+    # 降频：以「日志是否可读」为能力，不以「这次是否受限」为能力
+    if ($s.cpuThrottleOk -eq $true) { $c.cpuThrottle = $true }
     $c.ram = ($null -ne $s.ramTotal)
 }
 
 # ---------- 采样调度 ----------
-# 采样线程只创建一次：C# 里编译的原生类型与 PDH 查询都是**进程级静态状态**，
-# 每轮重建 runspace 会重新编译类型（静态状态归零、PDH 查询泄漏），
-# 表现为「首轮永远没有频率、退出时访问冲突 0xC0000005」。
-# 所以：常驻 runspace 循环采样 → ConcurrentQueue 回传 → 宿主计时器取走。
+# 把宿主已加载的模块源码读出来，随采样 runspace 一起注入（runspace 不共享函数表）。
+# 读不到就返回空：采样侧会跳过对应能力，绝不让整个监控因为一个模块缺失而起不来。
+function Get-MetricsModuleSource([string]$Name) {
+    try {
+        $root = $script:Root
+        if (-not $root) { $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot) }
+        $p = Join-Path $root ('src\app\' + $Name)
+        if (Test-Path -LiteralPath $p) { return (Get-Content -LiteralPath $p -Raw -Encoding UTF8) }
+    } catch { }
+    return ''
+}
+
 function Start-MetricsWorker {
+    # 采样线程只创建一次：C# 里编译的原生类型与 PDH 查询都是**进程级静态状态**，
+    # 每轮重建 runspace 会重新编译类型（静态状态归零、PDH 查询泄漏），
+    # 表现为「首轮永远没有频率、退出时访问冲突 0xC0000005」。
+    # 所以：常驻 runspace 循环采样 → ConcurrentQueue 回传 → 宿主计时器取走。
     if ($script:MetricsWorker) { return }
     try {
         if (-not $script:MetricsQueue) {
@@ -1103,6 +1153,11 @@ function Start-MetricsWorker {
         [void]$ps.AddParameter('FpsFixed', [bool]$script:MetricsFpsFixed)
         # 批次 D：把读取器源码作为参数传入，采样脚本在自身作用域点源定义函数。
         [void]$ps.AddParameter('RtssReaderCode', $script:RtssReaderSource)
+        # 平台规则 + 厂商温度（顺序：platform 先于 vendor）；降频单独注入。
+        $vendorSrc = ((Get-MetricsModuleSource 'platform-rules.ps1') + "`n" + (Get-MetricsModuleSource 'vendor-sensor.ps1'))
+        if ($vendorSrc.Trim()) { [void]$ps.AddParameter('VendorReaderCode', $vendorSrc) }
+        $thrSrc = Get-MetricsModuleSource 'cpu-throttle.ps1'
+        if ($thrSrc.Trim()) { [void]$ps.AddParameter('ThrottleReaderCode', $thrSrc) }
         $handle = $ps.BeginInvoke()
         $script:MetricsWorker = @{ PS = $ps; Handle = $handle; Started = (Get-Date) }
         Write-AppLog '监控采样线程已启动（常驻 runspace）'

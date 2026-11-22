@@ -29,11 +29,16 @@ $script:Cfg = @{ extensions = @{} }
 . (Join-Path $root 'src\app\80-Extensions.ps1')
 
 # ---- 1. 注册表加载与「已发布/规划中」分层 ----
+# v2.1.11：HWiNFO 已移除；当前 = rtss（可安装）+ cpu-sensor（内置）+ frameview/etw-consumer（规划中）。
 $reg = @(Get-ExtensionRegistry)
-Assert ($reg.Count -ge 5) "注册表加载 $($reg.Count) 项" "注册表条目过少：$($reg.Count)"
+Assert ($reg.Count -ge 4) "注册表加载 $($reg.Count) 项" "注册表条目过少：$($reg.Count)"
 $rtss = $reg | Where-Object { $_.id -eq 'rtss-shm' }
 Assert ($rtss.available) 'RTSS 已发布 available=true（批次 D 首个真实扩展）' 'RTSS 未标记已发布'
-Assert (@($reg | Where-Object { -not $_.available }).Count -ge 4) '其余扩展仍规划中（如实未发布）' '规划中扩展少于 4 项'
+Assert (@($reg | Where-Object { -not $_.available }).Count -ge 2) '其余扩展仍规划中（如实未发布）' '规划中扩展少于 2 项'
+# 内置能力：available=true 但不进供应层（没有 package、不参与安装/卸载）
+$cpuCap = $reg | Where-Object { $_.id -eq 'cpu-sensor' }
+Assert ($cpuCap.available -and $cpuCap.builtin) 'CPU 温度以内置能力发布（builtin=true）' 'CPU 温度内置能力声明缺失'
+Assert (-not $cpuCap.package) '内置能力没有 package（不捆绑组件）' '内置能力错误地声明了 package'
 Assert ($rtss.mode -eq 'external-shm' -and $rtss.shmName -eq 'RTSSSharedMemoryV2') 'RTSS 为外部共享内存模式' 'RTSS 模式/共享内存名错误'
 Assert ($null -ne $rtss.package -and $rtss.package.kind -eq 'nsis-zip') 'RTSS 为托管型：package 配置来自注册表（不探测本机预装实例）' 'RTSS 缺 package 配置'
 

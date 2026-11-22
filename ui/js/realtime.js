@@ -50,7 +50,8 @@
       scale: 1000, maxOf: (c) => (c && c.cpuBarMax ? c.cpuBarMax : (c && c.cpuBaseMhz ? c.cpuBaseMhz * 1.5 : 5000)),
       valueOf: (s) => s.cpuMhzMax, caps: 'cpuMhzMax', tip: 'realtime.tip.maxClock' },
     { col: 'cpu', key: 'cpu.temp', label: 'realtime.row.temp', unit: '°C', digits: 0,
-      maxOf: () => 100, valueOf: () => null, placeholder: 'realtime.naSensor' },
+      maxOf: () => 105, valueOf: (s) => s.cpuTemp, warn: 90, bad: 100,
+      caps: 'cpuTemp', tip: 'realtime.tip.cpuTemp', placeholder: 'realtime.naCpuTemp' },
     { col: 'cpu', key: 'cpu.fan', label: 'realtime.row.cpuFan', unit: 'rpm', digits: 0,
       maxOf: () => 3000, valueOf: () => null, placeholder: 'realtime.naSensor' },
 

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "note": "指标字典 = 唯一事实来源。modules 是报告板块顺序；metrics 是全部指标（含暂不可用）。status='ok' 表示本版可采；status='na' 表示本版暂不可用，reason 指向 reasons 里的三语原因（报告与详细说明都必须显示原因，绝不填 0）。label 是 i18n 键，nameZh/nameEn/nameJa 是兜底显示名。tiers 是所属档位（quick/standard/pro）。src 说明数据来源：presentmon=逐帧 CSV、nvsmi=nvidia-smi、pdh=Windows 性能计数器、wmi=系统接口、derived=由前述推导。",
+  "note": "指标字典 = 唯一事实来源。modules 是报告板块顺序；metrics 是全部指标（含暂不可用）。status='ok' 表示本版可采；status='na' 表示本版暂不可用，reason 指向 reasons 里的三语原因（报告与详细说明都必须显示原因，绝不填 0）。label 是 i18n 键，nameZh/nameEn/nameJa 是兜底显示名。tiers 是所属档位（quick/standard/pro）。src 说明数据来源：presentmon=逐帧 CSV、nvsmi=nvidia-smi、pdh=Windows 性能计数器、wmi=系统接口、vendorwmi=厂商固件通道（只读 ACPI-WMI）、winevent=Windows 事件日志、derived=由前述推导。",
   "modules": [
     { "id": "perf", "label": "metric.module.perf", "nameZh": "游戏性能表现", "nameEn": "Game performance", "nameJa": "ゲーム性能",
       "descZh": "帧率水平与稳定性：平均帧率、1% / 0.1% 低帧率、帧时间分布、卡顿次数与时长、上屏延迟。回答「流不流畅、稳不稳、卡不卡」。",
@@ -52,8 +52,8 @@
     { "id": "cpu.process", "opt": "proccpu", "module": "cpu", "label": "metric.cpuProcess", "nameZh": "游戏进程 CPU 占用", "nameEn": "Process CPU usage", "nameJa": "プロセス CPU 使用率", "unit": "%", "stat": "avg", "src": "pdh", "tiers": ["standard", "pro"], "status": "ok" },
     { "id": "cpu.coreMax", "module": "cpu", "label": "metric.cpuCoreMax", "nameZh": "单核最高占用", "nameEn": "Per-core peak", "nameJa": "単一コア最大", "unit": "%", "stat": "max", "src": "pdh", "tiers": ["standard", "pro"], "status": "ok" },
     { "id": "cpu.clock", "module": "cpu", "label": "metric.cpuClock", "nameZh": "CPU 当前频率", "nameEn": "CPU clock", "nameJa": "CPU 周波数", "unit": "MHz", "stat": "avg", "src": "pdh", "tiers": ["standard", "pro"], "status": "ok" },
-    { "id": "cpu.throttle", "module": "cpu", "label": "metric.cpuThrottle", "nameZh": "CPU 降频状态", "nameEn": "CPU throttling", "nameJa": "CPU スロットリング", "unit": "状态", "stat": "state", "src": "derived", "tiers": ["pro"], "status": "na", "reason": "na.cpuThrottle" },
-    { "id": "cpu.temp", "module": "cpu", "label": "metric.cpuTemp", "nameZh": "CPU 温度", "nameEn": "CPU temperature", "nameJa": "CPU 温度", "unit": "°C", "stat": "max", "src": "sensor", "tiers": ["standard", "pro"], "status": "na", "reason": "na.cpuTemp" },
+    { "id": "cpu.throttle", "module": "cpu", "label": "metric.cpuThrottle", "nameZh": "CPU 降频（固件限速）", "nameEn": "CPU throttling (firmware limit)", "nameJa": "CPU スロットリング（ファームウェア制限）", "unit": "状态", "stat": "state", "src": "winevent", "tiers": ["pro"], "status": "ok" },
+    { "id": "cpu.temp", "module": "cpu", "label": "metric.cpuTemp", "nameZh": "CPU 温度", "nameEn": "CPU temperature", "nameJa": "CPU 温度", "unit": "°C", "stat": "max", "src": "vendorwmi", "tiers": ["standard", "pro"], "status": "ok" },
     { "id": "cpu.power", "opt": "cpupower", "module": "cpu", "label": "metric.cpuPower", "nameZh": "CPU 封装功耗（含核显与 uncore）", "nameEn": "CPU package power (incl. iGPU & uncore)", "nameJa": "CPU パッケージ消費電力（内蔵 GPU・uncore 含む）", "unit": "W", "stat": "avg", "src": "pdh", "tiers": ["pro"], "status": "ok" },
 
     { "id": "gpu.util", "opt": "gpuusage", "module": "gpu", "label": "metric.gpuUtil", "nameZh": "GPU 平均利用率", "nameEn": "GPU average utilisation", "nameJa": "GPU 平均使用率", "unit": "%", "stat": "avg", "src": "nvsmi", "tiers": ["quick", "standard", "pro"], "status": "ok" },
@@ -81,7 +81,7 @@
     { "id": "thermal.gpuThermalThrottle", "opt": "gputemp", "module": "thermal", "label": "metric.gpuThermalThrottle", "nameZh": "GPU 温度降频", "nameEn": "GPU thermal throttling", "nameJa": "GPU 温度スロットリング", "unit": "状态", "stat": "state", "src": "nvsmi", "tiers": ["standard", "pro"], "status": "ok" },
     { "id": "thermal.cpuPowerAvg", "opt": "cpupower", "module": "thermal", "label": "metric.cpuPowerAvg", "nameZh": "CPU 平均封装功耗", "nameEn": "Average CPU package power", "nameJa": "CPU パッケージ平均消費電力", "unit": "W", "stat": "avg", "src": "pdh", "tiers": ["pro"], "status": "ok" },
     { "id": "thermal.cpuPowerPeak", "opt": "cpupower", "module": "thermal", "label": "metric.cpuPowerPeak", "nameZh": "CPU 峰值封装功耗", "nameEn": "Peak CPU package power", "nameJa": "CPU パッケージ最大消費電力", "unit": "W", "stat": "max", "src": "pdh", "tiers": ["pro"], "status": "ok" },
-    { "id": "thermal.cpuThermalThrottle", "module": "thermal", "label": "metric.cpuThermalThrottle", "nameZh": "CPU 温度降频", "nameEn": "CPU thermal throttling", "nameJa": "CPU 温度スロットリング", "unit": "状态", "stat": "state", "src": "sensor", "tiers": ["pro"], "status": "na", "reason": "na.cpuThrottle" },
+    { "id": "thermal.cpuThermalThrottle", "module": "thermal", "label": "metric.cpuThermalThrottle", "nameZh": "CPU 固件限速", "nameEn": "CPU firmware throttling", "nameJa": "CPU ファームウェア制限", "unit": "状态", "stat": "state", "src": "winevent", "tiers": ["pro"], "status": "ok" },
 
     { "id": "bottleneck.gpuBusy", "module": "bottleneck", "label": "metric.gpuBusy", "nameZh": "GPU Busy（忙时占比）", "nameEn": "GPU Busy (busy-time share)", "nameJa": "GPU ビジー率（稼働時間の割合）", "unit": "%", "stat": "avg", "src": "presentmon", "tiers": ["standard", "pro"], "status": "ok" },
     { "id": "bottleneck.cpuFrameTime", "module": "bottleneck", "label": "metric.cpuFrameTime", "nameZh": "CPU 帧处理时间", "nameEn": "CPU frame time", "nameJa": "CPU フレーム処理時間", "unit": "ms", "stat": "avg", "src": "presentmon", "tiers": ["standard", "pro"], "status": "ok" },
@@ -119,14 +119,14 @@
   ],
   "reasons": {
     "na.cpuTemp": {
-      "zh": "CPU 温度需要内核级传感器驱动（LibreHardwareMonitor 那一类）才能读。本项目坚持零注入、不捆绑驱动，避免触发反作弊与蓝屏风险，所以本版不提供；不是采不到帧，而是我们不引入这类组件。",
-      "en": "CPU temperature needs a kernel-mode sensor driver (the LibreHardwareMonitor class of tools). This project deliberately ships no drivers and no injection, to avoid anti-cheat and stability risks, so it is not provided in this version.",
-      "ja": "CPU 温度はカーネルモードのセンサードライバ（LibreHardwareMonitor 系）が必要です。本プロジェクトは非注入・ドライバ非同梱の方針（アンチチートと安定性のリスク回避）のため、本版では提供しません。"
+      "zh": "这台机器没有可用的固件温度通道。CPU 温度目前只支持联想机型：读取其固件通过 ACPI-WMI 暴露的只读温度接口，不需要内核驱动。其它品牌须逐一适配并经真机验证，未验证前如实标为暂不可用，不用估算值或主板热区温度替代。",
+      "en": "No usable firmware temperature channel was found on this machine. CPU temperature currently supports Lenovo models only: it reads a read-only ACPI-WMI interface exposed by the firmware, with no kernel driver. Other brands must be adapted and validated per model; until then the value stays unavailable rather than being estimated or replaced with a motherboard thermal-zone reading.",
+      "ja": "この機種には利用可能なファームウェア温度経路がありません。CPU 温度は現在 Lenovo 機のみ対応で、ファームウェアが ACPI-WMI で公開する読み取り専用インターフェースから取得します（カーネルドライバ不要）。他社機は機種ごとの適応と実機検証が必要で、それまでは推測値やマザーボードのサーマルゾーン温度で代替せず、未対応として表示します。"
     },
     "na.cpuThrottle": {
-      "zh": "CPU 降频状态要靠温度与功耗数据判断，而这两项本版拿不到；只看频率与占用推算会误报，所以不猜，标为暂不可用。",
-      "en": "CPU throttling can only be judged from temperature and power, which this version cannot read. Inferring from clock and usage alone would produce false positives, so it is left unavailable rather than guessed.",
-      "ja": "CPU スロットリングは温度と消費電力から判断しますが、本版では取得できません。周波数と使用率だけからの推測は誤判定になるため、推測せず未対応としています。"
+      "zh": "Windows 系统日志（Microsoft-Windows-Kernel-Processor-Power / Event 37）不可读，本次无法判断是否发生固件限速。该事件只说明「被固件限制」，不指明原因，因此也不会用频率或温度去反推原因。",
+      "en": "The Windows system log (Microsoft-Windows-Kernel-Processor-Power / Event 37) could not be read, so firmware throttling could not be determined. That event reports a firmware-imposed limit without naming the cause, so clock or temperature data is not used to infer one.",
+      "ja": "Windows システムログ（Microsoft-Windows-Kernel-Processor-Power / Event 37）を読めなかったため、ファームウェア制限の有無を判断できません。このイベントは「ファームウェアによる制限」のみを示し原因は示さないため、周波数や温度から原因を推測することもしません。"
     },
     "na.gpuHotspot": {
       "zh": "GPU 热点温度要 NVAPI 的逐传感器读取，nvidia-smi 只给整体温度。本版不引入 NVAPI 组件，所以标为暂不可用。",

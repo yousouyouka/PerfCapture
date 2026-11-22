@@ -17,7 +17,9 @@ Write-Host "`n[1/6] 目录结构"
 $structure = @(
     'src\PerfCapture.ps1',
     'src\app\00-Prelude.ps1', 'src\app\05-Paths.ps1', 'src\app\10-Bootstrap.ps1',
-    'src\app\15-Logging.ps1', 'src\app\20-Settings.ps1', 'src\app\30-Tools.ps1', 'src\app\35-Metrics.ps1', 'src\app\55-Overlay.ps1',
+    'src\app\15-Logging.ps1', 'src\app\20-Settings.ps1', 'src\app\30-Tools.ps1',
+    'src\app\platform-rules.ps1', 'src\app\vendor-sensor.ps1', 'src\app\cpu-throttle.ps1',
+    'src\app\35-Metrics.ps1', 'src\app\55-Overlay.ps1',
     'src\app\40-Bridge.ps1', 'src\app\50-Host.ps1', 'src\app\60-Capture.ps1', 'src\app\68-UpdateWrapper.ps1', 'src\app\rtss-shm.ps1', 'src\app\80-Extensions.ps1', 'src\app\85-ExtensionProvision.ps1', 'src\app\90-Main.ps1',
     'src\engine\Measure-GamePerf.ps1',
     'ui\index.html',
@@ -660,11 +662,21 @@ $reg       = $regJson | ConvertFrom-Json
 # 注册表：结构与「如实发布」（批次 D 起 RTSS 为首个 available=true 的真实扩展）
 if (@($reg.extensions).Count -lt 1) { Bad 'extensions.json 没有任何扩展条目' }
 $published = @($reg.extensions | Where-Object { $_.available -eq $true })
-if ($published.Count -ne 1 -or $published[0].id -ne 'rtss-shm') {
-    Bad "available=true 的扩展应恰为 rtss-shm（批次 D），实际：$($published.id -join ',')"
+# v2.1.11：可发布的条目 = 1 个可安装扩展（rtss-shm）+ 1 个内置能力（cpu-sensor）。
+# 内置能力没有 package、不参与供应层/看护；可安装扩展仍然只能有 rtss-shm 一个。
+$pubReal = @($published | Where-Object { -not $_.builtin })
+if ($pubReal.Count -ne 1 -or $pubReal[0].id -ne 'rtss-shm') {
+    Bad "available=true 的可安装扩展应恰为 rtss-shm（批次 D），实际：$($pubReal.id -join ',')"
 }
-if ($published.Count -eq 1 -and ($published[0].mode -ne 'external-shm' -or -not $published[0].shmName)) {
+if ($pubReal.Count -eq 1 -and ($pubReal[0].mode -ne 'external-shm' -or -not $pubReal[0].shmName)) {
     Bad 'RTSS 应为 external-shm 模式且声明 shmName（不捆绑 payload）'
+}
+$cpuReg = @($published | Where-Object { $_.id -eq 'cpu-sensor' })
+if ($cpuReg.Count -ne 1) { Bad 'cpu-sensor 未以 available=true 发布（v2.1.11 起为内置能力）' }
+else {
+    if (-not $cpuReg[0].builtin) { Bad 'cpu-sensor 必须标记 builtin=true（随主程序提供，不安装）' }
+    if ($cpuReg[0].package) { Bad 'cpu-sensor 不应有 package（不捆绑任何组件）' }
+    if ($cpuReg[0].mode -ne 'builtin-vendor') { Bad 'cpu-sensor 模式应为 builtin-vendor' }
 }
 foreach ($f in 'id', 'name', 'category', 'available', 'detect', 'payload') {
     if ($null -eq $reg.extensions[0].$f) { Bad "扩展注册表首条缺字段 $f" }
@@ -897,7 +909,10 @@ foreach ($need in 'Get-MetricsCapabilities', 'Start-MetricsSampler', 'Stop-Metri
 }
 if ($metPs -notmatch 'MetricsIntervalMs = 1000') { Bad '实时监控采样间隔不是 1 秒' }
 if ($metPs -notmatch 'MetricsRingSize = 120') { Bad '实时监控环形缓冲不是 120 点' }
-if ($metPs -notmatch 'cpuTemp = \$false') { Bad 'CPU 温度占位没有关掉（本版不该提供）' }
+if ($metPs -match 'cpuTemp = \$false') { Bad 'CPU 温度仍是恒 false 占位（v2.1.11 起应由真实样本校正）' }
+if ($metPs -notmatch 'Get-VendorCpuTempSnapshot') { Bad 'CPU 温度未接入厂商固件通道' }
+if ($metPs -notmatch 'Get-CpuThrottleState') { Bad 'CPU 降频未接入 Windows 事件日志' }
+if ($metPs -notmatch 'VendorReaderCode' -or $metPs -notmatch 'ThrottleReaderCode') { Bad '采样 runspace 未注入平台/温度/降频模块源码' }
 if ($metPs -notmatch 'GetSystemTimes|GlobalMemoryStatusEx') { Bad '缺少 Win32 只读采集（P/Invoke）' }
 if ($metPs -notmatch 'PdhAddEnglishCounterW') { Bad 'CPU 频率没有走 PDH 英文计数器（本地化系统会读不到）' }
 if ($metPs -match 'CpuMhz\(\)') { Bad '旧的 CallNtPowerInformation 频率口径又回来了（本机只给 2007/2501 粗值）' }
@@ -919,6 +934,67 @@ else {
 }
 if ($metPs -notmatch 'type = ''metricSample''') { Bad '没有向界面推送 metricSample' }
 if ($metPs -notmatch 'type = ''metricsCaps''') { Bad '没有向界面推送 metricsCaps' }
+
+# ---------- 5n-2. 平台覆盖与数据源规则（v2.1.11） ----------
+# 规则先行：没有规则文档就不允许有对应实现（防止「先写功能、后补口径」）
+$ruleDoc = Join-Path $root '数据源与平台覆盖规则.md'
+if (-not (Test-Path $ruleDoc)) { Bad '缺少《数据源与平台覆盖规则.md》（数据源必须先有规则）' }
+else {
+    $ruleTxt = Get-Content $ruleDoc -Raw -Encoding UTF8
+    foreach ($need in 'Windows 10 1809', 'Intel', 'AMD', 'NVIDIA', 'LENOVO_OTHER_METHOD', 'Event ID 37', '禁止') {
+        if ($ruleTxt -notmatch [regex]::Escape($need)) { Bad "规则文档缺关键条款：$need" }
+    }
+}
+$platPs = Get-Content (Join-Path $root 'src\app\platform-rules.ps1') -Raw -Encoding UTF8
+foreach ($need in 'Get-PlatformProfile', 'Get-CpuVendorName', 'Get-GpuVendorName', 'unsupportedCpu', 'unsupportedGpu', 'PlatformMinBuild') {
+    if ($platPs -notmatch [regex]::Escape($need)) { Bad "platform-rules.ps1 缺 $need" }
+}
+$venPs = Get-Content (Join-Path $root 'src\app\vendor-sensor.ps1') -Raw -Encoding UTF8
+foreach ($need in 'LENOVO_OTHER_METHOD', '0x05040000', 'Get-VendorCpuTempSnapshot', 'Get-VendorTempAvailability', 'vendorNotSupported') {
+    if ($venPs -notmatch [regex]::Escape($need)) { Bad "vendor-sensor.ps1 缺 $need" }
+}
+# 红线：只读。写接口（SetFeatureValue）只允许出现在注释里，不允许被调用。
+if ($venPs -match 'Invoke-CimMethod[^\r\n]*SetFeatureValue|MethodName\s+["'']SetFeatureValue') {
+    Bad 'vendor-sensor.ps1 调用了 SetFeatureValue（可改温度墙/功耗墙，规则禁止）'
+}
+# 禁止用 ACPI 热区冒充核心温度（规则 §2）
+foreach ($src in @($venPs, $platPs, $metPs)) {
+    if ($src -match 'MSAcpi_ThermalZoneTemperature') { Bad '出现 ACPI 热区温度（不是核心温度，规则禁止）' }
+}
+# 降频只准读事件日志，不准读 MSR / 内核
+$thrPs = Get-Content (Join-Path $root 'src\app\cpu-throttle.ps1') -Raw -Encoding UTF8
+foreach ($need in 'Microsoft-Windows-Kernel-Processor-Power', 'CapDurationInSeconds', 'Get-CpuThrottleSummary', 'throttleLogUnavailable') {
+    if ($thrPs -notmatch [regex]::Escape($need)) { Bad "cpu-throttle.ps1 缺 $need" }
+}
+if ($thrPs -match 'IA32_THERM_STATUS|Rdmsr|NtQuerySystemInformation') { Bad 'cpu-throttle.ps1 试图读 MSR（需内核驱动，规则禁止）' }
+# 入口必须加载三个模块（顺序：platform 先于 vendor）
+$entryPsX = Get-Content (Join-Path $root 'src\PerfCapture.ps1') -Raw -Encoding UTF8
+foreach ($need in 'platform-rules.ps1', 'vendor-sensor.ps1', 'cpu-throttle.ps1') {
+    if ($entryPsX -notmatch [regex]::Escape($need)) { Bad "入口未加载 $need" }
+}
+$iPlat = $entryPsX.IndexOf('platform-rules.ps1')
+$iVen = $entryPsX.IndexOf('vendor-sensor.ps1')
+if ($iPlat -lt 0 -or $iVen -lt 0 -or $iPlat -gt $iVen) { Bad '入口加载顺序错误（platform-rules 必须在 vendor-sensor 之前）' }
+# 指标字典：三条指标必须可采，且来源写对
+$dictObj = Get-Content (Join-Path $root 'capture-metrics.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+$ctMetric = @($dictObj.metrics | Where-Object { $_.id -eq 'cpu.temp' })
+$thMetric = @($dictObj.metrics | Where-Object { $_.id -eq 'cpu.throttle' })
+$ttMetric = @($dictObj.metrics | Where-Object { $_.id -eq 'thermal.cpuThermalThrottle' })
+if ($ctMetric.Count -ne 1 -or $ctMetric[0].status -ne 'ok' -or $ctMetric[0].src -ne 'vendorwmi') { Bad 'cpu.temp 指标状态/来源不对（应 ok + vendorwmi）' }
+if ($thMetric.Count -ne 1 -or $thMetric[0].status -ne 'ok' -or $thMetric[0].src -ne 'winevent') { Bad 'cpu.throttle 指标状态/来源不对（应 ok + winevent）' }
+if ($ttMetric.Count -ne 1 -or $ttMetric[0].status -ne 'ok' -or $ttMetric[0].src -ne 'winevent') { Bad 'thermal.cpuThermalThrottle 指标状态/来源不对（应 ok + winevent）' }
+# 采集引擎：必须真的把温度和降频写进汇总
+$engPs = Get-Content (Join-Path $root 'src\engine\Measure-GamePerf.ps1') -Raw -Encoding UTF8
+foreach ($need in 'cpu_thermal', 'cpu_temp_c', 'Get-CpuThrottleSummary', 'temp_state', 'throttle_count') {
+    if ($engPs -notmatch [regex]::Escape($need)) { Bad "采集引擎缺 CPU 温度/降频汇总：$need" }
+}
+# 前端：实时页温度行必须接真实字段（不允许仍写死 null）
+$rtJsX = Get-Content (Join-Path $root 'ui\js\realtime.js') -Raw -Encoding UTF8
+if ($rtJsX -notmatch 'valueOf:\s*\(s\)\s*=>\s*s\.cpuTemp') { Bad 'realtime.js 的 CPU 温度行仍不是真实字段' }
+$repJs = Get-Content (Join-Path $root 'ui\js\report.js') -Raw -Encoding UTF8
+foreach ($need in "cpuThermal", "cpuThrottleText", "'cpu.temp'", "'cpu.throttle'", 'thermal.cpuThermalThrottle') {
+    if ($repJs -notmatch [regex]::Escape($need)) { Bad "report.js 缺 CPU 温度/降频渲染：$need" }
+}
 
 $rtJs = Get-Content (Join-Path $root 'ui\js\realtime.js') -Raw -Encoding UTF8
 foreach ($need in 'window.PerfRealtime', '__refreshRealtime', 'metricsStart', 'metricsStop', 'is-na', 'FIELDS') {

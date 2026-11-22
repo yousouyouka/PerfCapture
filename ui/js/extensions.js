@@ -48,6 +48,13 @@
     staleData:        'extensions.reason.staleData',
     noFrames:         'extensions.reason.noFrames',
     readException:    'extensions.reason.readException',
+    // 内置厂商通道（v2.1.11）：为什么这台机器没有 CPU 温度
+    vendorNotSupported: 'extensions.reason.vendorNotSupported',
+    vendorNeedsAdmin:   'extensions.reason.vendorNeedsAdmin',
+    vendorNoChannel:    'extensions.reason.vendorNoChannel',
+    vendorNotImplemented:'extensions.reason.vendorNotImplemented',
+    vendorOutOfRange:   'extensions.reason.vendorOutOfRange',
+    vendorReadFailed:   'extensions.reason.vendorReadFailed',
     // 批次 E：供应层失败细分（一律回滚后回推，不假装成功）
     provisionBusy:       'extensions.reason.provisionBusy',
     provisionUnavailable:'extensions.reason.provisionUnavailable',
@@ -191,6 +198,16 @@
       const b = el('button', 'btn', tx('extensions.notReady', '后续版本开放'));
       b.type = 'button'; b.disabled = true;                   // 未发布：如实禁用，不做假安装
       b.title = tx('extensions.reason.notAvailable', '该扩展尚未发布');
+      box.appendChild(b);
+      return box;
+    }
+    // 内置能力：随主程序提供，不需要安装/启用/关闭（例如厂商固件温度通道）。
+    // 不给「一键启用」按钮，避免用户以为点了才会生效；状态只说明当前机器能不能用。
+    if (s.builtin) {
+      const on = s.status === 'enabled';
+      const b = el('button', 'btn', tx(on ? 'extensions.builtinOn' : 'extensions.builtinOff', on ? '内置 · 无需安装' : '当前机型不支持'));
+      b.type = 'button'; b.disabled = true;
+      b.title = tx('extensions.builtinHint', '该能力随主程序提供，不需要安装或启用；状态表示当前机型是否支持');
       box.appendChild(b);
       return box;
     }

@@ -312,6 +312,23 @@ function presetCode(r, key) {
   }
   return t('report.presetUnknown', '无法确认档位');
 }
+/** CPU 温度/降频的汇总块（v2.1.11）：老报告没有这个字段，返回 null 而不是 0 */
+function cpuThermal(r) {
+  return (r && r.cpu_thermal && typeof r.cpu_thermal === 'object') ? r.cpu_thermal : null;
+}
+/** CPU 降频：只描述「Windows 日志记录到固件限速」，不写原因 */
+function cpuThrottleText(r) {
+  const ct = cpuThermal(r);
+  if (!ct || ct.throttle_ok === false) return null;
+  const n = Number(ct.throttle_count) || 0;
+  if (n <= 0) return t('report.cpuThrottleOff', '未记录到固件限速');
+  let s = fillParams(t('report.cpuThrottleOn', '已记录 {n} 条固件限速'), { n: n });
+  const cores = Number(ct.throttle_cores) || 0;
+  const maxS = ct.throttle_max_s;
+  if (cores > 0) s += fillParams(t('report.cpuThrottleCores', '，涉及 {c} 个逻辑处理器'), { c: cores });
+  if (maxS != null) s += fillParams(t('report.cpuThrottleMax', '，最长一次 {s} 秒'), { s: maxS });
+  return s;
+}
 /** nvidia-smi 这一路是否真的采到了（否则不能说「未触发」，只能说没有数据） */
 function nvsmiOk(r) {
   return r.gpu_temp_max_c != null || r.gpu_clock_avg_mhz != null ||
@@ -349,6 +366,11 @@ const METRIC_TEXT = {
   'cpu.process': (r) => numText(r.cpu_extra && r.cpu_extra.proc_cpu_avg_pct, '%', 1),
   'cpu.coreMax': (r) => numText(r.cpu_max_core_peak_pct, '%', 1),
   'cpu.clock': (r) => numText(r.cpu_clock_avg_mhz, 'MHz', 0),
+  'cpu.temp': (r) => {
+    const ct = cpuThermal(r);
+    return ct ? numText(ct.temp_max_c, '°C', 0) : null;
+  },
+  'cpu.throttle': (r) => cpuThrottleText(r),
   'cpu.power': (r) => numText(r.cpu_extra && r.cpu_extra.pkg_power_avg_w, 'W', 1),
   'gpu.util': (r) => numText(r.gpu_util_avg_pct, '%', 0),
   'gpu.temp': (r) => numText(r.gpu_temp_max_c, '°C', 0),
@@ -382,6 +404,7 @@ const METRIC_TEXT = {
   'thermal.gpuThermalLimit': (r) => throttleState(r, 'sw_thermal'),
   'thermal.gpuPowerLimit': (r) => throttleState(r, 'sw_power_cap'),
   'thermal.gpuThermalThrottle': (r) => throttleState(r, 'hw_thermal'),
+  'thermal.cpuThermalThrottle': (r) => cpuThrottleText(r),
   'bottleneck.gpuBusy': (r) => numText(r.bottleneck && r.bottleneck.gpu_busy_pct, '%', 1),
   'bottleneck.cpuFrameTime': (r) => numText(r.bottleneck && r.bottleneck.cpu_frame_ms, 'ms', 2),
   'bottleneck.gpuRenderTime': (r) => numText(r.bottleneck && r.bottleneck.gpu_render_ms, 'ms', 2),
@@ -496,6 +519,28 @@ function runtimeNaWhy(r, x) {
       r.cpu_extra && r.cpu_extra.pkg_power_state === 'unavailable') {
     return t('report.naWhy.noEnergyMeter',
       '这台机器没有向 Windows 提供 CPU 能量计数器（Energy Meter），本次没有采到功耗数值；这里不会用 0 W 或估算值代替。');
+  }
+  /* CPU 温度：只有联想固件通道；其它品牌如实不可用，不用主板热区或估算值顶替。
+     老报告没有 cpu_thermal 字段 → 返回空，交给正常渲染（有值才有行）。 */
+  const ct = cpuThermal(r);
+  if (x.id === 'cpu.temp' && ct && ct.temp_state && ct.temp_state !== 'ok') {
+    return t('report.naWhy.cpuTemp',
+      '这台机器没有可用的固件温度通道（目前仅联想机型支持）。这里不会用估算值或主板热区温度替代。');
+  }
+  if ((x.id === 'cpu.throttle' || x.id === 'thermal.cpuThermalThrottle') && ct && ct.throttle_ok === false) {
+    return t('report.naWhy.cpuThrottle',
+      'Windows 系统日志不可读，本次无法判断是否发生固件限速；不会用频率或温度去猜测原因。');
+  }
+  /* 平台覆盖（规则文档 §1）：表外组合必须明确说「不支持」，不能因为值为空就把整行藏掉。 */
+  const env = r.environment || {};
+  if ((x.module === 'gpu' || String(x.id || '').indexOf('thermal.gpu') === 0) &&
+      env.gpu_vendor && env.gpu_vendor !== 'nvidia') {
+    return t('report.naWhy.gpuVendor',
+      'GPU 指标目前只支持 NVIDIA 显卡；这台机器的显卡不在覆盖范围内，因此没有数值，也不用估算值代替。');
+  }
+  if (x.module === 'cpu' && env.cpu_vendor && env.cpu_vendor !== 'intel' && env.cpu_vendor !== 'amd') {
+    return t('report.naWhy.cpuVendor',
+      'CPU 指标目前只支持 Intel / AMD 处理器；这台机器的处理器不在覆盖范围内，因此没有数值。');
   }
   return '';
 }

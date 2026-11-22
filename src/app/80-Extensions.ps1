@@ -46,6 +46,8 @@ function Get-ExtensionRegistry {
                 source    = if ($e.source) { [string]$e.source } else { '' }
                 version   = if ($e.version) { [string]$e.version } else { '' }
                 available = [bool]$e.available
+                # builtin=true：能力随主程序提供，不安装、不启用/关闭、不参与供应层与看护。
+                builtin   = [bool]$e.builtin
                 mode      = if ($e.mode) { [string]$e.mode } else { 'payload' }
                 shmName   = if ($e.shmName) { [string]$e.shmName } else { '' }
                 # 外部共享内存读取器：rtss（默认）。新增读取器时在 extensions.json 声明新 id，
@@ -226,6 +228,19 @@ function Wait-ExtensionReady($Entry, [int]$TimeoutMs = 4000) {
 function Get-ExtensionStateFor($Entry) {
     # 未发布：一律规划中，不看持久化——防止旧的残留状态把未发布扩展显示成可用。
     if (-not $Entry.available) { return 'planned' }
+    # 内置能力（例如厂商固件温度通道）：没有安装/启用概念，状态只反映当前机器能不能用。
+    # 不走持久化，也不进看护——它不是进程、不会被「关掉」。
+    if ($Entry.builtin) {
+        if (-not (Get-Command Get-VendorTempAvailability -ErrorAction SilentlyContinue)) { return 'unsupported' }
+        try {
+            $av = Get-VendorTempAvailability
+            switch ([string]$av.state) {
+                'enabled' { return 'enabled' }
+                'unsupported' { return 'unsupported' }
+                default { return 'failed' }
+            }
+        } catch { return 'failed' }
+    }
     $st = Get-ExtensionPersistState $Entry.id
     if (-not $st) { return 'notInstalled' }
     if ($st -eq 'installed') { return 'installed' }
@@ -245,6 +260,19 @@ function Get-ExtensionStateReason([string]$Id, [string]$State) {
     $bag = Get-ExtensionBag
     if ($bag.ContainsKey($Id) -and $bag[$Id] -isnot [string] -and $null -ne $bag[$Id].reason -and [string]$bag[$Id].reason -ne '') {
         return [string]$bag[$Id].reason
+    }
+    # 内置能力：原因来自实时能力探测（为什么这台机器没有温度）
+    $be = Get-ExtensionEntry $Id
+    if ($be -and $be.builtin) {
+        if ($State -eq 'enabled') { return '' }
+        try {
+            if (Get-Command Get-VendorTempAvailability -ErrorAction SilentlyContinue) {
+                $av = Get-VendorTempAvailability
+                if ($av.reason) { return [string]$av.reason }
+            }
+        } catch { }
+        if ($State -eq 'unsupported') { return 'vendorNotSupported' }
+        return 'vendorReadFailed'
     }
     switch ($State) {
         'planned' { return 'notAvailable' }
@@ -285,6 +313,7 @@ function Get-ExtensionStates {
             version = $e.version; available = $e.available
             status = $state; reason = $reason; installedAt = $installedAt
             autoStart = $autoStart; installedVersion = $ownVersion; managed = [bool]$e.package
+            builtin = [bool]$e.builtin
             note = $lastNote
         })
     }

@@ -19,6 +19,17 @@ window.PerfUpdateAreas = ['capture', 'realtime', 'other'];
 
 window.PerfUpdates = [
   {
+    date: '2026-11-22', version: '2.1.11',
+    title: 'CPU 温度与降频上线：厂商固件只读通道 + Windows 系统日志',
+    items: [
+      ['feature', 'CPU 温度不再恒为「暂不可用」：联想机型直接读固件通过 ACPI-WMI 暴露的只读温度接口，不需要装驱动、不注入游戏；其它品牌如实显示不可用并说明原因。', 'realtime'],
+      ['metrics', 'CPU 降频改看 Windows 系统日志（Kernel-Processor-Power / Event 37）：报告给出采集期间的固件限速条数、涉及逻辑处理器数与最长持续秒数；只报「被固件限制」，不猜原因。', 'capture'],
+      ['metrics', '新增《数据源与平台覆盖规则》：明确只支持 Windows 10 1809+、CPU 限 Intel/AMD、GPU 限 NVIDIA；表外组合一律如实 N/A，不用估算值或主板热区温度顶替。', 'other'],
+      ['ui', '实时监控的「温度」行接上真实读数（来源：厂商固件通道）；CPU 风扇仍如实显示「该机型未提供此传感器」。', 'realtime'],
+      ['ux', '扩展中心的 CPU 温度改为「内置 · 无需安装」，状态只表示这台机器是否支持，不再引导安装第三方组件。', 'other']
+    ]
+  },
+  {
     date: '2026-11-22', version: '2.1.10',
     title: '报告标注数据来源、扩展崩溃自愈、更新下载多一层兜底',
     items: [

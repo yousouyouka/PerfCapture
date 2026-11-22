@@ -49,6 +49,16 @@ $collectChart    = $true      # 图表始终生成：UI 不再提供开关，报
 $collectGpuSensors = $collectGpuTemp -or $collectGpuUsage   # 两者共用一次 nvidia-smi 查询
 $ErrorActionPreference = 'Stop'
 
+# ---------------------------------------------------------------- 规则模块
+# 采集引擎跑在独立进程里（由 60-Capture.ps1 拉起），宿主加载的函数在这里不存在。
+# 平台规则 / 厂商温度 / 降频这三个模块无 UI 依赖，直接点源即可；
+# 缺文件时对应能力降级为 N/A，不影响帧采集（见《数据源与平台覆盖规则.md》§5）。
+$script:AppModuleDir = Join-Path (Split-Path $PSScriptRoot -Parent) 'app'
+foreach ($m in @('platform-rules.ps1', 'vendor-sensor.ps1', 'cpu-throttle.ps1')) {
+    $mp = Join-Path $script:AppModuleDir $m
+    if (Test-Path -LiteralPath $mp) { . $mp }
+}
+
 # ---------------------------------------------------------------- elevation
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin -and -not $NoElevate) {
@@ -132,9 +142,16 @@ Write-Host ''
 # 批次 C：一次 nvidia-smi 取全部 GPU 字段（时钟/功耗/风扇/PCIe/降频原因），
 # CPU 每核占用用 CIM 的 formatted data（英文类名，不受系统语言影响）。
 # 老驱动/老 nvidia-smi 不认识新字段时整条查询会报错 -> 退回 1.4 的三字段，绝不因此丢数据。
-$sampler = Start-Job -ArgumentList $GamePid, $sensCsv, ($Seconds + 10), $smi, $collectGpuSensors, $collectVram, $collectRam, $collectProcCpu, $collectSysMem, $collectShared, $collectCpuPower -ScriptBlock {
-    param($gpid, $csv, $maxSec, $smi, $wantGpu, $wantVram, $wantRam, $wantProcCpu, $wantSysMem, $wantShared, $wantCpuPower)
-    if (-not ($wantGpu -or $wantVram -or $wantRam -or $wantProcCpu -or $wantSysMem -or $wantShared -or $wantCpuPower)) { return }
+$capStartedAt = Get-Date   # 降频只统计本次采集窗口内的日志事件
+$sampler = Start-Job -ArgumentList $GamePid, $sensCsv, ($Seconds + 10), $smi, $collectGpuSensors, $collectVram, $collectRam, $collectProcCpu, $collectSysMem, $collectShared, $collectCpuPower, $script:AppModuleDir -ScriptBlock {
+    param($gpid, $csv, $maxSec, $smi, $wantGpu, $wantVram, $wantRam, $wantProcCpu, $wantSysMem, $wantShared, $wantCpuPower, $appDir)
+    # 平台规则 + 厂商温度：与宿主同一份源码（避免两套实现算出两种结论）
+    foreach ($m in @('platform-rules.ps1', 'vendor-sensor.ps1')) {
+        $mp = Join-Path $appDir $m
+        if (Test-Path -LiteralPath $mp) { . $mp }
+    }
+    # 注意：这里不再「所有开关都关就整体 return」——CPU 占用与 CPU 温度是无开关的基础项，
+    # 提前返回会让这两项在只关 GPU 采集时凭空消失（历史上就是因此出现过空板块）。
 
 # ---- NvGpu：直调 nvml.dll（<1 ms）替代 nvidia-smi（每次 45–60 ms 进程启动）----
 # 任何一项取不到都回退 nvidia-smi，功能不退化。
@@ -213,7 +230,7 @@ if ('NvGpu' -as [type]) { try { $gpuUseNvml = [NvGpu]::Start() } catch { $gpuUse
     $script:t0 = Get-Date
     $cols = @('timestamp_utc', 'gpu_temp_c', 'gpu_util_pct', 'gpu_mem_used_mb', 'proc_vram_mb', 'proc_ram_mb',
               'gpu_clock_mhz', 'gpu_mem_clock_mhz', 'gpu_clock_max_mhz', 'gpu_power_w', 'gpu_fan_pct',
-              'pcie_gen', 'pcie_width', 'cpu_util_pct', 'cpu_max_core_pct',
+              'pcie_gen', 'pcie_width', 'cpu_util_pct', 'cpu_max_core_pct', 'cpu_temp_c',
               'proc_cpu_pct', 'sys_ram_pct', 'sys_ram_avail_mb', 'sys_commit_mb', 'shared_vram_mb',
               'gpu_limit_w', 'ac_online', 'battery_pct', 'cpu_pkg_w',
               'thr_sw_power_cap', 'thr_sw_thermal', 'thr_hw_thermal', 'thr_hw_slowdown', 'thr_sync_boost',
@@ -401,6 +418,14 @@ public static class PerfPower {
         }
         if ($null -ne $script:cpuTotal)   { $v['cpu_util_pct'] = $script:cpuTotal }
         if ($null -ne $script:cpuMaxCore) { $v['cpu_max_core_pct'] = $script:cpuMaxCore }
+        # CPU 温度：厂商固件通道（当前仅联想）。读不到就保持 NA，
+        # 绝不用「CPU 利用率换算」「ACPI 热区」之类顶替（规则文档 §2 / §3.3）。
+        if (Get-Command Get-VendorCpuTempSnapshot -ErrorAction SilentlyContinue) {
+            try {
+                $vt = Get-VendorCpuTempSnapshot
+                if ($vt -and $vt.ok -and $null -ne $vt.value) { $v['cpu_temp_c'] = [int]$vt.value }
+            } catch { }
+        }
         # ---- B1 新增遥测：进程 CPU / 系统内存 / 提交量 / 共享显存 ----
         # 进程 CPU：用 TotalProcessorTime 差分，避开「性能计数器对象名本地化」的坑
         if ($wantProcCpu) {
@@ -990,6 +1015,39 @@ $sysCommit = if ($collectSysMem) { Get-SensorStat 'sys_commit_mb' } else { $null
 $sharedVram = if ($collectShared) { Get-SensorStat 'shared_vram_mb' } else { $null }
 $cpuPkg   = if ($collectCpuPower) { Get-SensorStat 'cpu_pkg_w' } else { $null }
 
+# ---- CPU 温度与降频（v2.1.11）：温度走厂商固件通道（仅联想），降频走 Windows 事件日志 ----
+$cpuTemp = Get-SensorStat 'cpu_temp_c'
+$cpuThrottle = $null
+if (Get-Command Get-CpuThrottleSummary -ErrorAction SilentlyContinue) {
+    try { $cpuThrottle = Get-CpuThrottleSummary -Since $capStartedAt } catch { $cpuThrottle = $null }
+}
+$platform = $null
+try { if (Get-Command Get-PlatformProfile -ErrorAction SilentlyContinue) { $platform = Get-PlatformProfile } } catch { }
+
+# 温度状态：以「采集期间到底有没有采到」为准，不以最后一次探测为准。
+$cpuTempState = 'unsupported'; $cpuTempReason = ''; $cpuTempSource = ''
+if ($cpuTemp) {
+    $cpuTempState = 'ok'
+    try { $cpuTempSource = [string](Get-VendorCpuTempSnapshot).source } catch { }
+    if (-not $cpuTempSource) { $cpuTempSource = 'vendor-wmi' }
+} else {
+    try {
+        $vs = Get-VendorCpuTempSnapshot
+        if ($vs) {
+            $cpuTempReason = [string]$vs.reason
+            if ($vs.reason -in @('vendorNotSupported', 'vendorNoChannel', 'vendorNotImplemented', 'vendorOutOfRange')) { $cpuTempState = 'unsupported' }
+            else { $cpuTempState = 'failed' }
+        }
+    } catch { $cpuTempState = 'failed'; $cpuTempReason = 'vendorReadFailed' }
+    if (-not $cpuTempReason) { $cpuTempReason = 'vendorNotSupported' }
+}
+$throttleOk = [bool]($cpuThrottle -and $cpuThrottle.ok)
+$throttleCount = if ($cpuThrottle) { [int]$cpuThrottle.count } else { 0 }
+$throttleCores = if ($cpuThrottle) { [int]$cpuThrottle.cores } else { 0 }
+$throttleMaxS = if ($cpuThrottle) { $cpuThrottle.maxSeconds } else { $null }
+$throttleReason = if ($cpuThrottle) { [string]$cpuThrottle.reason } else { 'throttleLogUnavailable' }
+
+
 # 供电侧统计（都来自采样 CSV；AC 状态按样本计数，不做估算）
 $acOn = 0; $acOff = 0
 foreach ($s0 in $sensors) {
@@ -1512,6 +1570,23 @@ $summary = [ordered]@{
         # 采不到时说清是哪一种：skipped = 用户关了开关；unavailable = 这台机器没有这个计数器
         pkg_power_state = $(if (-not $collectCpuPower) { 'skipped' } elseif ($null -eq $cpuPkg) { 'unavailable' } else { 'ok' })
     }
+    # CPU 温度与降频：来源必须在报告里可见（规则文档 §5）。
+    # temp_state / throttle_reason 让报告能区分「不支持」「读取失败」「未记录」三种情况。
+    cpu_thermal      = [ordered]@{
+        temp_avg_c      = $(if ($cpuTemp) { [math]::Round($cpuTemp.Avg, 1) } else { $null })
+        temp_max_c      = $(if ($cpuTemp) { [math]::Round($cpuTemp.Max, 1) } else { $null })
+        temp_min_c      = $(if ($cpuTemp) { [math]::Round($cpuTemp.Min, 1) } else { $null })
+        temp_samples    = $(if ($cpuTemp) { $cpuTemp.N } else { 0 })
+        temp_state      = $cpuTempState       # ok / unsupported / failed
+        temp_reason     = $cpuTempReason      # vendorNotSupported / vendorNeedsAdmin / vendorReadFailed …
+        temp_source     = $cpuTempSource      # vendor-wmi:lenovo-wmi
+        throttle_ok     = $throttleOk         # 日志查询是否成功（成功但 0 条 = 未记录到限速）
+        throttle_count  = $throttleCount
+        throttle_cores  = $throttleCores
+        throttle_max_s  = $throttleMaxS
+        throttle_reason = $throttleReason
+        throttle_source = 'winevent:kpp-37'   # Microsoft-Windows-Kernel-Processor-Power / Event 37
+    }
     environment      = [ordered]@{
         cpu_model = $cpuModelText
         ram_type = $ramTypeText
@@ -1532,6 +1607,12 @@ $summary = [ordered]@{
         power_events        = $powerEvents        # 采集窗口内 Kernel-Power 105 的条数
         power_health        = $powerHealth        # ok / events / $null(查询失败)
         power_health_detail = $powerHealthDetail
+        # 平台覆盖（v2.1.11）：跨机器对比前先看这里；不支持的组合在指标处如实 N/A
+        cpu_vendor          = $(if ($platform) { [string]$platform.cpuVendor } else { $null })
+        gpu_vendor          = $(if ($platform) { [string]$platform.gpuVendor } else { $null })
+        system_vendor       = $(if ($platform) { [string]$platform.systemVendor } else { $null })
+        system_model        = $(if ($platform) { [string]$platform.systemModel } else { $null })
+        os_build            = $(if ($platform) { [int]$platform.osBuild } else { $null })
     }
     run              = $runName
     process          = $exeBase
@@ -1642,6 +1723,12 @@ if ($summary.throttle.Count -gt 0) {
 } else { Write-Host '  throttle        : none' }
 Write-Host ("  CPU             : " + $(if ($null -ne $summary.cpu_util_avg_pct) { "" + $summary.cpu_util_avg_pct + " % avg, 最高单核 " + $summary.cpu_max_core_avg_pct + " % (峰值 " + $summary.cpu_max_core_peak_pct + " %)" } else { "NA" }))
 Write-Host ("  CPU package     : " + $(if ($null -ne $summary.cpu_extra.pkg_power_avg_w) { "" + $summary.cpu_extra.pkg_power_avg_w + " W avg / " + $summary.cpu_extra.pkg_power_max_w + " W max (iGPU + uncore included)" } else { "NA" }))
+Write-Host ("  CPU temp        : " + $(if ($null -ne $summary.cpu_thermal.temp_max_c) { "" + $summary.cpu_thermal.temp_avg_c + " C avg / " + $summary.cpu_thermal.temp_max_c + " C max (" + $summary.cpu_thermal.temp_source + ")" } else { "NA (" + $summary.cpu_thermal.temp_reason + ")" }))
+if (Get-Command Format-CpuThrottleSummary -ErrorAction SilentlyContinue) {
+    Write-Host ("  CPU throttle    : " + (Format-CpuThrottleSummary $cpuThrottle))
+} else {
+    Write-Host "  CPU throttle    : NA (module missing)"
+}
 if ($summary.warmup_dropped -gt 0) { Write-Host ("  warmup          : 已丢弃开头 " + $summary.warmup_seconds + " s（" + $summary.warmup_dropped + " 帧）") }
 Write-Host ("  display latency : " + $(if ($null -ne $summary.display_latency_avg_ms) { "" + $summary.display_latency_avg_ms + " ms (p95 " + $summary.display_latency_p95_ms + " ms)" } else { "NA" }))
 Write-Host ("  GPU usage       : " + $(if ($null -ne $summary.gpu_util_avg_pct) { "" + $summary.gpu_util_avg_pct + " % (max " + $summary.gpu_util_max_pct + " %)" } else { "NA" }))
@@ -1952,6 +2039,10 @@ if ($summary.throttle.Count -gt 0) {
     $detRows += '<tr><td>降频原因</td><td>采集期间未触发降频</td></tr>'
 }
 $detRows += NaRows 'gpu'
+if ($summary.environment.gpu_vendor -and $summary.environment.gpu_vendor -ne 'nvidia') {
+    $gvTxt = [string]$summary.environment.gpu_vendor
+    $detRows += '<tr><td>GPU 指标</td><td>NA<span style="font-size:11.5px;color:#8a8a8a">（GPU 指标仅支持 NVIDIA 显卡；本机为 ' + $gvTxt + '）</span></td></tr>'
+}
 $detRows += SecRow 'CPU 运行状态'
 if ($null -ne $summary.cpu_util_avg_pct) {
     $detRows += '<tr><td>CPU 占用 平均 / 最高' + $(if ($null -ne $summary.cpu_max_core_avg_pct) { '<br><span style="font-size:11.5px">最高单核 ' + (Fmt $summary.cpu_max_core_avg_pct '0.0') + ' %（峰值 ' + (Fmt $summary.cpu_max_core_peak_pct '0.0') + ' %）</span>' } else { '' }) + '</td><td>' + (Fmt $summary.cpu_util_avg_pct '0.0') + ' / ' + (Fmt $summary.cpu_util_max_pct '0.0') + ' %</td></tr>'
@@ -1961,7 +2052,42 @@ if ($null -ne $summary.cpu_extra.pkg_power_avg_w) {
 } elseif ($collectCpuPower) {
     $detRows += '<tr><td>CPU 封装功耗</td><td>NA<span style="font-size:11.5px;color:#8a8a8a">（这台机器没有提供 CPU 能量计数器）</span></td></tr>'
 }
+# CPU 温度：有值就报数值 + 来源；没有就给具体原因，不藏行、不填 0（规则文档 §5）
+$ct = $summary.cpu_thermal
+$tmpSrcLabel = switch -Regex ([string]$ct.temp_source) {
+    'lenovo' { '联想固件通道' }
+    '^vendor-wmi' { '厂商固件通道' }
+    default { [string]$ct.temp_source }
+}
+if ($null -ne $ct.temp_max_c) {
+    $detRows += '<tr><td>CPU 温度 平均 / 最高<br><span style="font-size:11.5px">来源：' + $tmpSrcLabel + '（只读固件接口，不是主板/机箱热区）</span></td><td>' + (Fmt $ct.temp_avg_c '0.0') + ' / ' + (Fmt $ct.temp_max_c '0') + ' °C</td></tr>'
+} else {
+    $whyTmp = ''
+    if (Get-Command Get-PlatformReasonText -ErrorAction SilentlyContinue) { $whyTmp = Get-PlatformReasonText ([string]$ct.temp_reason) }
+    if (-not $whyTmp) { $whyTmp = '这台机器没有可用的固件温度通道' }
+    $detRows += '<tr><td>CPU 温度</td><td>NA<span style="font-size:11.5px;color:#8a8a8a">（' + $whyTmp + '）</span></td></tr>'
+}
+# CPU 降频：Windows 事件日志 Event 37，只报「固件限速记录」，不做原因归因
+if ($ct.throttle_ok) {
+    if ($ct.throttle_count -gt 0) {
+        $thrTxt = '已记录 ' + $ct.throttle_count + ' 条'
+        if ($ct.throttle_cores -gt 0) { $thrTxt += '（涉及 ' + $ct.throttle_cores + ' 个逻辑处理器' }
+        if ($null -ne $ct.throttle_max_s) {
+            if ($ct.throttle_cores -gt 0) { $thrTxt += '，最长一次 ' + $ct.throttle_max_s + ' 秒）' }
+            else { $thrTxt += '（最长一次 ' + $ct.throttle_max_s + ' 秒）' }
+        } elseif ($ct.throttle_cores -gt 0) { $thrTxt += '）' }
+        $detRows += '<tr><td>CPU 降频（固件限速）<br><span style="font-size:11.5px">Windows 系统日志 Event 37：只说明被固件限制，不指明原因</span></td><td>' + $thrTxt + '</td></tr>'
+    } else {
+        $detRows += '<tr><td>CPU 降频（固件限速）<br><span style="font-size:11.5px">Windows 系统日志 Event 37</span></td><td>采集期间未记录到固件限速</td></tr>'
+    }
+} else {
+    $detRows += '<tr><td>CPU 降频（固件限速）</td><td>NA<span style="font-size:11.5px;color:#8a8a8a">（Windows 系统日志不可读）</span></td></tr>'
+}
 $detRows += NaRows 'cpu'
+# 平台覆盖（规则文档 §1）：表外组合明确写「不支持」，不因为值为空就把整行藏掉
+if ($summary.environment.cpu_vendor -and $summary.environment.cpu_vendor -notin @('intel', 'amd')) {
+    $detRows += '<tr><td>CPU 指标</td><td>NA<span style="font-size:11.5px;color:#8a8a8a">（仅支持 Intel / AMD 处理器；本机厂商未在覆盖范围内）</span></td></tr>'
+}
 $detRows += SecRow '内存与显存'
 if ($collectVram) {
     $detRows += '<tr><td>显存 平均 / 最高（本程序）</td><td>' + (Fmt $summary.vram_avg_mb '0') + ' / ' + (Fmt $summary.vram_max_mb '0') + ' MB</td></tr>'
@@ -1980,6 +2106,18 @@ $detRows += NaRows 'thermal'
 $detRows += SecRow '渲染瓶颈分析'
 $detRows += NaRows 'bottleneck'
 $detRows += SecRow '测试环境'
+# 平台覆盖：跨机器对比时，先确认双方都在支持矩阵内（规则文档 §1）
+$platParts = @()
+if ($summary.environment.cpu_vendor) { $platParts += ('CPU ' + $summary.environment.cpu_vendor) }
+if ($summary.environment.gpu_vendor) { $platParts += ('GPU ' + $summary.environment.gpu_vendor) }
+if ($summary.environment.system_vendor) {
+    $sysTxt = [string]$summary.environment.system_vendor
+    if ($summary.environment.system_model) { $sysTxt += ' ' + $summary.environment.system_model }
+    $platParts += ('整机 ' + $sysTxt)
+}
+if ($platParts.Count -gt 0) {
+    $detRows += '<tr><td>平台</td><td>' + ($platParts -join ' · ') + '</td></tr>'
+}
 # 帧数据源：同一次采集只有一个来源，报告必须如实标注（2.1.10）
 $srcLabel = if ($FpsSource -eq 'presentmon') { 'PresentMon ETW（零注入基线）' } else { $FpsSource + '（扩展数据源）' }
 $detRows += '<tr><td>帧数据源</td><td>' + $srcLabel + '</td></tr>'

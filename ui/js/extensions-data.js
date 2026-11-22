@@ -44,17 +44,18 @@ window.PerfExtensions = [
   },
   {
     id: 'cpu-sensor',
-    name: 'CPU 温度与降频',
-    desc: '经用户态传感器组件提供 CPU 温度与降频原因。涉及组件由用户自行选择，安装须二次授权。',
+    name: 'CPU 温度（厂商固件通道）',
+    desc: '读取主板/EC 固件通过 ACPI-WMI 暴露的只读温度接口。内置能力：无需安装、不捆绑驱动；目前支持联想机型，其它品牌如实显示暂不可用。',
     category: 'sensor',
-    metrics: ['CPU 温度', '降频原因'],
-    depends: '用户态传感器库',
-    size: '中',
-    permission: '安装需二次授权',
-    platform: 'Windows · 全平台',
-    cost: '低',
-    source: '开源组件 · 用户自选',
-    status: 'planned'
+    metrics: ['CPU 温度', 'CPU 降频（固件限速）'],
+    depends: '联想机型固件接口（其它品牌暂不支持）',
+    size: '内置（不占额外空间）',
+    permission: '随主程序以管理员运行，无需额外授权',
+    platform: 'Windows · 联想机型',
+    cost: '极低（约 2 秒一次只读调用）',
+    source: '厂商固件 · ACPI-WMI 只读接口',
+    status: 'enabled',
+    builtin: true
   },
   {
     id: 'etw-consumer',

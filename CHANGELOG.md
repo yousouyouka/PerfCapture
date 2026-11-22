@@ -1,12 +1,24 @@
 ﻿# 更新记录
 
-## 未发布（本地改动，尚未发版）
+## 未发布（2.1.11，本地改动，尚未发版）
 
 - **移除 HWiNFO 扩展（`hwinfo-shm`）**：HWiNFO 为闭源商业软件，免费版共享内存接口有 12 小时会话限制、商业使用需 Pro 授权、
   官方禁止再分发安装包，不适合写进采集链路。读取器、三支探针（B144/B146/B147）、扩展中心条目与前端词条一并删除；
   配置化分派（`shmReader` / `Get-ExtensionShmSnapshot`）保留，当前仅 `rtss`，RTSS 行为不变。smoke 增加反向守卫，防止旧分支被误合回。
-- **CPU 温度改走厂商 WMI（规划中）**：新增 `tests/probe-vendor-wmi.ps1`，验证联想
-  `LENOVO_OTHER_METHOD.GetFeatureValue(0x05040000)` 的零驱动读数；未验证通过前不接入采样与报告。
+- **CPU 温度（厂商固件通道）与 CPU 降频（Windows 日志）已接入，未发版**：
+  - 新增《数据源与平台覆盖规则.md》：明确只支持 Windows 10 1809+、CPU 限 Intel/AMD、GPU 限 NVIDIA；
+    表外组合如实 N/A。数据源分四级白名单，自研内核驱动、注入、ACPI 热区冒充核心温度一律禁止。
+  - 温度：`src/app/vendor-sensor.ps1` 读联想 `LENOVO_OTHER_METHOD.GetFeatureValue(0x05040000)`，
+    只读白名单、绝不调 `SetFeatureValue`；读数按 15–110 °C 校验，0/负数判为「该机型未实现」；
+    连续失败 3 次进入 60 秒冷却。实时页、报告 JSON（`cpu_thermal`）与 HTML 均显示来源与数值。
+  - 降频：`src/app/cpu-throttle.ps1` 读 `Microsoft-Windows-Kernel-Processor-Power` / Event 37，
+    统计采集窗口内的条数、涉及逻辑处理器数与最长持续秒数；口径为「固件限速记录」，不做原因归因。
+    日志不可读与「查询成功但 0 条」严格区分，前者 N/A。
+  - 非联想的 CPU 温度、非 NVIDIA 的 GPU 指标、旧版 Windows 一律 N/A + 具体原因，不用估算值冒填充。
+  - 探针：`probe-platform-rules.ps1`、`probe-vendor-sensor.ps1`、`probe-cpu-throttle.ps1`；
+    smoke 增加静态守卫（禁止写接口 / ACPI 热区 / MSR，指标字典与前端渲染器一致）。
+  - 扩展中心 `cpu-sensor` 改为内置能力（`builtin=true`，无 package、不安装、不参与看护）。
+  - **未实测**：联想 WMI 真实读数需管理员运行一次探针；AMD/Intel 双平台与多品牌矩阵尚未补测。
 - **修复版本号显示滞后**：侧边栏底部与「关于」卡片仍显示 `v2.1.8`（2.1.10 发版时漏改），现与 `VERSION` 同步为 `v2.1.10`。
 
 ## 2.1.10 — 2026-11-22（报告标注数据来源、扩展崩溃自愈、更新通道兜底）

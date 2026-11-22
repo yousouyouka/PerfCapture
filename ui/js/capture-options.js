@@ -1,4 +1,4 @@
-/* 采集项勾选框：清单来自宿主下发的 capture-options.json（schemaVersion 3）
+/* 采集项勾选框：清单来自宿主下发的 capture-options.json（schemaVersion 4）
    新增采集项只改 capture-options.json（+ 引擎实现），不必动这里和 index.html。
    宿主读不到清单时会不下发 options，此时用下面的内置清单兜底。
    always=true 的项 = 引擎无条件采集：默认勾选、不可修改，界面上标「始终采集」。 */
@@ -35,6 +35,8 @@ const FALLBACK_OPTIONS = [
   { skip: 'ram', module: 'memory', kind: 'optional', label: 'capture.item.ram', default: true },
   { skip: 'sysmem', module: 'memory', kind: 'optional', label: 'capture.item.sysmem', tip: 'capture.tip.sysmem', default: true },
   { skip: 'sharedmem', module: 'memory', kind: 'optional', label: 'capture.item.sharedmem', default: true },
+  { skip: 'cputemp', module: 'thermal', kind: 'optional', label: 'capture.item.cputemp', tip: 'capture.tip.cputemp', default: true },
+  { skip: 'cputhrottle', module: 'thermal', kind: 'optional', label: 'capture.item.cputhrottle', tip: 'capture.tip.cputhrottle', default: true },
   { skip: 'gpubusy', module: 'bottleneck', kind: 'core', label: 'capture.item.gpubusy' },
   { skip: 'diagnosis', module: 'bottleneck', kind: 'derived', label: 'capture.item.diagnosis', note: 'capture.derive.diagnosis' },
   { skip: 'models', module: 'environment', kind: 'core', label: 'capture.item.models' },

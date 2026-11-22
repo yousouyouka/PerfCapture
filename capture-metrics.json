@@ -129,9 +129,9 @@
       "ja": "Windows システムログ（Microsoft-Windows-Kernel-Processor-Power / Event 37）を読めなかったため、ファームウェア制限の有無を判断できません。このイベントは「ファームウェアによる制限」のみを示し原因は示さないため、周波数や温度から原因を推測することもしません。"
     },
     "na.gpuHotspot": {
-      "zh": "GPU 热点温度要 NVAPI 的逐传感器读取，nvidia-smi 只给整体温度。本版不引入 NVAPI 组件，所以标为暂不可用。",
-      "en": "GPU hotspot temperature requires per-sensor reads through NVAPI; nvidia-smi only exposes the overall temperature. NVAPI is not bundled in this version.",
-      "ja": "GPU ホットスポット温度は NVAPI のセンサー単位取得が必要で、nvidia-smi は全体温度のみです。本版は NVAPI を同梱しないため未対応です。"
+      "zh": "GPU 热点温度需要驱动提供可确认的热点传感器。已用 NVAPI 逐传感器探针实测：本机只暴露 1 个核心温度传感器，没有可区分于核心温度的热点读数，因此不提供该指标，也不用核心温度顶替。",
+      "en": "GPU hotspot temperature needs a driver-exposed sensor that can be confirmed as hotspot. A read-only NVAPI probe found only one core temperature sensor on this machine with no separate hotspot reading, so the metric is not offered — and core temperature is never substituted for it.",
+      "ja": "GPU ホットスポット温度には、ホットスポットと確認できるセンサーがドライバから提供される必要があります。読み取り専用の NVAPI プローブでは、この機種はコア温度センサーを 1 つだけ公開し、コア温度と区別できるホットスポット値はありませんでした。そのため本指標は提供せず、コア温度で代用することもしません。"
     },
     "na.renderQueue": {
       "zh": "渲染队列深度属于引擎／驱动内部状态，PresentMon 不对外报告。要做只能在游戏侧插桩，那违反零注入原则，所以暂不可用。",

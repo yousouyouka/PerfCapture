@@ -43,6 +43,9 @@ $collectProcCpu  = -not ($skipList -contains 'proccpu')
 $collectSysMem   = -not ($skipList -contains 'sysmem')
 $collectShared   = -not ($skipList -contains 'sharedmem')
 $collectCpuPower = -not ($skipList -contains 'cpupower')   # 2.0.17：CPU 封装功耗（PDH Energy Meter）
+# 2.1.12：CPU 温度与降频进可选清单。默认开（与 2.1.11 行为一致），关掉可省掉 WMI 与事件日志查询。
+$collectCpuTemp  = -not ($skipList -contains 'cputemp')
+$collectCpuThrottle = -not ($skipList -contains 'cputhrottle')
 $collectFeatures = -not ($skipList -contains 'features')
 $collectRes      = -not ($skipList -contains 'res')
 $collectChart    = $true      # 图表始终生成：UI 不再提供开关，报告里必定含曲线
@@ -420,7 +423,7 @@ public static class PerfPower {
         if ($null -ne $script:cpuMaxCore) { $v['cpu_max_core_pct'] = $script:cpuMaxCore }
         # CPU 温度：厂商固件通道（当前仅联想）。读不到就保持 NA，
         # 绝不用「CPU 利用率换算」「ACPI 热区」之类顶替（规则文档 §2 / §3.3）。
-        if (Get-Command Get-VendorCpuTempSnapshot -ErrorAction SilentlyContinue) {
+        if ($collectCpuTemp -and (Get-Command Get-VendorCpuTempSnapshot -ErrorAction SilentlyContinue)) {
             try {
                 $vt = Get-VendorCpuTempSnapshot
                 if ($vt -and $vt.ok -and $null -ne $vt.value) { $v['cpu_temp_c'] = [int]$vt.value }
@@ -1016,9 +1019,11 @@ $sharedVram = if ($collectShared) { Get-SensorStat 'shared_vram_mb' } else { $nu
 $cpuPkg   = if ($collectCpuPower) { Get-SensorStat 'cpu_pkg_w' } else { $null }
 
 # ---- CPU 温度与降频（v2.1.11）：温度走厂商固件通道（仅联想），降频走 Windows 事件日志 ----
-$cpuTemp = Get-SensorStat 'cpu_temp_c'
+# 2.1.12：两项都受采集项开关控制。关掉时状态是 skipped（不是 unsupported），
+# 报告据此显示「未采集」而不是「暂不可用」——这两者不能混。
+$cpuTemp = if ($collectCpuTemp) { Get-SensorStat 'cpu_temp_c' } else { $null }
 $cpuThrottle = $null
-if (Get-Command Get-CpuThrottleSummary -ErrorAction SilentlyContinue) {
+if ($collectCpuThrottle -and (Get-Command Get-CpuThrottleSummary -ErrorAction SilentlyContinue)) {
     try { $cpuThrottle = Get-CpuThrottleSummary -Since $capStartedAt } catch { $cpuThrottle = $null }
 }
 $platform = $null
@@ -1026,7 +1031,9 @@ try { if (Get-Command Get-PlatformProfile -ErrorAction SilentlyContinue) { $plat
 
 # 温度状态：以「采集期间到底有没有采到」为准，不以最后一次探测为准。
 $cpuTempState = 'unsupported'; $cpuTempReason = ''; $cpuTempSource = ''
-if ($cpuTemp) {
+if (-not $collectCpuTemp) {
+    $cpuTempState = 'skipped'
+} elseif ($cpuTemp) {
     $cpuTempState = 'ok'
     try { $cpuTempSource = [string](Get-VendorCpuTempSnapshot).source } catch { }
     if (-not $cpuTempSource) { $cpuTempSource = 'vendor-wmi' }
@@ -1046,6 +1053,9 @@ $throttleCount = if ($cpuThrottle) { [int]$cpuThrottle.count } else { 0 }
 $throttleCores = if ($cpuThrottle) { [int]$cpuThrottle.cores } else { 0 }
 $throttleMaxS = if ($cpuThrottle) { $cpuThrottle.maxSeconds } else { $null }
 $throttleReason = if ($cpuThrottle) { [string]$cpuThrottle.reason } else { 'throttleLogUnavailable' }
+# skipped = 用户关了开关；unavailable = 日志读不了（权限/服务）；ok = 查询成功（0 条也算 ok，表示没记录到限速）
+$throttleState = if (-not $collectCpuThrottle) { 'skipped' } elseif ($throttleOk) { 'ok' } else { 'unavailable' }
+if (-not $collectCpuThrottle) { $throttleReason = '' }
 
 
 # 供电侧统计（都来自采样 CSV；AC 状态按样本计数，不做估算）
@@ -1577,9 +1587,10 @@ $summary = [ordered]@{
         temp_max_c      = $(if ($cpuTemp) { [math]::Round($cpuTemp.Max, 1) } else { $null })
         temp_min_c      = $(if ($cpuTemp) { [math]::Round($cpuTemp.Min, 1) } else { $null })
         temp_samples    = $(if ($cpuTemp) { $cpuTemp.N } else { 0 })
-        temp_state      = $cpuTempState       # ok / unsupported / failed
+        temp_state      = $cpuTempState       # ok / skipped / unsupported / failed
         temp_reason     = $cpuTempReason      # vendorNotSupported / vendorNeedsAdmin / vendorReadFailed …
         temp_source     = $cpuTempSource      # vendor-wmi:lenovo-wmi
+        throttle_state  = $throttleState      # ok / skipped / unavailable
         throttle_ok     = $throttleOk         # 日志查询是否成功（成功但 0 条 = 未记录到限速）
         throttle_count  = $throttleCount
         throttle_cores  = $throttleCores

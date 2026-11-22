@@ -1060,6 +1060,15 @@ if ($ovPs -notmatch 'locked = \[bool\]') { Bad 'overlayState 没有回传 locked
 if ($idx -notmatch 'id="ovLockDrag"') { Bad 'index.html 缺「禁用鼠标拖动」开关' }
 if ($rtJs -notmatch 'ovLockDrag') { Bad 'realtime.js 没有绑定拖动锁开关' }
 
+# 2.1.12：浮窗 CPU 温度不许再写死 locked。
+# 2.1.11 已接入厂商固件通道，写死会让联想机型「报告里有温度、浮窗却勾不上」。
+# 判定必须按平台能力动态算（非联想才灰掉），且要有独立的判定函数供状态回传复用。
+if ($ovPs -match 'key = ''cputemp''[^\r\n]*locked = \$true') {
+    Bad '浮窗把 cputemp 写死 locked（应按平台能力判定）'
+}
+if ($ovPs -notmatch "dynamic = 'temp'") { Bad '浮窗 cputemp 缺 dynamic 能力判定' }
+if ($ovPs -notmatch 'Get-OverlayLockedKeys') { Bad '55-Overlay.ps1 缺 Get-OverlayLockedKeys（动态锁定）' }
+
 # 2.1.7：扩展供应 E2（下载体验）/ E3（安装确认）的关键实现不许被回退掉
 $provPs = Get-Content (Join-Path $root 'src\app\85-ExtensionProvision.ps1') -Raw -Encoding UTF8
 foreach ($need in 'Get-InstallerPlan', 'Invoke-SourceOnce', 'Send-DownloadProgress', 'Stop-ExtensionProvision', 'Save-ProvisionDiagnostics', 'Get-ShmFacts') {

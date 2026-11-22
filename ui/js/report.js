@@ -523,6 +523,13 @@ function runtimeNaWhy(r, x) {
   /* CPU 温度：只有联想固件通道；其它品牌如实不可用，不用主板热区或估算值顶替。
      老报告没有 cpu_thermal 字段 → 返回空，交给正常渲染（有值才有行）。 */
   const ct = cpuThermal(r);
+  /* 「未采集」≠「暂不可用」：用户在采集项里关掉时，原因是「你关的」，不是「这台机器没有」。
+     两者共用一条文案会让用户以为机器不支持，必须分项判断（温度与降频是两个独立开关）。 */
+  const skippedText = t('report.naWhy.skipped', '采集项里关闭了这一项，本次没有采集；这不代表这台机器不支持。');
+  if (x.id === 'cpu.temp' && ct && ct.temp_state === 'skipped') return skippedText;
+  if ((x.id === 'cpu.throttle' || x.id === 'thermal.cpuThermalThrottle') && ct && ct.throttle_state === 'skipped') {
+    return skippedText;
+  }
   if (x.id === 'cpu.temp' && ct && ct.temp_state && ct.temp_state !== 'ok') {
     return t('report.naWhy.cpuTemp',
       '这台机器没有可用的固件温度通道（目前仅联想机型支持）。这里不会用估算值或主板热区温度替代。');

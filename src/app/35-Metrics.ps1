@@ -168,6 +168,18 @@ function Get-FpsLow1 {
     return 1000.0 / $slow
 }
 
+# 1%L 的三种状态（2.1.12）：null 不等于「这台机器没有」。
+#   ok      = 已经算出来了
+#   warming = 收到帧了，但样本还不足（窗口未满 / 帧数 < 20），再等几秒就有
+#   idle    = 一个帧都没收到（没选目标 / 游戏不出帧）
+# 不区分的话，浮窗只能一律显示 N/A，把「再等一下」说成「拿不到」。
+function Get-FpsLow1State {
+    param($Fps)
+    if ($null -ne $Fps.low1) { return 'ok' }
+    if ($Fps.ftWin -and $Fps.ftWin.Count -gt 0) { return 'warming' }
+    return 'idle'
+}
+
 function Get-BurstFrames {
     param([string]$Path)
     if (-not (Test-Path -LiteralPath $Path)) { return $null }
@@ -658,7 +670,7 @@ $out = [ordered]@{
     gpu = $null; gpuClock = $null; gpuMemClock = $null; gpuTemp = $null; gpuPower = $null; gpuFan = $null
     vramUsed = $null; vramTotal = $null
     ramUsed = $null; ramTotal = $null
-    fps = $null; fpsLow1 = $null; rlat = $null; pcl = $null; cpuPower = $null
+    fps = $null; fpsLow1 = $null; fpsLow1State = 'idle'; rlat = $null; pcl = $null; cpuPower = $null
     fpsTarget = $fps.target
     fpsErr = $fps.err
     fpsSource = if ($fps.sourceTag) { $fps.sourceTag } else { 'presentmon' }
@@ -965,6 +977,7 @@ if ($cpuPwrCounter) {
     } catch { $cpuPwrCounter = $null }
 }
 if ($null -ne $fps.low1) { $out.fpsLow1 = [math]::Round([double]$fps.low1, 2) }
+$out.fpsLow1State = Get-FpsLow1State $fps
 if ($null -ne $fps.dl) { $out.rlat = [math]::Round([double]$fps.dl, 2) }
 # 平均 PC 延迟（PCL）= 平均帧时间 + 渲染延迟；两个都在才有值，绝不估算
 if ($null -ne $fps.dl -and $null -ne $out.fps -and [double]$out.fps -gt 0) {
@@ -1000,6 +1013,7 @@ for ($k = 0; $k -lt $subSteps; $k++) {
         $out.at = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
         $out.fps = $fps.value
         $out.fpsLow1 = if ($null -ne $fps.low1) { [math]::Round([double]$fps.low1, 2) } else { $null }
+        $out.fpsLow1State = Get-FpsLow1State $fps
         $out.rlat = if ($null -ne $fps.dl) { [math]::Round([double]$fps.dl, 2) } else { $null }
         $out.pcl = if ($null -ne $fps.dl -and $null -ne $out.fps -and [double]$out.fps -gt 0) { [math]::Round((1000.0 / [double]$out.fps) + [double]$fps.dl, 2) } else { $null }
         $out.fpsTarget = $fps.target

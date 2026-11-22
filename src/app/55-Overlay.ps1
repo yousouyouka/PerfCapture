@@ -25,7 +25,8 @@ $script:OverlayLocked = $false
 # ── 浮窗可显示的 16 项（键名与 35-Metrics 采样字段一一对应）──
 # group：显示分组（FPS / GPU / CPU / 延迟 / RAM）
 # label：堆叠布局里一行的名字（照用户给的样式：GPU 利用率 / FPS 1%L / PCL（av）…）
-# field / unit：采样字段与单位；locked：本机确实拿不到，界面上**不给勾选**
+# field / unit：采样字段与单位；locked：**永远**没有数据源，界面上不给勾选
+# dynamic：本机**当前**有没有这条路（按平台能力算），非联想/非管理员时灰掉，但不写死
 $script:OverlayItemDefs = @(
     @{ key = 'fps';      group = 'FPS';  label = 'FPS';         unit = '';    field = 'fps' }
     @{ key = 'fpslow';   group = 'FPS';  label = 'FPS 1%L';     unit = '';    field = 'fpsLow1' }
@@ -39,16 +40,28 @@ $script:OverlayItemDefs = @(
     @{ key = 'cpuutil';  group = 'CPU';  label = 'CPU 利用率';   unit = '%';   field = 'cpu' }
     @{ key = 'cpuclock'; group = 'CPU';  label = 'CPU 频率';     unit = 'MHz'; field = 'cpuMhz' }
     @{ key = 'cpupower'; group = 'CPU';  label = 'CPU 功率';     unit = 'W';   field = 'cpuPower' }
-    @{ key = 'cputemp';  group = 'CPU';  label = 'CPU 温度';     unit = '°C';  locked = $true }
+    @{ key = 'cputemp';  group = 'CPU';  label = 'CPU 温度';     unit = '°C';  field = 'cpuTemp'; dynamic = 'temp' }
     @{ key = 'rlat';     group = '延迟'; label = 'RLAT';         unit = 'ms';  field = 'rlat' }
     @{ key = 'pcl';      group = '延迟'; label = 'PCL（av）';    unit = 'ms';  field = 'pcl' }
     @{ key = 'ram';      group = 'RAM';  label = 'RAM';          unit = '%';   field = '__ram' }
 )
 
 $script:OverlayItemKeys = @($script:OverlayItemDefs | ForEach-Object { $_.key })
-# 本机拿不到的项：界面上灰掉、不可勾选，也不写进配置
-$script:OverlayLockedKeys = @($script:OverlayItemDefs | Where-Object { $_.locked } | ForEach-Object { $_.key })
-$script:OverlaySelectableKeys = @($script:OverlayItemDefs | Where-Object { -not $_.locked } | ForEach-Object { $_.key })
+# 本机拿不到的项：界面上灰掉、不可勾选，也不写进配置。
+# 2.1.12 起 cputemp 不再写死——2.1.11 已接入联想固件通道，写死会把已经有数的机器也锁上。
+# 静态 locked 管「永远没有」；dynamic 管「这台机器现在有没有」，每次现算。
+function Get-OverlayLockedKeys {
+    $keys = @($script:OverlayItemDefs | Where-Object { $_.locked } | ForEach-Object { $_.key })
+    foreach ($d in $script:OverlayItemDefs) {
+        if (-not $d.dynamic) { continue }
+        $ok = $false
+        try { $ok = [bool](Test-PlatformCapability $d.dynamic) } catch { $ok = $false }
+        if (-not $ok) { $keys += $d.key }
+    }
+    return $keys
+}
+$script:OverlayLockedKeys = @(Get-OverlayLockedKeys)
+$script:OverlaySelectableKeys = @($script:OverlayItemDefs | Where-Object { -not $_.locked -and $script:OverlayLockedKeys -notcontains $_.key } | ForEach-Object { $_.key })
 $script:OverlayGroupOrder = @('FPS', 'GPU', 'CPU', '延迟', 'RAM')
 
 # 首次开启时的默认显示项（想只看 FPS 就在设置里全关掉、只留一项）
@@ -60,7 +73,8 @@ function Get-OverlayItemSet {
     $keys = @()
     if ($null -ne $Cfg.items) { $keys = @($Cfg.items) }
     if (-not $keys.Count) { $keys = $script:OverlayDefaultItems }
-    $rows = @($script:OverlayItemDefs | Where-Object { $keys -contains $_.key -and -not $_.locked })
+    $locked = @(Get-OverlayLockedKeys)
+    $rows = @($script:OverlayItemDefs | Where-Object { $keys -contains $_.key -and $locked -notcontains $_.key })
     if (-not $rows.Count) { $rows = @($script:OverlayItemDefs[0]) }
     return $rows
 }
@@ -434,7 +448,12 @@ function Format-OverlayItemValue {
     } else {
         $raw = $S.($Def.field)
     }
-    if ($null -eq $raw) { return $null }
+    if ($null -eq $raw) {
+        # 1%L 冷启动：已经收到帧、只是样本还不够（约 6 秒窗口 / 20 帧）。
+        # 显示「…」表示「再等一下」，与「拿不到」的 N/A 区分开——两者不是一回事。
+        if ($Def.key -eq 'fpslow' -and [string]$S.fpsLow1State -eq 'warming') { return '…' }
+        return $null
+    }
     $v = [double]$raw
     $txt = switch ($Def.key) {
         'fps'      { '{0:0.0}' -f $v }
@@ -450,6 +469,7 @@ function Format-OverlayItemValue {
         'cpuutil'  { '{0:0}' -f $v }
         'cpuclock' { '{0:0}' -f $v }
         'cpupower' { '{0:0.0}' -f $v }
+        'cputemp'  { '{0:0}' -f $v }
         'ram'      { '{0:0}' -f $v }
         default    { '{0:0.0}' -f $v }
     }
@@ -547,7 +567,7 @@ function Send-OverlayState {
             locked = [bool]$cfg.locked
             items = @($cfg.items)
             itemKeys = @($script:OverlayItemKeys)
-            itemLocked = @($script:OverlayLockedKeys)
+            itemLocked = @(Get-OverlayLockedKeys)
             hotkey = @{
                 ctrl = [bool]$cfg.hotkey.ctrl
                 alt = [bool]$cfg.hotkey.alt

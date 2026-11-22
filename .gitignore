@@ -1,9 +1,10 @@
 # ── 构建产物（打包生成，不进仓库）──
 /dist/*
-# 例外：只保留「当前版本」的安装包 —— 发版后用 git add -f 显式加进来
-# 例外：只保留「当前版本」的安装包 —— 用 git add -f dist/PerfCapture-Setup-<版本>.exe 显式加进来；
+# 例外：dist 只保留最近 3 个发布版本的安装包（AGENTS.md「发布决策」），
+# 发版后用 git add -f dist/PerfCapture-Setup-<版本>.exe 显式把当前版本加进来；
+# 被 pack.ps1 的 prune-dist.ps1 清掉的那个版本，随下次提交 git rm 掉（保持仓库与本地一致）。
 # 不要写 !/dist/PerfCapture-Setup-*.exe 这种通配例外，否则 git add -A 会把所有历史 exe 一起加进来
-# 展开的版本目录与历史 zip 不入库（例外只对 Setup exe 生效）
+# 展开的版本目录与 zip 不入库（例外只对 Setup exe 生效）
 # 根目录的 PerfCapture.exe 是本地编译的启动器，随 dist 产物走，源码仓库不带
 /PerfCapture.exe
 /build/payload.zip

@@ -80,6 +80,13 @@ build\          pack.ps1 · launcher.cs · setup-core.cs · setup-ui.cs · setup
   **不自行 push tag、不自行发 Release、不自行推 `updates` 分支**。
 - 检查更新的自动行为：**每次启动最多检查一次**；没发现新版本就**停止本次会话的自动检查**
   （下次启动恢复）；发现新版本提示后同样不再重复检查，直到用户操作或重启。
+- **`dist\` 只放最近 3 个发布版本的安装包**（2026-11-22 定规）。一个版本的三类产物
+  （`PerfCapture-<v>\` 展开目录、`PerfCapture-<v>.zip`、`PerfCapture-Setup-<v>.exe`）同进同出；
+  第 4 个版本发布后，更早的版本从 `dist\` 清掉——需要回滚时按 tag 重新打包，或从 GitHub Release 取。
+  由 `build\pack.ps1` 在打包末尾调用 `build\prune-dist.ps1 -Apply -Keep 3` 自动执行
+  （可手动预览：不加 `-Apply` 只打印计划）。排序按**版本号**，不看时间戳；
+  仓库里 `git add -f` 跟踪的 Setup exe 与之一致：只跟踪这 3 个，被清掉的那个随下次提交一并删除。
+  注意这是**本地产物**规则，与 `updates` 分支保留 2 个版本（`push-updates.ps1 -KeepVersions`）相互独立。
 
 ## 版本号规则（务必照做）
 

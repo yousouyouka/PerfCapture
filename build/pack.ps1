@@ -6,7 +6,8 @@ param(
     [string]$Version = '',
     [switch]$NoZip,
     [string]$ReleaseDate = '',   # 更新清单里的发布日期（默认今天；发版时显式传）
-    [switch]$NoManifest          # 只打包、不生成更新清单（调试用）
+    [switch]$NoManifest,         # 只打包、不生成更新清单（调试用）
+    [int]$KeepDistVersions = 3   # dist 只保留最近 N 个发布版本（0 = 不清理）；规则见 AGENTS.md
 )
 
 $ErrorActionPreference = 'Stop'
@@ -233,6 +234,20 @@ if (-not $NoManifest) {
         Write-Host '     未签名的清单会被客户端拒绝（验签失败）。发布前务必先签名。' -ForegroundColor Yellow
     }
 }
+# ---------- 10. 清理旧产物：dist 只保留最近 N 个发布版本 ----------
+# 规则（AGENTS.md「发布决策」）：dist 下只放最近 3 个发布版本的安装包。
+# 更早的版本从本地清掉——需要时用 tag 重新打包，或从 GitHub Release 取；
+# 清理逻辑单独放在 prune-dist.ps1，可手工 -Apply / 预览，不把删除逻辑埋进打包流程里。
+if ($KeepDistVersions -gt 0) {
+    $prune = Join-Path $buildDir 'prune-dist.ps1'
+    if (Test-Path -LiteralPath $prune) {
+        & $prune -DistRoot $distRoot -Keep $KeepDistVersions -Apply
+        if ($LASTEXITCODE -ne 0) { Write-Host "  ⚠ dist 清理未完成（exit $LASTEXITCODE），产物本身不受影响" -ForegroundColor Yellow }
+    } else {
+        Write-Host "  ⚠ 未找到 build\prune-dist.ps1，跳过 dist 清理" -ForegroundColor Yellow
+    }
+}
+
 Write-Host '== 打包完成 ==' -ForegroundColor Green
 Write-Host "  绿色目录: $stage"
 Write-Host '  直接双击 PerfCapture.exe 即可运行（首次会弹一次 UAC）'

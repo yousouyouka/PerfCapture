@@ -51,7 +51,8 @@ $required = @(
     'build\launcher.cs',
     'build\setup-core.cs',
     'build\setup-ui.cs',
-    'build\setup-dpi.manifest'
+    'build\setup-dpi.manifest',
+    '数据源与平台覆盖规则.md'
 )
 $missing = @()
 foreach ($r in $required) { if (-not (Test-Path (Join-Path $root $r))) { $missing += $r } }
@@ -79,10 +80,15 @@ foreach ($d in $dirs) {
     robocopy (Join-Path $root $d) (Join-Path $stage $d) /E /NFL /NDL /NJH /NJS /NP | Out-Null
     if ($LASTEXITCODE -ge 8) { throw "复制 $d 失败 (robocopy $LASTEXITCODE)" }
 }
-    foreach ($f in 'PerfCapture.cmd', 'README.md', 'CHANGELOG.md', 'AGENTS.md', 'VERSION', 'capture-options.json', 'capture-metrics.json', 'extensions.json') {
+    foreach ($f in 'PerfCapture.cmd', 'README.md', 'CHANGELOG.md', 'AGENTS.md', '数据源与平台覆盖规则.md', 'VERSION', 'capture-options.json', 'capture-metrics.json', 'extensions.json') {
     $src = Join-Path $root $f
     if (Test-Path $src) { Copy-Item $src $stage -Force }
 }
+# 产物内带一份验签脚本：用户/支持人员可对 latest.json 自行验签（smoke 也据此断言）。
+# 只复制这一个文件，不把构建脚本、.cs 源码打进发布目录。
+$stageBuild = Join-Path $stage 'build'
+New-Item -ItemType Directory -Path $stageBuild -Force | Out-Null
+Copy-Item (Join-Path $root 'build\sign-manifest.ps1') $stageBuild -Force
 # 报告目录留空壳，绝不打包历史数据
 New-Item -ItemType Directory -Path (Join-Path $stage 'reports') -Force | Out-Null
 Write-Host "  ✅ 目录复制完成"

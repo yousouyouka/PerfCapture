@@ -29,12 +29,14 @@ $script:Cfg = @{ extensions = @{} }
 . (Join-Path $root 'src\app\80-Extensions.ps1')
 
 # ---- 1. 注册表加载与「已发布/规划中」分层 ----
-# v2.1.11：HWiNFO 已移除；当前 = rtss（可安装）+ cpu-sensor（内置）+ frameview/etw-consumer（规划中）。
+# 2026-11-22：frameview 与 etw-consumer 已按用户要求删除；当前 = rtss（可安装）+ cpu-sensor（内置）。
+# 注册表里不再有「规划中」条目，但「规划中一律拒绝安装」是铁律，改由下方 2b 的克隆条目验证。
 $reg = @(Get-ExtensionRegistry)
-Assert ($reg.Count -ge 4) "注册表加载 $($reg.Count) 项" "注册表条目过少：$($reg.Count)"
+Assert ($reg.Count -ge 2) "注册表加载 $($reg.Count) 项" "注册表条目过少：$($reg.Count)"
 $rtss = $reg | Where-Object { $_.id -eq 'rtss-shm' }
 Assert ($rtss.available) 'RTSS 已发布 available=true（批次 D 首个真实扩展）' 'RTSS 未标记已发布'
-Assert (@($reg | Where-Object { -not $_.available }).Count -ge 2) '其余扩展仍规划中（如实未发布）' '规划中扩展少于 2 项'
+Assert (@($reg | Where-Object { $_.id -eq 'frameview' -or $_.id -eq 'etw-consumer' }).Count -eq 0) `
+    'FrameView 与自研 ETW 消费条目已移除（不保留会腐化的死条目）' '注册表仍残留已否决的候选扩展'
 # 内置能力：available=true 但不进供应层（没有 package、不参与安装/卸载）
 $cpuCap = $reg | Where-Object { $_.id -eq 'cpu-sensor' }
 Assert ($cpuCap.available -and $cpuCap.builtin) 'CPU 温度以内置能力发布（builtin=true）' 'CPU 温度内置能力声明缺失'
@@ -61,7 +63,12 @@ Assert ($err.Count -eq 1 -and $err[0].reason -eq 'provisionUnavailable') '拒绝
 Assert ($script:Cfg.extensions.Count -eq 0) '被拒后持久化状态未污染' '被拒后状态被写入'
 
 # ---- 2b. 规划中扩展仍被拒 notAvailable（保留该铁律断言）----
-$planned = @($reg | Where-Object { -not $_.available })[0]
+# 注册表里已无未发布条目，用克隆条目构造一个「规划中」项；断言的仍是状态机铁律，不是注册表内容。
+$planned = ($reg | Where-Object { $_.id -eq 'cpu-sensor' }).PSObject.Copy()
+$planned.id = 'b121-planned'
+$planned.available = $false
+$planned.builtin = $false
+$script:ExtRegistry = @($reg) + @($planned)
 $before = @($script:UiMessages).Count
 $rp = Install-ExtensionCore $planned.id
 $errp = @(@($script:UiMessages)[$before..(@($script:UiMessages).Count - 1)] | Where-Object { $_.reason -eq 'notAvailable' })
@@ -69,9 +76,10 @@ Assert (-not $rp -and $errp.Count -eq 1) '规划中扩展安装拒绝且原因 n
 
 # ---- 3. 注入一个「payload 型已发布」测试扩展，驱动完整状态机 ----
 # 用克隆条目（外部共享内存型的安装不满足 payloadMissing 语义，故用 payload 型验证该分支）。
-$test = $reg[3].PSObject.Copy()   # frameview：非 external-shm
+$test = ($reg | Where-Object { $_.id -eq 'cpu-sensor' }).PSObject.Copy()   # 内置能力条目：非 external-shm、无 package
 $test.id = 'b121-test'
 $test.available = $true
+$test.builtin = $false
 $test.mode = 'payload'
 $test.detectProcess = @()
 $test.payload = 'tests\__b121_nonexistent_payload.ps1'   # 不存在：install 会走 payloadMissing，验证细分失败

@@ -38,12 +38,14 @@ $structure = @(
 foreach ($p in $structure) {
     if (-not (Test-Path (Join-Path $root $p))) { Bad "缺少 $p" }
 }
-# build\ 只在开发目录存在，分发包里没有，不做必检
-if ((Test-Path (Join-Path $root 'build')) -and -not (Test-Path (Join-Path $root 'build\pack.ps1'))) {
+# build\ 只在开发目录存在，分发包里没有，不做必检。
+# 判定认构建输入 launcher.cs：发布产物的 build\ 只放验签脚本，不能算"开发目录"。
+$isDevTree = Test-Path (Join-Path $root 'build\launcher.cs')
+if ($isDevTree -and -not (Test-Path (Join-Path $root 'build\pack.ps1'))) {
     Bad '缺少 build\pack.ps1'
 }
 # dist 只保留最近 3 个发布版本：清理脚本必须存在，且 pack.ps1 必须真的调用它
-if (Test-Path (Join-Path $root 'build')) {
+if ($isDevTree) {
     if (-not (Test-Path (Join-Path $root 'build\prune-dist.ps1'))) { Bad '缺少 build\prune-dist.ps1（dist 保留规则）' }
     $packSrc = Get-Content (Join-Path $root 'build\pack.ps1') -Raw -Encoding UTF8
     if ($packSrc -notmatch 'prune-dist\.ps1') { Bad 'pack.ps1 没有调用 prune-dist.ps1（dist 会无限增长）' }
@@ -478,7 +480,9 @@ foreach ($uk in 'nav.realtime', 'nav.updates', 'updates.title', 'updates.noteLab
 # ---------- 5i. 安装分发 ----------
 $pathsPs = Get-Content (Join-Path $root 'src\app\05-Paths.ps1') -Raw -Encoding UTF8
 # build\ 只在开发目录存在（分发包里没有），与上面 pack.ps1 的检查同样处理
-$hasBuild = Test-Path (Join-Path $root 'build')
+# 「开发目录」判定复用前面的 $isDevTree（认 launcher.cs，不认 build 目录本身），
+# 发布产物的 build\ 只放验签脚本，不能因此触发仓库交付类断言。
+$hasBuild = $isDevTree
 $packPs = ''
 $setupCore = Join-Path $root 'build\setup-core.cs'
 $setupUi = Join-Path $root 'build\setup-ui.cs'
@@ -769,6 +773,15 @@ if ($extHostPs -match 'HwinfoFrameSnapshot|HwinfoReaderSource') { Bad '宿主仍
 if ($metPs -match 'HwinfoReaderCode|HwinfoFrameSnapshot') { Bad '采样侧仍残留 HWiNFO 读取器注入' }
 $hwReg = @($published | Where-Object { $_.id -eq 'hwinfo-shm' })
 if ($hwReg.Count -ne 0) { Bad '注册表仍发布 hwinfo-shm（已决定移除）' }
+# FrameView 与自研 ETW 消费者已于 2026-11-22 按用户决定移除（理由见规则文档 §7）：
+# 前者帧率能力与 PresentMon 同源、无精度增益，独有能力（逐帧对齐 GPU 遥测 / PCAT）不在报告口径内，
+# 且 SDK 服务占用 ETW 通道、EULA 与开源分发冲突；后者等于把 3–5 天开发 + DxgKrnl schema 漂移的维护成本留在项目里。
+foreach ($deadId in 'frameview', 'etw-consumer') {
+    if (@($reg.extensions | Where-Object { $_.id -eq $deadId }).Count -ne 0) { Bad "注册表仍保留已否决条目 $deadId" }
+    # 只认 id 声明：注释里提到"已删除的条目"是正常的，不能当成复活。
+    if ($extData -match ("id:\s*'" + [regex]::Escape($deadId) + "'")) { Bad "扩展中心前端镜像仍保留已否决条目 $deadId" }
+}
+if (Test-Path (Join-Path $root 'tests\probe-b145-frameview.ps1')) { Bad 'probe-b145-frameview.ps1 已移除，不应再出现' }
 foreach ($key in 'versionMismatch', 'noReadings') {
     $n = ([regex]::Matches($i18nText, [regex]::Escape("'extensions.reason." + $key + "':"))).Count
     if ($n -ne 3) { Bad "i18n 缺 extensions.reason.$key（需 3 语，实际 $n）" }

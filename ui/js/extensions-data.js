@@ -2,7 +2,9 @@
 /* 扩展中心数据（前端回退镜像：仅当宿主尚未下发 extensions 时展示）
    真正的事实来源是宿主 extensions.json + 状态机；本文件只在 init 之前兜底。
    批次 D 起 RTSS 已发布（available:true），回退态标为 notInstalled；
-   其余仍为 planned。宿主就绪后 apply() 会用真实状态覆盖。
+   cpu-sensor 是内置能力（builtin），回退态标为 enabled。
+   2026-11-22 起 frameview / etw-consumer 已删除，注册表不再有"规划中"条目。
+   宿主就绪后 apply() 会用真实状态覆盖。
    每项字段：
      id / name / desc / category / metrics / depends / size / permission /
      platform / cost / source / status（见 extensions.js 的 STATUS 映射）
@@ -29,20 +31,6 @@ window.PerfExtensions = [
     status: 'notInstalled'
   },
   {
-    id: 'frameview',
-    name: 'NVIDIA FrameView 适配',
-    desc: '经由厂商官方接口提供帧率与帧时间。仅限 NVIDIA 显卡，授权条款待评估。',
-    category: 'datasource',
-    metrics: ['FPS', '帧时间'],
-    depends: 'NVIDIA 显卡 + 官方 SDK',
-    size: '小',
-    permission: '无需驱动级权限',
-    platform: 'Windows · NVIDIA',
-    cost: '中',
-    source: '厂商官方 SDK',
-    status: 'planned'
-  },
-  {
     id: 'cpu-sensor',
     name: 'CPU 温度（厂商固件通道）',
     desc: '读取主板/EC 固件通过 ACPI-WMI 暴露的只读温度接口。内置能力：无需安装、不捆绑驱动；目前支持联想机型，其它品牌如实显示暂不可用。',
@@ -56,19 +44,5 @@ window.PerfExtensions = [
     source: '厂商固件 · ACPI-WMI 只读接口',
     status: 'enabled',
     builtin: true
-  },
-  {
-    id: 'etw-consumer',
-    name: '自研高频 ETW 数据源',
-    desc: '以独立消费者常驻采集帧事件，零注入。作为备选扩展实现，风险与开发成本由需要的用户自行承担，不再是主程序默认路线。',
-    category: 'datasource',
-    metrics: ['FPS', '帧时间', '1% Low'],
-    depends: '无第三方依赖',
-    size: '小',
-    permission: '无需管理员 / 驱动',
-    platform: 'Windows · 全平台',
-    cost: '低',
-    source: '项目自研 · 备选',
-    status: 'planned'
   }
 ];

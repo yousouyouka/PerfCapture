@@ -61,7 +61,7 @@ Assert ($innerSha -eq $setupSha) '内层 exe 的 SHA-256 与清单一致' ("内�
 
 $jsdUrl = 'https://cdn.jsdelivr.net/gh/yousouyouka/PerfCapture@updates/bin/' + $wrapperName
 Write-Host ''
-Write-Host '  B0 试验资产（尚未推送，清单未引用，不影响现有用户）：' -ForegroundColor Cyan
+Write-Host '  B0 试验资产（已推送 updates 分支，清单未引用，不影响现有用户）：' -ForegroundColor Cyan
 Write-Host "    文件: $wrapperName"
 Write-Host "    大小: $wrapperSize B"
 Write-Host "    SHA-256: $wrapperSha"
@@ -88,6 +88,27 @@ function Invoke-Probe([string]$url, $pi) {
         return [pscustomobject]@{ ok = $true; status = $status; length = $len; ttfb = $sw.ElapsedMilliseconds; error = '' }
     } catch {
         return [pscustomobject]@{ ok = $false; status = 0; length = 0; ttfb = $sw.ElapsedMilliseconds; error = (($_.Exception.Message -split "`r?`n")[0]) }
+    }
+}
+function Invoke-Range([string]$url, $pi) {
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    $buf = New-Object byte[] 4096
+    try {
+        $req = [System.Net.HttpWebRequest]::Create($url)
+        [void](Set-RequestProxy $req $pi)
+        $req.Method = 'GET'
+        $req.Timeout = 12000
+        $req.ReadWriteTimeout = 12000
+        $req.AddRange(0, 1023)
+        $resp = $req.GetResponse()
+        $status = [int]$resp.StatusCode
+        $got = [int64]0
+        try {
+            while (($n = $resp.GetResponseStream().Read($buf, 0, $buf.Length)) -gt 0) { $got += $n }
+        } finally { $resp.Close() }
+        return [pscustomobject]@{ ok = $true; status = $status; bytes = $got; ttfb = $sw.ElapsedMilliseconds; error = '' }
+    } catch {
+        return [pscustomobject]@{ ok = $false; status = 0; bytes = 0; ttfb = $sw.ElapsedMilliseconds; error = (($_.Exception.Message -split "`r?`n")[0]) }
     }
 }
 function Invoke-Download([string]$url, $pi, [string]$out, [int64]$limit) {
@@ -135,6 +156,8 @@ $head = Invoke-Probe $jsdUrl $pi
 if ($head.ok) {
     Ok ("jsDelivr HEAD 可达：HTTP {0} / {1:N0} B / TTFB {2} ms" -f $head.status, $head.length, $head.ttfb)
     Assert ($head.length -eq $wrapperSize -or $head.length -le 0) 'HEAD 长度与本地 wrapper 一致' "HEAD 长度 $($head.length) ≠ 本地 $wrapperSize"
+    $rg = Invoke-Range $jsdUrl $pi
+    Assert ($rg.ok -and $rg.status -eq 206 -and $rg.bytes -eq 1024) ("Range 续传可用：HTTP {0} / {1} B / TTFB {2} ms" -f $rg.status, $rg.bytes, $rg.ttfb) ("Range 不可用：HTTP {0} / {1} B / {2}" -f $rg.status, $rg.bytes, $rg.error)
     $dl = Invoke-Download $jsdUrl $pi (Join-Path $work 'downloaded.zip') 20971520
     if ($dl.ok) {
         $gotSha = (Get-FileHash -LiteralPath (Join-Path $work 'downloaded.zip') -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -144,8 +167,8 @@ if ($head.ok) {
         Warn ("整包下载失败：{0}" -f $dl.error)
     }
 } else {
-    if ($head.status -eq 403 -and $control.ok) {
-        Warn 'wrapper 文件尚未推送到 updates 分支（jsDelivr 对不存在的路径回 403）；推送后重跑本探针即可实测。'
+    if (($head.status -eq 403 -or $head.status -eq 404) -and $control.ok) {
+        Warn 'wrapper 文件尚未被 jsDelivr 收录（对不存在的路径回 403/404）；推送后清一次 CDN 缓存再重跑本探针即可实测。'
     } else {
         Warn ("本机探测 jsDelivr 失败（{0}，{1} ms）：{2}" -f $head.status, $head.ttfb, $head.error)
     }

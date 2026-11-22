@@ -173,11 +173,10 @@ namespace PerfCaptureSetup
                 + "· 因此不会触发反作弊检查与 DLSS 的驱动门禁，也不影响游戏本身\r\n"
                 + "· 采集平均帧率、1% Low、帧时间、上屏延迟与 GPU 状态，并生成报告与长图",
                 9F, C_Text, 16);
-            y = AddPara(p, 0, y, ContentW,
+            AddPara(p, 0, y, ContentW,
                 "安装体积约 " + gb + " MB（" + info.Files + " 个文件）。按当前用户安装，安装过程不需要管理员权限；"
                 + "运行采集时需要管理员权限（读取 ETW），程序启动时会自行请求提升。",
                 8.5F, C_Muted, 8);
-            AddPara(p, 0, y, ContentW, "默认安装位置：" + Program.DefaultDir(), 8.5F, C_Hint, 0);
         }
 
         // 自定义路径后面自动补一级 PerfCapture（已经是 ...\PerfCapture 就不再叠加）：

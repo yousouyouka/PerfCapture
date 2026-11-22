@@ -269,10 +269,14 @@ function Start-Capture($msg) {
     if ($msg.minimize) { $form.WindowState = 'Minimized' }
 
     $script:T0 = Get-Date
-    $script:Job = Start-Job -ArgumentList $script:Engine, $sec, $pid0, $pname, $script:OutDir, $cd, $skip, $theme, $script:TempHtml, $warmup -ScriptBlock {
-        param($eng, $s, $targetPid, $pname, $out, $cd, $skip, $theme, $html, $warmup)
+    # 帧数据源随采集任务传给引擎：同一次采集只能有一个来源，报告元数据必须如实标注。
+    # 这里读宿主当前来源（未启用扩展时是 presentmon 基线），不在引擎里猜。
+    $fpsSource = if ($script:ActiveFpsSource) { [string]$script:ActiveFpsSource } else { 'presentmon' }
+    $script:Job = Start-Job -ArgumentList $script:Engine, $sec, $pid0, $pname, $script:OutDir, $cd, $skip, $theme, $script:TempHtml, $warmup, $fpsSource -ScriptBlock {
+        param($eng, $s, $targetPid, $pname, $out, $cd, $skip, $theme, $html, $warmup, $fpsSource)
         & $eng -Seconds $s -ProcessId $targetPid -ProcessName $pname -Label 'run' -OutDir $out `
-              -Countdown $cd -NoPause -Skip $skip -Theme $theme -HtmlPath $html -WarmupSec $warmup *>&1
+              -Countdown $cd -NoPause -Skip $skip -Theme $theme -HtmlPath $html -WarmupSec $warmup `
+              -FpsSource $fpsSource *>&1
     }
     $script:Timer.Start()
 }

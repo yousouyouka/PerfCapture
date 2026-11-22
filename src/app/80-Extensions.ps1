@@ -12,6 +12,9 @@ $script:ExtLoaded      = $false
 $script:ExtProcesses   = @{}          # id -> Process：独立运行的扩展进程（隔离）
 $script:ExtIpc         = @{}          # id -> IPC 占位（批次 D 装入真实管道/共享内存句柄）
 $script:ActiveFpsSource = 'presentmon' # 采样会话仲裁：'presentmon' 或某个 enabled 扩展 id
+# 运行期看护（§10.5）：id -> @{ attempts; nextAt }。只记内存，重启本软件后从头算——
+# 历史重试次数不该跨会话累积，否则用户重开一次软件就被旧计数直接判死。
+$script:ExtWatch = @{}
 
 # ---------- 注册表 ----------
 function Get-ExtensionRegistry {
@@ -826,6 +829,8 @@ function Enable-ExtensionCore([string]$Id) {
 function Disable-ExtensionCore([string]$Id) {
     $e = Get-ExtensionEntry $Id
     if (-not $e) { Send-ExtensionError $Id 'unknown'; return $false }
+    # 用户主动关闭：先抑制看护，避免关闭流程中进程退出被误判成崩溃又拉起来。
+    if (Get-Command Set-ExtensionWatchSuppressed -ErrorAction SilentlyContinue) { Set-ExtensionWatchSuppressed $Id }
     # ① 断开 IPC
     if ($script:ExtIpc.ContainsKey($Id)) {
         $ipc = $script:ExtIpc[$Id]
@@ -898,6 +903,7 @@ function Disable-ExtensionCore([string]$Id) {
 function Uninstall-ExtensionCore([string]$Id) {
     $e = Get-ExtensionEntry $Id
     if (-not $e) { Send-ExtensionError $Id 'unknown'; return $false }
+    if (Get-Command Set-ExtensionWatchSuppressed -ErrorAction SilentlyContinue) { Set-ExtensionWatchSuppressed $Id }
     [void](Disable-ExtensionCore $Id)
     $dst = Join-Path $script:DataDir ('extensions\' + $Id)
     try { if (Test-Path $dst) { Remove-Item $dst -Recurse -Force -ErrorAction Stop } } catch { }
@@ -989,6 +995,114 @@ function Invoke-ExtensionCommand($Msg) {
             else { Send-ExtensionError ([string]$Msg.id) 'noPageUrl' }
         }
         default                    { Send-ExtensionError '' 'unknown' }
+    }
+}
+
+# ---------- 运行期看护（§10.5）----------
+# 只接管「本软件拉起、且用户仍启用、且开了自启」的扩展进程。用户主动关闭/卸载时
+# Set-ExtensionWatchSuppressed 打一个短抑制窗，避免关闭过程中的进程退出被误认成崩溃。
+# 指数退避 2s / 4s，最多重启 2 次；仍失败转 failed + 回退零注入基线，不做重装。
+$script:ExtWatchBackoffSec = @(2, 4)
+
+function Set-ExtensionWatchSuppressed([string]$Id, [int]$Seconds = 6) {
+    if (-not $script:ExtWatch.ContainsKey($Id)) { $script:ExtWatch[$Id] = @{} }
+    $w = $script:ExtWatch[$Id]
+    $w.suppressedUntil = (Get-Date).AddSeconds($Seconds)
+    $w.attempts = 0
+    $w.nextAt = [DateTime]::MinValue
+    $w.restarting = $false
+    $script:ExtWatch[$Id] = $w
+}
+
+function Reset-ExtensionWatch([string]$Id) {
+    if ($script:ExtWatch.ContainsKey($Id)) { [void]$script:ExtWatch.Remove($Id) }
+}
+
+function Get-ExtensionWatchOwnPid([string]$Id) {
+    $bag = Get-ExtensionBag
+    if (-not $bag.ContainsKey($Id) -or $bag[$Id] -is [string] -or $null -eq $bag[$Id]) { return 0 }
+    if ($null -eq $bag[$Id].installPid) { return 0 }
+    return [int]$bag[$Id].installPid
+}
+
+# 存活判据：installPid 对应的进程在，且路径属于自有安装目录（防 PID 回收后误判）。
+# 只认主进程：RTSS 主程序退出后注入器可能还在，但共享内存已失效，必须算「意外退出」。
+function Test-ExtensionWatchAlive($Entry) {
+    $pid0 = Get-ExtensionWatchOwnPid $Entry.id
+    if ($pid0 -le 0) { return $false }
+    $p = Get-Process -Id $pid0 -ErrorAction SilentlyContinue
+    if (-not $p) { return $false }
+    $root = Get-ExtensionInstallRoot $Entry.id
+    if ($root -and $p.Path) {
+        $full = [IO.Path]::GetFullPath($p.Path)
+        if (-not $full.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) { return $false }
+    }
+    return $true
+}
+
+function Set-ExtensionWatchFailed($Entry, [string]$Reason) {
+    $id = $Entry.id
+    $bag = Get-ExtensionBag
+    $fields = @{}
+    $old = if ($bag.ContainsKey($id)) { $bag[$id] } else { $null }
+    if ($old -isnot [string] -and $null -ne $old) {
+        foreach ($p in $old.PSObject.Properties) {
+            if ($p.Name -notin @('status', 'reason', 'installedAt', 'updatedAt', 'lastNote')) { $fields[$p.Name] = $p.Value }
+        }
+    }
+    # 失败后不再自认拥有进程：否则下次启动仍会尝试拉起一个已经不可用的运行时。
+    $fields.startedByUs = $false
+    $fields.installPid = 0
+    $fields.lastNote = 'watchdogFailed'
+    Set-ExtensionPersistState $id 'failed' $Reason $fields
+    if ($script:ActiveFpsSource -eq $id) { [void](Set-FpsSource 'presentmon') }
+    Send-ExtensionState $id
+    Write-AppLog ('扩展看护放弃重启，已转 failed 并回退基线: ' + $id + ' / ' + $Reason) 'WARN'
+    Reset-ExtensionWatch $id
+}
+
+function Invoke-ExtensionWatchdogTick {
+    foreach ($e in (Get-ExtensionRegistry)) {
+        if (-not $e.available -or -not $e.package -or -not $e.package.kind) { continue }
+        if ((Get-ExtensionPersistState $e.id) -ne 'enabled') { continue }
+        $bag = Get-ExtensionBag
+        if (-not $bag.ContainsKey($e.id) -or $bag[$e.id] -is [string] -or $null -eq $bag[$e.id]) { continue }
+        if (-not $bag[$e.id].startedByUs -or $bag[$e.id].autoStart -eq $false) { continue }
+
+        $now = Get-Date
+        $w = if ($script:ExtWatch.ContainsKey($e.id)) { $script:ExtWatch[$e.id] } else {
+            @{ attempts = 0; nextAt = $now; suppressedUntil = [DateTime]::MinValue; restarting = $false }
+        }
+        if ($now -lt [DateTime]$w.suppressedUntil -or $w.restarting) { continue }
+        if (Test-ExtensionWatchAlive $e) {
+            # 进程恢复：清零退避计数，下次真退出时从第 1 次重试重新开始
+            if ([int]$w.attempts -gt 0) {
+                $w.attempts = 0; $w.nextAt = [DateTime]::MinValue
+                $script:ExtWatch[$e.id] = $w
+            }
+            continue
+        }
+        if ($now -lt [DateTime]$w.nextAt) { continue }
+        if ([int]$w.attempts -ge 2) { Set-ExtensionWatchFailed $e 'watchdogRestartFailed'; continue }
+
+        $idx = [int]$w.attempts
+        $w.attempts = $idx + 1
+        $delay = [int]$script:ExtWatchBackoffSec[$idx]
+        $w.nextAt = $now.AddSeconds($delay)
+        $w.restarting = $true
+        $script:ExtWatch[$e.id] = $w
+        $result = ''
+        try {
+            # 复用已安装副本，绝不重装（重装会多一次 UAC，且不是「意外退出」的解药）。
+            if (Get-Command Start-ExtensionCopy -ErrorAction SilentlyContinue) { $result = Start-ExtensionCopy $e -ReadyWaitMs 1200 }
+            else { $result = 'unavailable' }
+        } catch { $result = 'unavailable'; Write-AppLog ('看护重启异常: ' + $e.id + ' / ' + $_.Exception.Message) 'WARN' }
+        $w.restarting = $false
+        $script:ExtWatch[$e.id] = $w
+        Write-AppLog ('扩展进程意外退出，已尝试第 ' + $w.attempts + '/2 次重启: ' + $e.id + ' / ' + $result) 'WARN'
+        # blocked（残留杀不掉）立刻放弃：再重启只会叠加双份注入。
+        # 其它失败不立即判死：下一次 tick 若进程仍不在，会按退避再试一次；两次都不到达才转 failed。
+        if ($result -eq 'blocked') { Set-ExtensionWatchFailed $e 'stopIncomplete' }
     }
 }
 

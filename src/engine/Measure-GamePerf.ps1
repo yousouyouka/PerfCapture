@@ -18,7 +18,8 @@ param(
     [string]$HtmlPath = '',
     [int]$WarmupSec = 0,          # 预热丢弃：丢掉开头这么多秒的帧（管线/编译着色器造成的假卡顿）
     [switch]$NoElevate,           # 仅供自动化测试：跳过自我提权（正常使用不要加）
-    [int]$StutterMs = 50          # 卡顿阈值：单帧超过这个毫秒数记一次卡顿
+    [int]$StutterMs = 50,         # 卡顿阈值：单帧超过这个毫秒数记一次卡顿
+    [string]$FpsSource = 'presentmon'  # 帧数据源：presentmon 或扩展 id（单一来源，写入报告元数据）
 )
 
 # ---------------------------------------------------------------- collection switches
@@ -29,6 +30,9 @@ $skipList = @()
 foreach ($k in ($Skip -split ',')) { $k = $k.Trim().ToLower(); if ($k) { $skipList += $k } }
 if ($skipList -contains 'gpu') { $skipList += 'gputemp', 'gpuusage' }
 if ($skipList -contains 'mem') { $skipList += 'vram', 'ram' }
+# 帧数据源：单一来源口径，值只允许 presentmon 或「字母数字-点-下划线」的扩展 id。
+# 不合法就回退基线并标注，不让外部参数把任意字符串写进报告元数据。
+if (-not $FpsSource -or $FpsSource -notmatch '^[A-Za-z0-9._-]{1,64}$') { $FpsSource = 'presentmon' }
 $collectLatency  = -not ($skipList -contains 'latency')
 $collectGpuTemp  = -not ($skipList -contains 'gputemp')
 $collectGpuUsage = -not ($skipList -contains 'gpuusage')
@@ -55,6 +59,7 @@ if (-not $isAdmin -and -not $NoElevate) {
     $argList += @('-Theme', $Theme)
     if ($HtmlPath) { $argList += @('-HtmlPath', ('"' + $HtmlPath + '"')) }
     if ($WarmupSec -gt 0) { $argList += @('-WarmupSec', "$WarmupSec") }
+    if ($FpsSource) { $argList += @('-FpsSource', ('"' + $FpsSource + '"')) }
     if ($NoPause) { $argList += '-NoPause' }
     Write-Host 'Requesting administrator rights (PresentMon needs an ETW session)...' -ForegroundColor Yellow
     Start-Process $ps -Verb RunAs -ArgumentList ($argList -join ' ') -Wait | Out-Null
@@ -1512,6 +1517,8 @@ $summary = [ordered]@{
         ram_type = $ramTypeText
         gpu_model = $gpuModelText
         vram_type = $null
+        # 帧数据源（2.1.10）：同一次采集单一来源，presentmon 或扩展 id；跨机器比较报告必须先对齐这里。
+        fps_source = $FpsSource
         present_api = $apiName
         present_mode = $presentMode
         # 供电侧（07 测试环境）：台机没有电池时 battery_* 为 null，报告侧不显示该行，不当错误
@@ -1973,6 +1980,9 @@ $detRows += NaRows 'thermal'
 $detRows += SecRow '渲染瓶颈分析'
 $detRows += NaRows 'bottleneck'
 $detRows += SecRow '测试环境'
+# 帧数据源：同一次采集只有一个来源，报告必须如实标注（2.1.10）
+$srcLabel = if ($FpsSource -eq 'presentmon') { 'PresentMon ETW（零注入基线）' } else { $FpsSource + '（扩展数据源）' }
+$detRows += '<tr><td>帧数据源</td><td>' + $srcLabel + '</td></tr>'
 if ($collectRes -and $summary.resolution) {
     $detRows += '<tr><td>分辨率 / 窗口模式</td><td>' + ($summary.resolution -replace 'x', '×') + ' / ' + $summary.window_mode + '</td></tr>'
     if ($summary.monitor) { $detRows += '<tr><td>显示器分辨率</td><td>' + ($summary.monitor -replace 'x', '×') + '</td></tr>' }

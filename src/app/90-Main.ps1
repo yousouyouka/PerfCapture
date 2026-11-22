@@ -13,6 +13,10 @@ $form.Add_FormClosing({
         $script:Cfg.windowH = [int]($form.ClientSize.Height / $script:DpiScale)
         if ($form.WindowState -eq 'Normal') { Save-Config }
     } catch { }
+    # 先停看护计时器：否则退出清理杀进程时会被误判成「意外退出」又拉起来。
+    try {
+        if ($script:ExtWatchTimer) { $script:ExtWatchTimer.Stop(); $script:ExtWatchTimer.Dispose(); $script:ExtWatchTimer = $null }
+    } catch { }
     # 退出时清掉所有在跑的扩展进程，绝不留孤儿（扩展隔离进程的兜底清理）
     try { if (Get-Command Stop-AllExtensionProcesses -ErrorAction SilentlyContinue) { Stop-AllExtensionProcesses } } catch { }
     try { $script:Mutex.ReleaseMutex() } catch { }
@@ -28,6 +32,21 @@ catch { Write-AppLog ('启动自愈清理失败: ' + $_.Exception.Message) 'WARN
 # 扩展自启：启动时恢复所有「已启用」且 autoStart 的托管扩展；失败只记日志并回退基线，不阻断界面。
 try { if (Get-Command Start-EnabledExtensions -ErrorAction SilentlyContinue) { Start-EnabledExtensions } }
 catch { Write-AppLog ('扩展自启失败: ' + $_.Exception.Message) 'WARN' }
+
+# 运行期看护（§10.5）：每 2 秒检查一次「本软件拉起、用户仍启用」的扩展进程。
+# 意外退出 → 指数退避重启最多 2 次；仍失败转 failed 并回退基线。
+# 独立计时器而不是挂在采集/更新计时器上：那些会被采集任务停掉，看护必须全程在。
+try {
+    if (Get-Command Invoke-ExtensionWatchdogTick -ErrorAction SilentlyContinue) {
+        $script:ExtWatchTimer = New-Object System.Windows.Forms.Timer
+        $script:ExtWatchTimer.Interval = 2000
+        $script:ExtWatchTimer.Add_Tick({
+            try { Invoke-ExtensionWatchdogTick }
+            catch { Write-AppLog ('扩展看护异常: ' + $_.Exception.Message) 'WARN' }
+        })
+        $script:ExtWatchTimer.Start()
+    }
+} catch { Write-AppLog ('扩展看护计时器启动失败: ' + $_.Exception.Message) 'WARN' }
 
 # 主循环：$form.ShowDialog() 只在窗口被**用户关掉**时才应该返回。
 # 万一有代码路径让它提前返回（例如误把窗口设成不可见 —— 模态循环的条件就是"仍可见"），

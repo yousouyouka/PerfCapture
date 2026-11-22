@@ -976,7 +976,7 @@ function Complete-ExtensionProvision {
 #   'blocked'     目录内仍有杀不掉的残留，拒绝启动（已回推错误）—— 不能回退到重装：
 #                 重装会重下 17 MB、再弹一次 UAC，而根源是残留而不是缺文件
 #   'unavailable' 副本或配置缺失，需要走完整供应
-function Start-ExtensionCopy($Entry) {
+function Start-ExtensionCopy($Entry, [int]$ReadyWaitMs = 4000) {
     if (-not $Entry -or -not $Entry.package) { return 'unavailable' }
     $bag = Get-ExtensionBag
     if (-not $bag.ContainsKey($Entry.id) -or $bag[$Entry.id] -is [string]) { return 'unavailable' }
@@ -1018,7 +1018,8 @@ function Start-ExtensionCopy($Entry) {
             lastNote         = ''
         }
         # 等共享内存真的建好再切数据源：刚拉起的进程还在初始化，立刻判会闪一下「读取失败」。
-        [void](Wait-ExtensionReady $Entry)
+        # 看护重启走前台 tick，等待预算调短（1200ms），避免卡住主界面；正常启用仍用默认 4000ms。
+        [void](Wait-ExtensionReady $Entry $ReadyWaitMs)
         [void](Set-FpsSource $Entry.id)
         Write-AppLog ('扩展随软件恢复（复用已安装副本，未重装）: ' + $Entry.id + '（pid=' + $p.Id + '）')
         return 'started'

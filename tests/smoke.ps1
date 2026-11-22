@@ -347,6 +347,21 @@ if ($repJs -notmatch 'class="p"') { Bad 'report.js 缺占比的 .p 标记' }
 if ($repCss -notmatch '(?s)\.rp-tile \.v small,\s*\n\.rp-tile \.v \.p \{') { Bad 'report.css 里占比没有和单位（small）共用同一套样式' }
 if ($engPs -notmatch '\.card \.p\{font-size:12px;color:\$cMuted') { Bad '引擎 HTML 的 .card .p 没有跟单位（.card .u）同样式' }
 
+# ---------- 5g-2. 2.1.10 报告元数据：帧数据源单一口径 ----------
+if ($engPs -notmatch '\$FpsSource = ''presentmon''') { Bad '引擎缺 FpsSource 参数（报告无法标注帧数据源）' }
+if ($engPs -notmatch 'fps_source = \$FpsSource') { Bad '引擎报告 environment 缺 fps_source 字段' }
+if ($engPs -notmatch '-FpsSource') { Bad '引擎自我提权时没有透传 FpsSource' }
+$capturePs = Get-Content (Join-Path $root 'src\app\60-Capture.ps1') -Raw -Encoding UTF8
+if ($capturePs -notmatch '\$fpsSource = if \(\$script:ActiveFpsSource\)') { Bad '宿主没有把当前数据源传给采集引擎' }
+if ($capturePs -notmatch '-FpsSource \$fpsSource') { Bad '宿主启动引擎时未传 -FpsSource' }
+$metricsDoc = Get-Content (Join-Path $root 'capture-metrics.json') -Raw -Encoding UTF8
+if ($metricsDoc -notmatch '"env\.fpsSource"') { Bad 'capture-metrics.json 缺 env.fpsSource 行' }
+if ($repJs -notmatch "'env\.fpsSource':") { Bad 'report.js 缺 env.fpsSource 渲染映射' }
+foreach ($key in 'metric.fpsSource', 'value.fpsPresentmon', 'value.fpsExtension') {
+    $n = ([regex]::Matches($i18nText, [regex]::Escape("'" + $key + "':"))).Count
+    if ($n -ne 3) { Bad "i18n 中 $key 只有 $n 种语言（需 3）" }
+}
+
 # ---------- 5h. 更新公告 / 实时监控入口 ----------
 $dataJs = Get-Content (Join-Path $root 'ui\js\updates-data.js') -Raw -Encoding UTF8
 $updJs = Get-Content (Join-Path $root 'ui\js\updates.js') -Raw -Encoding UTF8
@@ -698,6 +713,18 @@ foreach ($hard in 'ftp.nluug.nl', '9B084A8CB3E', 'RTSSSetup737') {
 $mainPs = Get-Content (Join-Path $root 'src\app\90-Main.ps1') -Raw -Encoding UTF8
 if ($mainPs -notmatch 'Start-EnabledExtensions') { Bad '90-Main.ps1 缺启动自启钩子' }
 if ($mainPs -notmatch 'Stop-AllExtensionProcesses') { Bad '90-Main.ps1 缺退出清理钩子' }
+# 2.1.10 运行期看护（§10.5）：独立计时器 + 退出前先停，用户关闭有抑制窗
+if ($mainPs -notmatch 'Invoke-ExtensionWatchdogTick') { Bad '90-Main.ps1 未接入扩展看护 tick' }
+if ($mainPs -notmatch '\$script:ExtWatchTimer\.Stop\(\)') { Bad '退出时未先停看护计时器（杀进程会被误判成崩溃重启）' }
+if ($extHostPs -notmatch 'function Invoke-ExtensionWatchdogTick') { Bad '80-Extensions.ps1 缺看护 tick 实现' }
+if ($extHostPs -notmatch 'Set-ExtensionWatchSuppressed') { Bad '用户主动关闭没有抑制看护' }
+if ($extHostPs -notmatch 'ExtWatchBackoffSec\s*=\s*@\(2,\s*4\)') { Bad '看护退避不是 2/4 秒' }
+if ($extHostPs -notmatch 'attempts -ge 2') { Bad '看护重启没有 2 次上限' }
+if ($provPs -notmatch 'function Start-ExtensionCopy\(\$Entry, \[int\]\$ReadyWaitMs') { Bad 'Start-ExtensionCopy 不支持看护的短等待参数' }
+foreach ($key in 'watchdogRestartFailed', 'watchdogFailed') {
+    $n = ([regex]::Matches($i18nText, [regex]::Escape("'extensions.reason." + $key + "':"))).Count
+    if ($n -ne 3) { Bad "i18n 缺 extensions.reason.$key（需 3 语，实际 $n）" }
+}
 $pubPkg = @($published | Where-Object { $_.package -and $_.package.kind -eq 'nsis-zip' })
 if ($pubPkg.Count -ne 1) { Bad '已发布扩展只有一个，且必须声明 package（nsis-zip）' }
 else {

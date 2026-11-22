@@ -431,6 +431,14 @@ const METRIC_TEXT = {
   'env.dlssPreset': (r) => presetCode(r, 'feature.dlssMode'),
   'env.fgPreset': (r) => presetCode(r, 'feature.framegenModeLevel'),
   'env.foreground': (r) => numText(r.foreground_pct, '%', 0),
+  /* 帧数据源（2.1.10）：同一次采集只有一个来源。旧报告没有该字段时不显示这一行，
+     不拿 PresentMon 冒充。扩展源只显示 id + 已标注，不猜它的内部实现。 */
+  'env.fpsSource': (r) => {
+    const s = (r.environment && r.environment.fps_source) || r.fps_source;
+    if (!s) return null;
+    if (s === 'presentmon') return t('value.fpsPresentmon', 'PresentMon ETW（零注入基线）');
+    return fillParams(t('value.fpsExtension', '{id}（扩展数据源）'), { id: s });
+  },
   'env.presentApi': (r) => (r.environment && r.environment.present_api) || r.api || null,
   'env.presentMode': (r) => (r.environment && r.environment.present_mode) || r.present_mode || null,
   'env.upscaler': (r) => {

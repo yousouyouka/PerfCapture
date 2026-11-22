@@ -40,6 +40,13 @@ foreach ($p in $structure) {
 if ((Test-Path (Join-Path $root 'build')) -and -not (Test-Path (Join-Path $root 'build\pack.ps1'))) {
     Bad '缺少 build\pack.ps1'
 }
+# dist 只保留最近 3 个发布版本：清理脚本必须存在，且 pack.ps1 必须真的调用它
+if (Test-Path (Join-Path $root 'build')) {
+    if (-not (Test-Path (Join-Path $root 'build\prune-dist.ps1'))) { Bad '缺少 build\prune-dist.ps1（dist 保留规则）' }
+    $packSrc = Get-Content (Join-Path $root 'build\pack.ps1') -Raw -Encoding UTF8
+    if ($packSrc -notmatch 'prune-dist\.ps1') { Bad 'pack.ps1 没有调用 prune-dist.ps1（dist 会无限增长）' }
+    if ($packSrc -notmatch 'KeepDistVersions\s*=\s*3') { Bad 'pack.ps1 的 KeepDistVersions 默认值不是 3' }
+}
 if ($fail -eq 0) { Ok "结构完整（$($structure.Count) 项）" }
 
 # ---------- 2. PowerShell 语法 + BOM ----------

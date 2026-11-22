@@ -30,6 +30,69 @@ $script:VendorTempAdapters = @{
     }
 }
 
+# 品牌通道目录：只用于**探测类是否存在**，不调用任何非联想方法。
+# evidence：verified=本项目真机实测；protocol=有公开的开源协议文档（ACPI-WMI 邮箱与端点）；
+#           name-only=只见到类名传闻，未验证；banned=规则禁止使用。
+# 探测是只读的元数据查询（Get-CimClass），不需要管理员，也不会触发任何厂商方法。
+$script:VendorChannelCatalog = @(
+    @{ vendor = 'lenovo'; nc = 'root/WMI'; class = 'LENOVO_OTHER_METHOD'; role = 'temp'
+       evidence = 'verified'; implemented = $true
+       note = 'GetFeatureValue(0x05040000)=CPU 温度；本机 83QC/UHCN09WW 实测 75 ℃。已实现。' }
+    @{ vendor = 'lenovo'; nc = 'root/WMI'; class = 'LENOVO_FAN_METHOD'; role = 'temp/fan'
+       evidence = 'protocol'; implemented = $false
+       note = '老一代机型：Fan_GetCurrentSensorTemperature(SensorID=3)。需新适配器。' }
+    @{ vendor = 'lenovo'; nc = 'root/WMI'; class = 'LENOVO_GAMEZONE_DATA'; role = 'thermal-mode'
+       evidence = 'protocol'; implemented = $false
+       note = '消费级机型常见；主要给性能模式，温度能力随机型而异，需实测。' }
+    @{ vendor = 'acer'; nc = 'root/WMI'; class = 'AcerGamingFunction'; role = 'temp/fan'
+       evidence = 'protocol'; implemented = $false
+       note = 'ACPI-WMI 邮箱 GUID 7A4DDFE7-5B5D-40B4-8595-4408E0CC7F56；GetGamingSysInfo(1 | sensor<<8)，sensor 0x01=CPU 温度。Windows 侧是否注册成该类需真机确认。' }
+    @{ vendor = 'asus'; nc = 'root/WMI'; class = 'AsusAtkWmi_WMNB'; role = 'temp/fan'
+       evidence = 'protocol'; implemented = $false
+       note = 'DEVS/DSTS 端点；Temp_CPU 端点常量随代际不同（公开资料有 0x00120094 与 0x00120012 两种），必须逐机型探测，禁止硬编码。G-Helper 优先走 ATKACPI 设备而非 WMI。' }
+    @{ vendor = 'msi'; nc = 'root/WMI'; class = 'MSI_ACPI'; role = 'unknown'
+       evidence = 'name-only'; implemented = $false
+       note = '未验证是否暴露温度；MSI Center 的监控组件来源不公开。' }
+    @{ vendor = 'hp'; nc = 'root/WMI'; class = 'HPBIOS_BIOSSetting'; role = 'bios-setting'
+       evidence = 'protocol'; implemented = $false
+       note = '只做 BIOS 设置读写，不含传感器读数；HP 的温度在 HP Command Center/HP Insights 里。' }
+    @{ vendor = 'dell'; nc = 'root/DCIM/SYSMAN'; class = 'DCIM_ThermalInformation'; role = 'thermal-mode'
+       evidence = 'protocol'; implemented = $false
+       note = '需用户自行安装 Dell Command | Monitor（第三方代理）；给的是散热模式/设置，不是实时核心温度。' }
+    @{ vendor = 'generic'; nc = 'root/WMI'; class = 'MSAcpi_ThermalZoneTemperature'; role = 'acpi-zone'
+       evidence = 'banned'; implemented = $false
+       note = 'ACPI 热区，常为主板/进风口温度，规则禁止冒充 CPU 温度。此处仅用于解释「为什么明明有这个类却不用」。' }
+)
+
+# 探测本机存在哪些厂商通道（只读元数据，无方法调用）。
+# 返回每项：vendor/class/role/evidence/implemented/present/detail
+function Get-VendorChannelMap {
+    $rows = @()
+    foreach ($c in $script:VendorChannelCatalog) {
+        $present = $false; $detail = ''
+        try {
+            $cls = Get-CimClass -Namespace $c.nc -ClassName $c.class -ErrorAction Stop
+            $present = $true
+            $methods = @($cls.CimClassMethods | ForEach-Object { [string]$_.Name })
+            if ($methods.Count -gt 0) { $detail = 'methods: ' + ($methods -join ',') }
+        } catch {
+            $detail = [string]$_.Exception.Message
+        }
+        $rows += [pscustomobject]@{
+            vendor      = $c.vendor
+            class       = $c.class
+            namespace   = $c.nc
+            role        = $c.role
+            evidence    = $c.evidence
+            implemented = [bool]$c.implemented
+            present     = $present
+            detail      = $detail
+            note        = $c.note
+        }
+    }
+    return $rows
+}
+
 # 读取结果缓存：EC 轮询 2 s 一次足够，避免采样循环每秒都发 WMI 调用。
 $script:VendorTempCache = $null
 $script:VendorTempCacheAt = [datetime]::MinValue

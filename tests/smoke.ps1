@@ -957,9 +957,14 @@ foreach ($need in 'LENOVO_OTHER_METHOD', '0x05040000', 'Get-VendorCpuTempSnapsho
 if ($venPs -match 'Invoke-CimMethod[^\r\n]*SetFeatureValue|MethodName\s+["'']SetFeatureValue') {
     Bad 'vendor-sensor.ps1 调用了 SetFeatureValue（可改温度墙/功耗墙，规则禁止）'
 }
-# 禁止用 ACPI 热区冒充核心温度（规则 §2）
+# 禁止用 ACPI 热区冒充核心温度（规则 §2）。
+# 注意：类名允许出现在 vendor-sensor.ps1 的「通道目录」里（标记 evidence=banned，用于向用户解释
+# 「为什么本机明明有这个类却不用」）。真正禁止的是**读取它的值**，所以这里断言的是读取痕迹。
 foreach ($src in @($venPs, $platPs, $metPs)) {
-    if ($src -match 'MSAcpi_ThermalZoneTemperature') { Bad '出现 ACPI 热区温度（不是核心温度，规则禁止）' }
+    if ($src -match 'CurrentTemperature') { Bad '读取了 ACPI 热区的 CurrentTemperature（不是核心温度，规则禁止）' }
+    if ($src -match 'Get-CimInstance[^\r\n]*MSAcpi_ThermalZoneTemperature|Invoke-CimMethod[^\r\n]*MSAcpi_ThermalZoneTemperature') {
+        Bad '对 ACPI 热区发起了实例/方法调用（不是核心温度，规则禁止）'
+    }
 }
 # 降频只准读事件日志，不准读 MSR / 内核
 $thrPs = Get-Content (Join-Path $root 'src\app\cpu-throttle.ps1') -Raw -Encoding UTF8

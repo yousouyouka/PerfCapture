@@ -154,6 +154,21 @@ $manifest = Join-Path $buildDir 'setup-dpi.manifest'
 if (-not (Test-Path $setupOut)) { throw '安装包编译失败' }
 Remove-Item $payload -Force -ErrorAction SilentlyContinue
 Write-Host ("  ✅ 安装包: $setupOut  ({0} MB)" -f [math]::Round((Get-Item $setupOut).Length / 1MB, 1))
+
+# 2.1.9 / M3：jsDelivr 拒发 .exe 但接受 .zip，额外包一层供 setup 全失败时回退。
+# 只放内层 Setup exe；条目时间固定，便于用户核对 SHA-256。
+$setupName = "PerfCapture-Setup-$Version.exe"
+$wrapperOut = Join-Path $distRoot "PerfCapture-Update-$Version.zip"
+if (Test-Path -LiteralPath $wrapperOut) { Remove-Item -LiteralPath $wrapperOut -Force }
+$wrapperZip = [IO.Compression.ZipFile]::Open($wrapperOut, [IO.Compression.ZipArchiveMode]::Create)
+try {
+    $entry = $wrapperZip.CreateEntry($setupName, [IO.Compression.CompressionLevel]::Optimal)
+    $entry.LastWriteTime = (Get-Item -LiteralPath $setupOut).LastWriteTime
+    $dst = $entry.Open()
+    $srcExe = [IO.File]::OpenRead($setupOut)
+    try { $srcExe.CopyTo($dst) } finally { $srcExe.Dispose(); $dst.Dispose() }
+} finally { $wrapperZip.Dispose() }
+Write-Host ("  ✅ jsDelivr 回退包: $wrapperOut  ({0} MB)" -f [math]::Round((Get-Item $wrapperOut).Length / 1MB, 1))
 # ---------- 9. 更新清单 + 签名（updates\latest.json 与 manifest-<版本>.json） ----------
 # 清单是客户端"检查更新"的唯一依据：多源读取 → RSA 验签 → 版本比较 → 按 sha256 校验安装包。
 # 私钥在 %LOCALAPPDATA%\PerfCapture\keys\，绝不进仓库；公钥硬编码在 src\app\70-Updates.ps1。
@@ -205,8 +220,23 @@ if (-not $NoManifest) {
         } catch { }
     }
 
+    function Get-WrapperEntry([string]$file, [string]$innerFile) {
+        $outer = Get-AssetEntry $file 'wrapper'
+        return [ordered]@{
+            kind = 'wrapper'
+            name = $outer.name
+            size = $outer.size
+            sha256 = $outer.sha256
+            urls = $outer.urls
+            innerName = (Split-Path $innerFile -Leaf)
+            innerSize = (Get-Item -LiteralPath $innerFile).Length
+            innerSha256 = (Get-FileHash -LiteralPath $innerFile -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+    }
+
     $assets = @()
     if (Test-Path $setupOut) { $assets += Get-AssetEntry $setupOut 'setup' }
+    if (Test-Path $wrapperOut) { $assets += (Get-WrapperEntry $wrapperOut $setupOut) }
     if (Test-Path $zipOut) { $assets += Get-AssetEntry $zipOut 'zip' }
 
     $manifestObj = [ordered]@{

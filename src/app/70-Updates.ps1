@@ -549,13 +549,28 @@ function Complete-UpdateCheck {
         return
     }
 
+    # M3：setup 全源失败后的 wrapper 回退资产。清单已验签，这里只做结构校验；
+    # 老客户端不认 kind=wrapper，仍按 setup 走，互不影响。
+    $primaryInfo = New-UpdateAssetInfo $asset 'setup'
+    $fallbackInfo = $null
+    if ($man.assets) {
+        foreach ($cand in @($man.assets | Where-Object { $_.kind -eq 'wrapper' })) {
+            $candInfo = New-UpdateAssetInfo $cand 'wrapper'
+            if ($candInfo) { $fallbackInfo = $candInfo; break }
+        }
+    }
+    $script:UpdateOffer = @{ Primary = $primaryInfo; Fallback = $fallbackInfo; Version = [string]$man.version }
+    if ($fallbackInfo) {
+        Write-AppLog ("jsDelivr 回退包已登记: $($fallbackInfo.Name)（内层 $($fallbackInfo.InnerName)）")
+    }
+
     $script:UpdateState = 'available'
     $script:UpdateAutoCheckDone = $true
     Send-UpdateState @{
         state = 'available'; reason = $Ctx.Reason
         version = $man.version; date = $man.date; notes = $man.notes
         size = $asset.size; sha256 = $asset.sha256; name = $asset.name; urls = $urls
-        source = $obj.url
+        source = $obj.url; fallback = $fallbackInfo
     }
     Set-UpdateCheckedAt
 }
@@ -570,7 +585,11 @@ function Set-UpdateCheckedAt {
 
 # ---------- 下载（异步，边下边算进度） ----------
 function Start-UpdateDownload {
-    param([string]$Name, [string[]]$Urls, [string]$Sha256, [long]$Size)
+    param(
+        [string]$Name, [string[]]$Urls, [string]$Sha256, [long]$Size,
+        [string]$Kind = 'setup', [hashtable]$Fallback = $null,
+        [string]$InnerName = '', [string]$InnerSha256 = '', [long]$InnerSize = 0
+    )
     if ($script:UpdateCtx) { Write-AppLog '已有下载/检查任务在进行' 'WARN'; return }
     # 资产名只取文件名，杜绝用 ../ 之类写到目录外
     $Name = Split-Path -Leaf ([string]$Name)
@@ -589,11 +608,20 @@ function Start-UpdateDownload {
         }
     } catch { }
     if (Test-Path $out) { Remove-Item $out -Force -ErrorAction SilentlyContinue }
+    # wrapper 的内层 exe 落到受控的 unpack-<版本> 目录，安装启动后再清掉。
+    $unpackDir = ''
+    if ($Kind -eq 'wrapper') {
+        $vm = [regex]::Match($safe, '^PerfCapture-Update-(\d+\.\d+\.\d+)\.zip$')
+        $v = if ($vm.Success) { $vm.Groups[1].Value } else { 'unknown' }
+        $unpackDir = Join-Path $dir ('unpack-' + $v)
+        Remove-UpdateUnpackDir $unpackDir
+    }
     $allowed = @()
     foreach ($u in @($Urls)) {
         if ($u -and (Test-UpdateHost $u) -and ($allowed -notcontains $u)) { $allowed += [string]$u }
     }
     if (-not $allowed.Count) {
+        Remove-UpdateUnpackDir $unpackDir
         $script:UpdateState = 'error'
         Send-UpdateState @{ state = 'error'; detail = 'url'; hint = 'update.hint.offline' }
         return
@@ -619,10 +647,13 @@ function Start-UpdateDownload {
     $script:UpdateCtx = @{
         Kind = 'download'; PS = $ps; Handle = $handle; Out = $out; Part = $part
         Sha = $Sha256; Size = $Size; Url = $allowed[0]; Urls = $allowed
+        AssetKind = $Kind; Fallback = $Fallback; UnpackDir = $unpackDir
+        InnerName = $InnerName; InnerSha256 = $InnerSha256; InnerSize = $InnerSize
         Cts = $cts; LastBytes = 0; LastAt = (Get-Date); Samples = $null
     }
-    Send-UpdateState @{ state = 'downloading'; progress = 0; name = $safe; source = $allowed[0] }
-    Write-AppLog ("开始下载更新（$($allowed.Count) 个源）: " + ($allowed -join ' | '))
+    $tag = if ($Kind -eq 'wrapper') { 'jsDelivr 回退包' } else { '更新包' }
+    Send-UpdateState @{ state = 'downloading'; progress = 0; name = $safe; source = $allowed[0]; assetKind = $Kind }
+    Write-AppLog ("开始下载$tag（$($allowed.Count) 个源）: " + ($allowed -join ' | '))
 
     Stop-UpdateTimer
     $timer = New-Object System.Windows.Forms.Timer
@@ -650,11 +681,23 @@ function Complete-UpdateDownload {
         if ($err -eq 'CANCELLED') {
             if (Test-Path -LiteralPath $Ctx.Out) { Remove-Item -LiteralPath $Ctx.Out -Force -ErrorAction SilentlyContinue }
             if ($Ctx.Part -and (Test-Path -LiteralPath $Ctx.Part)) { Remove-Item -LiteralPath $Ctx.Part -Force -ErrorAction SilentlyContinue }
+            Remove-UpdateUnpackDir $Ctx.UnpackDir
             Write-AppLog '用户取消了下载'
             $script:UpdateState = 'idle'
             Send-UpdateState @{ state = 'idle'; detail = 'cancelled' }
             return
         }
+        # setup 全源失败 → 用已验签清单里的 wrapper 再走一次；老版本清单无此资产时行为不变。
+        if ($Ctx.Fallback) {
+            $fb = $Ctx.Fallback
+            Write-AppLog ("setup 资产全源失败（$err），改用 jsDelivr 回退包 $($fb.Name)") 'WARN'
+            Remove-UpdateUnpackDir $Ctx.UnpackDir
+            Start-UpdateDownload -Name ([string]$fb.Name) -Urls @($fb.Urls) -Sha256 ([string]$fb.Sha256) `
+                -Size ([long]$fb.Size) -Kind 'wrapper' -Fallback $null `
+                -InnerName ([string]$fb.InnerName) -InnerSha256 ([string]$fb.InnerSha256) -InnerSize ([long]$fb.InnerSize)
+            return
+        }
+        Remove-UpdateUnpackDir $Ctx.UnpackDir
         # 换源在 worker 内部完成（同一个 .part 接力），这里只负责如实汇报每个源的结果。
         $trail = ''
         if ($res -and $res.log) { $trail = '；' + (@($res.log) -join '；') }
@@ -684,14 +727,38 @@ function Complete-UpdateDownload {
         Remove-Item -LiteralPath $Ctx.Out -Force -ErrorAction SilentlyContinue
         # 校验不过说明字节不可信：连 .part 一起删，下次从头下（不能拿半截包续一个可能已换版的镜像）。
         if ($Ctx.Part -and (Test-Path -LiteralPath $Ctx.Part)) { Remove-Item -LiteralPath $Ctx.Part -Force -ErrorAction SilentlyContinue }
+        Remove-UpdateUnpackDir $Ctx.UnpackDir
         $script:UpdateState = 'error'
         Send-UpdateState @{ state = 'error'; detail = 'integrity'; hint = 'update.hint.tampered' }
         return
     }
 
+    $readyPath = $Ctx.Out
+    $readySha = $Ctx.Sha
+    $readyName = Split-Path $Ctx.Out -Leaf
+    if ($Ctx.AssetKind -eq 'wrapper') {
+        $script:UpdateState = 'verifying'
+        Send-UpdateState @{ state = 'verifying'; name = $Ctx.InnerName }
+        try {
+            $meta = @{
+                Kind = 'wrapper'; InnerName = [string]$Ctx.InnerName
+                InnerSize = [long]$Ctx.InnerSize; InnerSha256 = [string]$Ctx.InnerSha256
+            }
+            $readyPath = Expand-UpdateWrapper -ZipPath $Ctx.Out -Dest $Ctx.UnpackDir -Info $meta
+            $readySha = [string]$Ctx.InnerSha256
+            $readyName = [string]$Ctx.InnerName
+        } catch {
+            Remove-UpdateUnpackDir $Ctx.UnpackDir
+            Write-AppLog ("回退包解包失败: " + $_.Exception.Message) 'WARN'
+            $script:UpdateState = 'error'
+            Send-UpdateState @{ state = 'error'; detail = 'unpack'; hint = 'update.hint.tampered' }
+            return
+        }
+    }
+
     $script:UpdateState = 'ready'
-    Send-UpdateState @{ state = 'ready'; name = (Split-Path $Ctx.Out -Leaf); path = $Ctx.Out; sha256 = $Ctx.Sha }
-    Write-AppLog ("更新包已下载并通过本地校验: $($Ctx.Out)（源 " + [string]$res.url + "，proxy=" + [string]$res.proxy + "）")
+    Send-UpdateState @{ state = 'ready'; name = $readyName; path = $readyPath; sha256 = $readySha; assetKind = $Ctx.AssetKind }
+    Write-AppLog ("更新包已下载并通过本地校验: $readyPath（源 " + [string]$res.url + "，proxy=" + [string]$res.proxy + "）")
 }
 
 # ---------- 计时器总入口 ----------
@@ -760,6 +827,7 @@ function Invoke-UpdateTick {
 
 # ---------- 启动后自动检查一次 ----------
 function Start-UpdateAutoCheck {
+    Clear-StaleUpdateUnpacks
     if ($script:Cfg.updateCheck -and $script:Cfg.updateCheck.auto -eq $false) { Write-AppLog '自动检查更新已在设置里关闭'; return }
     if ($script:UpdateAutoCheckDone) { return }
     Write-AppLog ("将在 {0} 秒后自动检查一次更新（本次会话只查一次）" -f [int]($script:UpdateAutoCheckDelayMs / 1000))
@@ -840,6 +908,32 @@ function Get-UpdateInstallDir {
     return ''
 }
 
+# wrapper 解包目录的延迟清理：安装包进程起来后再删，避免占用内层 exe。
+function Get-UpdateUnpackDirForPath([string]$path) {
+    $root = Get-UpdateUnpackRoot
+    $full = ''
+    try { $full = [IO.Path]::GetFullPath($path) } catch { return '' }
+    if (-not $full.StartsWith($root + '\unpack-', [StringComparison]::OrdinalIgnoreCase)) { return '' }
+    $rel = $full.Substring($root.Length + 1)
+    $m = [regex]::Match($rel, '^(unpack-[^\\]+)\\')
+    if (-not $m.Success) { return '' }
+    return (Join-Path $root $m.Groups[1].Value)
+}
+
+function Schedule-UpdateUnpackCleanup([string]$Dir) {
+    if (-not $Dir) { return }
+    if (-not $script:UpdateCleanupTimers) { $script:UpdateCleanupTimers = New-Object System.Collections.ArrayList }
+    $t = New-Object System.Windows.Forms.Timer
+    $t.Interval = 8000
+    $t.add_Tick({
+        try { $t.Stop(); $t.Dispose() } catch { }
+        try { [void]$script:UpdateCleanupTimers.Remove($t) } catch { }
+        Remove-UpdateUnpackDir $Dir
+    })
+    [void]$script:UpdateCleanupTimers.Add($t)
+    $t.Start()
+}
+
 # ---------- 更新安装窗口起来后，退出当前进程 ----------
 # 不退出的话安装程序写 lib\*.dll 会被占用（实测 IOException），用户眼前也会留个旧实例。
 function Request-AppExitForUpdate {
@@ -867,8 +961,16 @@ function Invoke-UpdateCommand {
     switch ($Msg.cmd) {
         'checkUpdate' { Start-UpdateCheck -Reason 'manual' }
         'downloadUpdate' {
-            $urls = @($Msg.urls | Where-Object { $_ })
-            Start-UpdateDownload -Name ([string]$Msg.name) -Urls $urls -Sha256 ([string]$Msg.sha256) -Size ([long]$Msg.size)
+            # 资产信息以验签后的清单为准，不直接信 UI 传来的参数（UI 只负责发起动作）。
+            $offer = $script:UpdateOffer
+            if ($offer -and $offer.Primary) {
+                Start-UpdateDownload -Name ([string]$offer.Primary.Name) -Urls @($offer.Primary.Urls) `
+                    -Sha256 ([string]$offer.Primary.Sha256) -Size ([long]$offer.Primary.Size) `
+                    -Kind 'setup' -Fallback $offer.Fallback
+            } else {
+                $urls = @($Msg.urls | Where-Object { $_ })
+                Start-UpdateDownload -Name ([string]$Msg.name) -Urls $urls -Sha256 ([string]$Msg.sha256) -Size ([long]$Msg.size)
+            }
         }
         'cancelUpdate' {
             if ($script:UpdateCtx) {
@@ -881,6 +983,7 @@ function Invoke-UpdateCommand {
                         if ($p -and (Test-Path -LiteralPath $p)) { Remove-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue }
                     }
                 } catch { }
+                try { Remove-UpdateUnpackDir $script:UpdateCtx.UnpackDir } catch { }
                 $script:UpdateCtx = $null
             }
             Stop-UpdateTimer
@@ -893,7 +996,10 @@ function Invoke-UpdateCommand {
         'runUpdateInstaller' {
             $full = Resolve-UpdateInstaller ([string]$Msg.path) ([string]$Msg.sha256)
             if (-not $full) { return }
-            try { Start-Process -FilePath $full } catch { Write-AppLog ('启动安装包失败: ' + $_.Exception.Message) 'ERROR' }
+            try {
+                Start-Process -FilePath $full
+                Schedule-UpdateUnpackCleanup (Get-UpdateUnpackDirForPath $full)
+            } catch { Write-AppLog ('启动安装包失败: ' + $_.Exception.Message) 'ERROR' }
         }
         'applyUpdate' {
             # 用户点了「立即更新」：静默覆盖安装到**当前安装目录**（不弹路径选择、不建快捷方式），
@@ -905,6 +1011,7 @@ function Invoke-UpdateCommand {
                 $args = @('/S', ('/D="' + $dir + '"'), '/NODESKTOP', '/NOMENU', '/RUN')
                 Write-AppLog ('启动安装程序（静默覆盖）: ' + $full + ' → ' + $dir)
                 Start-Process -FilePath $full -ArgumentList $args
+                Schedule-UpdateUnpackCleanup (Get-UpdateUnpackDirForPath $full)
                 Request-AppExitForUpdate
             } catch {
                 Write-AppLog ('启动安装包失败: ' + $_.Exception.Message) 'ERROR'

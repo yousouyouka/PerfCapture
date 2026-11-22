@@ -18,7 +18,7 @@ $structure = @(
     'src\PerfCapture.ps1',
     'src\app\00-Prelude.ps1', 'src\app\05-Paths.ps1', 'src\app\10-Bootstrap.ps1',
     'src\app\15-Logging.ps1', 'src\app\20-Settings.ps1', 'src\app\30-Tools.ps1', 'src\app\35-Metrics.ps1', 'src\app\55-Overlay.ps1',
-    'src\app\40-Bridge.ps1', 'src\app\50-Host.ps1', 'src\app\60-Capture.ps1', 'src\app\rtss-shm.ps1', 'src\app\80-Extensions.ps1', 'src\app\85-ExtensionProvision.ps1', 'src\app\90-Main.ps1',
+    'src\app\40-Bridge.ps1', 'src\app\50-Host.ps1', 'src\app\60-Capture.ps1', 'src\app\68-UpdateWrapper.ps1', 'src\app\rtss-shm.ps1', 'src\app\80-Extensions.ps1', 'src\app\85-ExtensionProvision.ps1', 'src\app\90-Main.ps1',
     'src\engine\Measure-GamePerf.ps1',
     'ui\index.html',
     'ui\css\tokens.css', 'ui\css\layout.css', 'ui\css\components.css',
@@ -46,6 +46,11 @@ if (Test-Path (Join-Path $root 'build')) {
     $packSrc = Get-Content (Join-Path $root 'build\pack.ps1') -Raw -Encoding UTF8
     if ($packSrc -notmatch 'prune-dist\.ps1') { Bad 'pack.ps1 没有调用 prune-dist.ps1（dist 会无限增长）' }
     if ($packSrc -notmatch 'KeepDistVersions\s*=\s*3') { Bad 'pack.ps1 的 KeepDistVersions 默认值不是 3' }
+    if ($packSrc -notmatch "PerfCapture-Update-") { Bad 'pack.ps1 没有生成 jsDelivr 回退包' }
+    if ($packSrc -notmatch 'innerSha256') { Bad '回退包清单没有记录内层 exe 哈希' }
+    $pushSrc = Get-Content (Join-Path $root 'build\push-updates.ps1') -Raw -Encoding UTF8
+    if ($pushSrc -notmatch 'PerfCapture-Update-') { Bad 'push-updates.ps1 没有同步回退包' }
+    if ($pushSrc -notmatch '\(\?:-Setup\|-Update\)\?') { Bad 'push-updates.ps1 清理旧版本时漏掉回退包' }
 }
 if ($fail -eq 0) { Ok "结构完整（$($structure.Count) 项）" }
 
@@ -777,6 +782,13 @@ if ($updPs -notmatch 'Get-FileHash -LiteralPath \$OutPath') { Bad '下载完成�
 if ($updPs -notmatch 'CancellationTokenSource') { Bad '下载不支持取消（无法中断）' }
 if ($updPs -notmatch 'TotalSeconds -gt 45') { Bad '没有下载停滞看门狗' }
 if ($updPs -notmatch 'PartPath') { Bad '更新下载没有 .part 续传文件' }
+# 2.1.9 / M3：setup 全源失败后的 wrapper 回退
+$entryPs = Get-Content (Join-Path $root 'src\PerfCapture.ps1') -Raw -Encoding UTF8
+if ($entryPs -notmatch '68-UpdateWrapper\.ps1') { Bad '入口没有加载 wrapper 助手' }
+if ($updPs -notmatch 'New-UpdateAssetInfo') { Bad '检查更新没有登记 wrapper 回退资产' }
+if ($updPs -notmatch 'Start-UpdateDownload -Name \(\[string\]\$fb\.Name\)') { Bad 'setup 失败后没有自动改用 wrapper' }
+if ($updPs -notmatch 'Expand-UpdateWrapper') { Bad 'wrapper 下载完成后没有解压校验' }
+if ($updPs -notmatch 'Schedule-UpdateUnpackCleanup') { Bad '安装后没有清理解包目录' }
 if ($updPs -notmatch '\$ProbeMs') { Bad '更新下载没有源探测预算（会逐个源等超时）' }
 if ($provPs -notmatch 'Select-ProvisionSources') { Bad '扩展供应层没有源探测（多源仍逐个等超时）' }
 # M1：系统代理显式化——助手必须存在、入口必须加载、两个后台 worker 都要注入它

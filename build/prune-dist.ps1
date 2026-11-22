@@ -34,7 +34,7 @@ function Get-VerKey([string]$v) {
 # 版本 → 该版本的产物路径（目录 / zip / Setup exe），三种命名都认
 $byVer = @{}
 foreach ($item in @(Get-ChildItem -LiteralPath $distFull -Force -ErrorAction SilentlyContinue)) {
-    $m = [regex]::Match($item.Name, '^PerfCapture(?:-Setup)?-(\d+\.\d+\.\d+)(?:\.(?:exe|zip))?$')
+    $m = [regex]::Match($item.Name, '^PerfCapture(?:-Setup|-Update)?-(\d+\.\d+\.\d+)(?:\.(?:exe|zip))?$')
     if (-not $m.Success) { continue }
     $v = $m.Groups[1].Value
     if (-not $byVer.ContainsKey($v)) { $byVer[$v] = New-Object System.Collections.Generic.List[string] }

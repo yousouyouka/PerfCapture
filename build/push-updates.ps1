@@ -43,9 +43,11 @@ if (-not $Yes) { Write-Host "  （预览模式：不会建提交也不会推送�
 
 # ---------- 1. 待发布文件必须齐全 ----------
 $setupName = "PerfCapture-Setup-$version.exe"
+$wrapperName = "PerfCapture-Update-$version.zip"
 $zipName = "PerfCapture-$version.zip"
 $assets = @(
     @{ Src = Join-Path $root "dist\$setupName"; Dst = "bin\$setupName" },
+    @{ Src = Join-Path $root "dist\$wrapperName"; Dst = "bin\$wrapperName" },
     @{ Src = Join-Path $root "dist\$zipName"; Dst = "bin\$zipName" }
 )
 $manifestFiles = @(
@@ -120,7 +122,7 @@ try {
     # ---------- 5. 只留最近 N 个版本的资产 ----------
     $byVer = @{}
     foreach ($f in @(Get-ChildItem (Join-Path $staging 'bin') -File -ErrorAction SilentlyContinue)) {
-        if ($f.Name -match '^PerfCapture(?:-Setup)?-(\d+\.\d+\.\d+)\.(?:exe|zip)$') {
+        if ($f.Name -match '^PerfCapture(?:-Setup|-Update)?-(\d+\.\d+\.\d+)\.(?:exe|zip)$') {
             $v = $Matches[1]
             if (-not $byVer.ContainsKey($v)) { $byVer[$v] = @() }
             $byVer[$v] += $f

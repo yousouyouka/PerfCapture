@@ -779,6 +779,12 @@ if ($updPs -notmatch 'TotalSeconds -gt 45') { Bad '没有下载停滞看门狗' 
 if ($updPs -notmatch 'PartPath') { Bad '更新下载没有 .part 续传文件' }
 if ($updPs -notmatch '\$ProbeMs') { Bad '更新下载没有源探测预算（会逐个源等超时）' }
 if ($provPs -notmatch 'Select-ProvisionSources') { Bad '扩展供应层没有源探测（多源仍逐个等超时）' }
+# M1：系统代理显式化——助手必须存在、入口必须加载、两个后台 worker 都要注入它
+if (-not (Test-Path (Join-Path $root 'src\app\06-NetProxy.ps1'))) { Bad '缺 06-NetProxy.ps1（系统代理显式化助手）' }
+if ($entryPs -notmatch '06-NetProxy\.ps1') { Bad 'PerfCapture.ps1 未加载 06-NetProxy.ps1' }
+if ($updPs -notmatch 'NetProxyHelper' -or $provPs -notmatch 'NetProxyHelper') { Bad '更新/扩展 worker 未注入代理助手源码' }
+if ($updPs -notmatch 'Set-RequestProxy' -or $provPs -notmatch 'Set-RequestProxy') { Bad '下载请求没有显式设置代理' }
+if ($updPs -notmatch 'retry probe direct' -or $provPs -notmatch 'retry probe direct') { Bad '代理失败时缺直连回退分支' }
 if (-not $updPs.Contains('StartsWith($root')) { Bad '运行安装包没有限制在下载目录内' }
 if ($updPs -notmatch 'UpdateDelayTimer') { Bad '自动检查的延时计时器没有纳入管理（可能重复检查）' }
 if ($capPs -notmatch "'checkUpdate'") { Bad '60-Capture.ps1 没登记 checkUpdate 命令' }

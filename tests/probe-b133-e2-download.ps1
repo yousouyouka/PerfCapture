@@ -24,6 +24,7 @@ function Send-ToUi([hashtable]$payload) { [void]$script:UiMessages.Add($payload)
 function Save-Config { }
 $script:Cfg = @{ extensions = @{} }
 
+. (Join-Path $root 'src\app\06-NetProxy.ps1')
 . (Join-Path $root 'src\app\rtss-shm.ps1')
 . (Join-Path $root 'src\app\80-Extensions.ps1')
 . (Join-Path $root 'src\app\85-ExtensionProvision.ps1')
@@ -39,7 +40,7 @@ function Get-Sha([string]$path) {
 
 function Invoke-Worker([hashtable]$S) {
     $ps = [PowerShell]::Create()
-    [void]$ps.AddScript($script:ExtensionProvisionWorker).AddArgument($S).AddArgument($script:ExtProvQueue)
+    [void]$ps.AddScript($script:ExtensionProvisionWorker).AddArgument($S).AddArgument($script:ExtProvQueue).AddArgument('').AddArgument([string]$script:NetProxyHelper)
     $r = @($ps.Invoke())[0]
     $ps.Dispose()
     Drain-ExtProvQueue
@@ -258,7 +259,7 @@ Assert ($hitMsg.Count -ge 1) '缓存命中如实回推 cacheHit' '缓存命中�
 $s6 = New-Spec 'cancel'
 $state.mode = 'slow'
 $ps = [PowerShell]::Create()
-[void]$ps.AddScript($script:ExtensionProvisionWorker).AddArgument($s6).AddArgument($script:ExtProvQueue)
+[void]$ps.AddScript($script:ExtensionProvisionWorker).AddArgument($s6).AddArgument($script:ExtProvQueue).AddArgument('').AddArgument([string]$script:NetProxyHelper)
 $h = $ps.BeginInvoke()
 Start-Sleep -Milliseconds 500
 Assert ((Test-Path (Join-Path $s6.cacheDir 'pkg.zip.part'))) '取消前已开始写 .part（确实在传）' '取消用例没进入下载（.part 不存在）'

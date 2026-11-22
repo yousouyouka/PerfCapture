@@ -25,6 +25,8 @@ $s0 = $src.IndexOf("`n", $i) + 1
 $e0 = $src.IndexOf("`n'@", $s0)
 $body = $src.Substring($s0, $e0 - $s0)
 $runner = [scriptblock]::Create($body)
+# M1：下载 worker 现在需要代理助手源码（宿主运行时由 06-NetProxy.ps1 提供）
+$proxyHelper = [IO.File]::ReadAllText((Join-Path $root 'src\app\06-NetProxy.ps1'))
 
 # ---------- 2. 造 1.5MB 负载（分块足够多次，能测出限速与断流） ----------
 $payload = New-Object byte[] (1536 * 1024)
@@ -133,7 +135,7 @@ function Invoke-Dl([string[]]$urls, [string]$tag, [long]$expectSize, [long]$maxB
     $out = Join-Path $work ($tag + '.exe')
     $part = $out + '.part'
     return (& $runner -Urls $urls -OutPath $out -PartPath $part -MaxBytes $maxBytes -ExpectedSize $expectSize `
-            -AllowedHosts $hosts -Token $token -ProbeMs $probeMs -StallSec $stallSec)[0]
+            -AllowedHosts $hosts -Token $token -ProbeMs $probeMs -StallSec $stallSec -NetProxyHelper $proxyHelper)[0]
 }
 
 $cts = New-Object System.Threading.CancellationTokenSource
@@ -183,6 +185,7 @@ $ps = [PowerShell]::Create()
 [void]$ps.AddParameter('Token', $cts2.Token)
 [void]$ps.AddParameter('ProbeMs', 1000)
 [void]$ps.AddParameter('StallSec', 20)
+[void]$ps.AddParameter('NetProxyHelper', $proxyHelper)
 $h = $ps.BeginInvoke()
 Start-Sleep -Milliseconds 700
 $cts2.Cancel()

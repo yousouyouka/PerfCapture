@@ -9,6 +9,7 @@ $appDir = Join-Path $PSScriptRoot 'app'
 foreach ($f in @(
     '00-Prelude.ps1',
     '05-Paths.ps1',
+    '06-NetProxy.ps1',
     '10-Bootstrap.ps1',
     '15-Logging.ps1',
     '20-Settings.ps1',

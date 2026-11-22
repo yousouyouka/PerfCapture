@@ -24,6 +24,7 @@ function Send-ToUi([hashtable]$payload) { [void]$script:UiMessages.Add($payload)
 function Save-Config { }
 $script:Cfg = @{ extensions = @{} }
 
+. (Join-Path $root 'src\app\06-NetProxy.ps1')
 . (Join-Path $root 'src\app\rtss-shm.ps1')
 . (Join-Path $root 'src\app\80-Extensions.ps1')
 . (Join-Path $root 'src\app\85-ExtensionProvision.ps1')
@@ -39,7 +40,7 @@ function Get-Sha([string]$path) {
 
 function Invoke-Worker([hashtable]$S) {
     $ps = [PowerShell]::Create()
-    [void]$ps.AddScript($script:ExtensionProvisionWorker).AddArgument($S).AddArgument($script:ExtProvQueue)
+    [void]$ps.AddScript($script:ExtensionProvisionWorker).AddArgument($S).AddArgument($script:ExtProvQueue).AddArgument('').AddArgument([string]$script:NetProxyHelper)
     $r = @($ps.Invoke())[0]
     $ps.Dispose()
     Drain-ExtProvQueue

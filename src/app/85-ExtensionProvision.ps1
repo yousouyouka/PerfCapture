@@ -33,7 +33,11 @@ function Expand-ExtensionTemplate {
 # ---------- runspace 内执行的供应worker ----------
 # 刻意只用 .NET 与内置 cmdlet，不依赖 UI 主线程状态；失败一律回滚后返回结构化结果。
 $script:ExtensionProvisionWorker = @'
-param([hashtable]$Spec, [System.Collections.Concurrent.ConcurrentQueue[object]]$ProgressQueue, [string]$RtssReaderCode)
+param([hashtable]$Spec, [System.Collections.Concurrent.ConcurrentQueue[object]]$ProgressQueue, [string]$RtssReaderCode, [string]$NetProxyHelper)
+if ($NetProxyHelper) { . ([scriptblock]::Create($NetProxyHelper)) }
+# M1：网络请求显式走系统代理；诊断与日志统一记 proxy=<...>，失败时再直连一次。
+$proxyInfo = Get-NetProxyDescriptor ([string]$Spec.url)
+$directInfo = Get-DirectProxyInfo
 
 # 运行态校验复用宿主那份读取器（唯一实现，避免两处维护同一套结构常量）。
 # 宿主在启动 worker 时把读取器源码作为参数传进来，这里点源到当前 runspace。
@@ -92,6 +96,7 @@ function Save-ProvisionDiagnostics([string]$Reason, [string]$Detail) {
         $lines.Add('时间: ' + (Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))
         $lines.Add('结果: ' + $Reason)
         $lines.Add('详情: ' + $Detail)
+        $lines.Add('网络: proxy=' + $proxyInfo.label + '（来源: ' + $proxyInfo.source + '）')
         $lines.Add('')
         $lines.Add('-- 阶段时间线 --')
         foreach ($t in $timeline) { $lines.Add($t) }
@@ -256,8 +261,7 @@ function Select-ProvisionSources([string[]]$Sources) {
     $jobs = @()
     try {
         try { Add-Type -AssemblyName System.Net.Http -ErrorAction Stop } catch { return @{ order = $list; facts = $facts } }
-        $client = New-Object System.Net.Http.HttpClient
-        $client.Timeout = [TimeSpan]::FromMilliseconds($probeMs + 2000)
+        $client = New-ProxyHttpClient $proxyInfo ($probeMs + 2000)
         try { $client.DefaultRequestHeaders.UserAgent.ParseAdd('PerfCapture') } catch { }
         $cts = New-Object System.Threading.CancellationTokenSource
         $cts.CancelAfter($probeMs)
@@ -295,6 +299,34 @@ function Select-ProvisionSources([string[]]$Sources) {
         try { if ($client) { $client.Dispose() } } catch { }
     }
     $okList = @($jobs | Where-Object { $_.Ok } | Sort-Object -Property Ms | ForEach-Object { $_.Url })
+    # M1 直连回退：代理下所有源都探不通时，再直连探一次；失败也只多花一轮探测预算。
+    if (-not $okList.Count -and $proxyInfo.active) {
+        $facts.Add('proxy unreachable -> retry probe direct')
+        $dclient = $null; $dcts = $null
+        try {
+            $dclient = New-ProxyHttpClient $directInfo ($probeMs + 2000)
+            $dcts = New-Object System.Threading.CancellationTokenSource
+            $dcts.CancelAfter($probeMs)
+            foreach ($j in $jobs) {
+                $t = $null
+                try {
+                    $req = New-Object System.Net.Http.HttpRequestMessage([System.Net.Http.HttpMethod]::Get, $j.Url)
+                    $req.Headers.Range = New-Object System.Net.Http.Headers.RangeHeaderValue(0, 0)
+                    $t = $dclient.SendAsync($req, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead, $dcts.Token)
+                    if ($t.IsCompleted) {
+                        $resp = $t.GetAwaiter().GetResult()
+                        if ($resp -and $resp.IsSuccessStatusCode) { $j.Ok = $true; $j.Ms = [int]$j.Sw.ElapsedMilliseconds }
+                        try { if ($resp) { $resp.Dispose() } } catch { }
+                    }
+                } catch { }
+                $facts.Add('direct ' + (Get-SafeUrl $j.Url) + ' -> ' + $(if ($j.Ok) { ([string]$j.Ms + 'ms') } else { 'unreachable' }))
+            }
+            $okList = @($jobs | Where-Object { $_.Ok } | Sort-Object -Property Ms | ForEach-Object { $_.Url })
+        } catch { } finally {
+            try { if ($dcts) { $dcts.Dispose() } } catch { }
+            try { if ($dclient) { $dclient.Dispose() } } catch { }
+        }
+    }
     $badList = @($jobs | Where-Object { -not $_.Ok } | ForEach-Object { $_.Url })
     # 一个都没探通，不要直接判死：保持原顺序交给下载去试（探测本身也可能被中间设备拦掉）。
     if (-not $okList.Count) { return @{ order = $list; facts = $facts } }
@@ -323,12 +355,13 @@ function Send-DownloadProgress([int64]$Recv, [int64]$Total, [double]$Seconds) {
 
 # 单源单次尝试：Range 续传 + 流式写盘 + 进度回推。
 # 返回 @{ ok; status; restart; message }：restart=true 表示「丢 .part 从头再来一次」。
-function Invoke-SourceOnce([string]$Url, [string]$Dest, [DateTime]$Deadline) {
+function Invoke-SourceOnce([string]$Url, [string]$Dest, [DateTime]$Deadline, $ProxyInfo) {
     $existing = 0
     if (Test-Path -LiteralPath $Dest) {
         try { $existing = [int64](Get-Item -LiteralPath $Dest).Length } catch { $existing = 0 }
     }
     $req = [System.Net.HttpWebRequest]::Create($Url)
+    [void](Set-RequestProxy $req $ProxyInfo)
     $req.Method = 'GET'
     $req.AllowAutoRedirect = $true
     $req.UserAgent = 'PerfCapture'
@@ -505,6 +538,7 @@ try {
             if (-not $sources.Count) { throw 'noSource' }
             # 先探测再下载：把「逐个源各等一次连接超时」压成一次并发探测，快的源先上。
             $probe = Select-ProvisionSources $sources
+            $sourceLog.Add('proxy ' + $proxyInfo.label)
             foreach ($f in @($probe.facts)) { if ($f) { $sourceLog.Add([string]$f) } }
             $sources = @($probe.order)
             $ok = $false
@@ -515,7 +549,13 @@ try {
                     Assert-NotCancelled
                     # 每个源独立预算：首选源慢死时，备用源仍然拿得到完整时间。
                     $deadline = [DateTime]::UtcNow.AddSeconds([int]$Spec.timeoutSec)
-                    $r = Invoke-SourceOnce $src $partPath $deadline
+                    $r = Invoke-SourceOnce $src $partPath $deadline $proxyInfo
+                    # 代理连接失败（含 407 凭据问题）才直连重试；404/403 是源本身的问题，重试没有意义。
+                    if (-not $r.ok -and $proxyInfo.active -and ($r.status -eq 0 -or $r.status -eq 407) -and
+                        $r.message -notmatch 'cancelled|archiveTooLarge|downloadTimeout') {
+                        $sourceLog.Add((Get-SafeUrl $src) + ' -> 代理失败，直连重试一次')
+                        $r = Invoke-SourceOnce $src $partPath $deadline $directInfo
+                    }
                     if ($r.ok) { $ok = $true; break }
                     if ($r.message -eq 'cancelled') { throw 'cancelled' }
                     $sourceLog.Add((Get-SafeUrl $src) + ' -> ' + $r.status + ' / ' + $r.message)
@@ -841,6 +881,7 @@ function Start-ExtensionProvision {
     # 把读取器源码随参数带入 worker：运行态校验与运行时采样共用同一份结构定义。
     $readerCode = if ($script:RtssReaderSource) { [string]$script:RtssReaderSource } else { '' }
     [void]$ps.AddArgument($readerCode)
+    [void]$ps.AddArgument([string]$script:NetProxyHelper)
     $handle = $ps.BeginInvoke()
     $script:ExtProvCtx = @{ Id = $Id; Mode = $Mode; PS = $ps; Handle = $handle; Started = (Get-Date); Cancel = $script:ExtProvCancel }
     Send-ExtensionProgress $Id 'prepare' 2

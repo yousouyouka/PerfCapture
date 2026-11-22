@@ -103,7 +103,10 @@ function Stop-UpdateTimer {
 
 # ---------- 后台线程里跑的脚本（runspace，不阻塞 UI 线程） ----------
 $script:UpdateFetchScript = @'
-param($ManifestUrls, $TimeoutSec, $PublicKeyXml, $AllowedHosts)
+param($ManifestUrls, $TimeoutSec, $PublicKeyXml, $AllowedHosts, [string]$NetProxyHelper)
+if ($NetProxyHelper) { . ([scriptblock]::Create($NetProxyHelper)) }
+# M1：显式使用系统代理；探测失败时把 proxy=... 一并带回去，日志里能看出走了哪条路。
+$proxyInfo = Get-NetProxyDescriptor ([string]$ManifestUrls[0])
 # 多源策略（2.0.22 起）：
 #   1) 所有源**同时**取清单与签名，互不等待，总耗时约等于最慢的那个（串行最坏要 3 倍超时）；
 #   2) 每个源各自独立验签，验签不过的直接丢弃 —— 镜像出现「新清单 + 旧签名」错配时不牵连其它源；
@@ -136,11 +139,10 @@ function Compare-Ver([string]$A, [string]$B) {
     }
     return 0
 }
-$errs = @()
+$errs = @('proxy=' + $proxyInfo.label)
 $sigFail = $false
 $cands = @()
-$http = New-Object System.Net.Http.HttpClient
-$http.Timeout = [TimeSpan]::FromSeconds($TimeoutSec)
+$http = New-ProxyHttpClient $proxyInfo ([int]($TimeoutSec * 1000))
 try { $http.DefaultRequestHeaders.UserAgent.ParseAdd('PerfCapture/1.4') } catch {}
 try { $http.DefaultRequestHeaders.Add('Accept', 'application/vnd.github.raw, application/json, */*') } catch {}
 # 先把所有请求一次性发出去（清单与签名各一个 Task），再逐个收结果
@@ -212,17 +214,20 @@ if ($cands.Count -gt 0) {
     return [pscustomobject]@{
         ok = $true; url = $best.Url; ms = $best.Ms
         manifest = $best.Manifest; sig = $best.Sig; sigFail = $false; errors = $errs
-        version = $best.Version; serial = $best.Serial; candidates = $seen
+        version = $best.Version; serial = $best.Serial; candidates = $seen; proxy = $proxyInfo.label
     }
 }
 return [pscustomobject]@{
     ok = $false; url = ''; ms = 0; manifest = ''; sig = ''; sigFail = $sigFail; errors = $errs
-    version = ''; serial = [long]0; candidates = @()
+    version = ''; serial = [long]0; candidates = @(); proxy = $proxyInfo.label
 }
 '@
 
 $script:UpdateDownloadScript = @'
-param($Urls, $OutPath, $PartPath, $MaxBytes, $ExpectedSize, $AllowedHosts, $Token, $ProbeMs, $StallSec)
+param($Urls, $OutPath, $PartPath, $MaxBytes, $ExpectedSize, $AllowedHosts, $Token, $ProbeMs, $StallSec, [string]$NetProxyHelper)
+if ($NetProxyHelper) { . ([scriptblock]::Create($NetProxyHelper)) }
+$proxyInfo = Get-NetProxyDescriptor ([string]@($Urls)[0])
+$directInfo = Get-DirectProxyInfo
 # 2.1.8 下载引擎：探测排序 → 多源接力（.part 续传）→ 整体 SHA-256。
 # 与扩展供应层同一套策略：先并发试首字节，慢源/死源不再各消耗一次完整超时；
 # 换源不丢进度（.part 保留，新源用 Range 续），最终仍以清单里的整包哈希为准。
@@ -230,12 +235,13 @@ function Test-Host($uri) {
     try { return ($AllowedHosts -contains $uri.Host.ToLowerInvariant()) } catch { return $false }
 }
 $log = New-Object System.Collections.Generic.List[string]
+$log.Add('proxy ' + $proxyInfo.label)
 function Fail([string]$code, [bool]$keepPart = $false) {
     # 全源失败时保留 .part：下次重试/重启后能接着下（大小与整包哈希仍会兜底校验）。
     if (-not $keepPart) {
         try { if ($PartPath -and (Test-Path -LiteralPath $PartPath)) { Remove-Item -LiteralPath $PartPath -Force -ErrorAction SilentlyContinue } } catch { }
     }
-    return [pscustomobject]@{ ok = $false; err = $code; sha256 = ''; size = 0; url = ''; log = @($log) }
+    return [pscustomobject]@{ ok = $false; err = $code; sha256 = ''; size = 0; url = ''; proxy = $proxyInfo.label; log = @($log) }
 }
 $ordered = @($Urls | Where-Object { $_ })
 
@@ -245,8 +251,7 @@ if ($ordered.Count -gt 1) {
     $cts = $null
     try {
         try { Add-Type -AssemblyName System.Net.Http -ErrorAction Stop } catch { throw 'nohttp' }
-        $http = New-Object System.Net.Http.HttpClient
-        $http.Timeout = [TimeSpan]::FromMilliseconds([int]$ProbeMs + 2000)
+        $http = New-ProxyHttpClient $proxyInfo ([int]$ProbeMs + 2000)
         try { $http.DefaultRequestHeaders.UserAgent.ParseAdd('PerfCapture/2.1') } catch { }
         $cts = New-Object System.Threading.CancellationTokenSource
         $cts.CancelAfter([int]$ProbeMs)
@@ -277,6 +282,34 @@ if ($ordered.Count -gt 1) {
             $log.Add('probe ' + $j.Url + ' -> ' + $(if ($j.Ok) { [string]$j.Ms + 'ms' } else { 'unreachable' }))
         }
         $good = @($jobs | Where-Object { $_.Ok } | Sort-Object -Property Ms | ForEach-Object { $_.Url })
+        # M1 直连回退：代理下所有源都探不通时，用直连再探一次（只多一次探测预算）。
+        if (-not $good.Count -and $proxyInfo.active) {
+            $log.Add('proxy unreachable -> retry probe direct')
+            $dhttp = $null; $dcts = $null
+            try {
+                $dhttp = New-ProxyHttpClient $directInfo ([int]$ProbeMs + 2000)
+                $dcts = New-Object System.Threading.CancellationTokenSource
+                $dcts.CancelAfter([int]$ProbeMs)
+                foreach ($j in $jobs) {
+                    $t = $null
+                    try {
+                        $rq = New-Object System.Net.Http.HttpRequestMessage([System.Net.Http.HttpMethod]::Get, $j.Url)
+                        $rq.Headers.Range = New-Object System.Net.Http.Headers.RangeHeaderValue(0, 0)
+                        $t = $dhttp.SendAsync($rq, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead, $dcts.Token)
+                        if ($t.IsCompleted) {
+                            $rs = $t.GetAwaiter().GetResult()
+                            if ($rs -and $rs.IsSuccessStatusCode) { $j.Ok = $true; $j.Ms = [int]$j.Sw.ElapsedMilliseconds }
+                            if ($rs) { $rs.Dispose() }
+                        }
+                    } catch { }
+                    $log.Add('direct ' + $j.Url + ' -> ' + $(if ($j.Ok) { [string]$j.Ms + 'ms' } else { 'unreachable' }))
+                }
+                $good = @($jobs | Where-Object { $_.Ok } | Sort-Object -Property Ms | ForEach-Object { $_.Url })
+            } catch { } finally {
+                try { if ($dcts) { $dcts.Dispose() } } catch { }
+                try { if ($dhttp) { $dhttp.Dispose() } } catch { }
+            }
+        }
         $bad = @($jobs | Where-Object { -not $_.Ok } | ForEach-Object { $_.Url })
         if ($good.Count) { $ordered = @($good + $bad) }
     } catch {
@@ -289,12 +322,23 @@ if ($ordered.Count -gt 1) {
 # ---------- 2. 多源接力：续传写入 .part，失败换源继续 ----------
 $ok = $false
 $usedUrl = ''
+# M1：代理模式下一个源失败后再用直连试一次；直连模式只试一次。展平成一张尝试表，
+# 原有的「成功就 break、失败换下一源」语义不变，.part 仍跨尝试保留。
+$attempts = @()
 foreach ($u in $ordered) {
+    $attempts += [pscustomobject]@{ Url = $u; Proxy = $proxyInfo }
+    if ($proxyInfo.active) { $attempts += [pscustomobject]@{ Url = $u; Proxy = $directInfo } }
+}
+foreach ($a in $attempts) {
+    $u = $a.Url
+    $pi = $a.Proxy
+    $log.Add('attempt ' + $u + ' via ' + $pi.label)
     if ($Token -and $Token.IsCancellationRequested) { return (Fail 'CANCELLED') }
     $existing = 0
     try { if (Test-Path -LiteralPath $PartPath) { $existing = [int64](Get-Item -LiteralPath $PartPath).Length } } catch { $existing = 0 }
     if ($ExpectedSize -gt 0 -and $existing -ge $ExpectedSize) { break }
     $req = [System.Net.HttpWebRequest]::Create([string]$u)
+    [void](Set-RequestProxy $req $pi)
     $req.Method = 'GET'
     $req.AllowAutoRedirect = $true
     $req.UserAgent = 'PerfCapture/2.1'
@@ -382,7 +426,7 @@ $size = 0
 try { $size = (Get-Item -LiteralPath $OutPath).Length } catch { }
 $hex = ''
 try { $hex = (Get-FileHash -LiteralPath $OutPath -Algorithm SHA256).Hash.ToLowerInvariant() } catch { }
-return [pscustomobject]@{ ok = $true; err = ''; sha256 = $hex; size = $size; url = $usedUrl; log = @($log) }
+return [pscustomobject]@{ ok = $true; err = ''; sha256 = $hex; size = $size; url = $usedUrl; proxy = $proxyInfo.label; log = @($log) }
 '@
 
 # ---------- 检查更新（异步） ----------
@@ -400,6 +444,7 @@ function Start-UpdateCheck {
     [void]$ps.AddParameter('TimeoutSec', 6)
     [void]$ps.AddParameter('PublicKeyXml', $script:UpdatePublicKeyXml)
     [void]$ps.AddParameter('AllowedHosts', $script:UpdateAllowedHosts)
+    [void]$ps.AddParameter('NetProxyHelper', $script:NetProxyHelper)
     $handle = $ps.BeginInvoke()
     $script:UpdateCtx = @{ Kind = 'check'; PS = $ps; Handle = $handle; Reason = $Reason; Started = (Get-Date) }
 
@@ -426,6 +471,7 @@ function Complete-UpdateCheck {
     if (-not $obj -or -not $obj.ok) {
         $detail = ''
         if ($obj -and $obj.errors) { $detail = (@($obj.errors) -join '；') }
+        if ($obj -and $obj.proxy) { $detail += '；proxy=' + $obj.proxy }
         if ($obj -and $obj.sigFail) {
             # 至少有一个源确实取到了文件，但签名对不上 —— 按被篡改处理，不降级接受
             Write-AppLog ('所有可取到的清单都验签失败，已拒绝: ' + $detail) 'WARN'
@@ -467,7 +513,7 @@ function Complete-UpdateCheck {
 
     $newer = (Compare-AppVersion $man.version $script:AppVersion) -gt 0
     $skipped = ($script:Cfg.updateCheck -and $script:Cfg.updateCheck.skippedVersion -eq $man.version)
-    Write-AppLog ("清单版本 {0}（serial {1}），当前 {2}，来源 {3}（{4} ms）" -f $man.version, $obj.serial, $script:AppVersion, $obj.url, $obj.ms)
+    Write-AppLog ("清单版本 {0}（serial {1}），当前 {2}，来源 {3}（{4} ms，proxy={5}）" -f $man.version, $obj.serial, $script:AppVersion, $obj.url, $obj.ms, $obj.proxy)
     # 多源候选一并记下：日后排查「某镜像缓存滞后」不必再手动 curl
     if ($obj.candidates -and @($obj.candidates).Count -gt 1) {
         Write-AppLog ('多源候选：' + (@($obj.candidates | ForEach-Object { '{0}={1}/s{2}' -f $_.url, $_.version, $_.serial }) -join '；'))
@@ -567,6 +613,7 @@ function Start-UpdateDownload {
     # 45 秒宿主看门狗 ≈ 6s 探测 + 3 个源各 12s，不会在正常换源途中误杀。
     [void]$ps.AddParameter('ProbeMs', 6000)
     [void]$ps.AddParameter('StallSec', 12)
+    [void]$ps.AddParameter('NetProxyHelper', $script:NetProxyHelper)
     $handle = $ps.BeginInvoke()
     $script:UpdateState = 'downloading'
     $script:UpdateCtx = @{
@@ -611,7 +658,7 @@ function Complete-UpdateDownload {
         # 换源在 worker 内部完成（同一个 .part 接力），这里只负责如实汇报每个源的结果。
         $trail = ''
         if ($res -and $res.log) { $trail = '；' + (@($res.log) -join '；') }
-        Write-AppLog ('下载失败: ' + $err + $trail) 'WARN'
+        Write-AppLog ('下载失败: ' + $err + '；proxy=' + [string]$res.proxy + $trail) 'WARN'
         $script:UpdateState = 'error'
         Send-UpdateState @{ state = 'error'; detail = $err; hint = 'update.hint.download'; sources = $trail.TrimStart('；') }
         return
@@ -644,7 +691,7 @@ function Complete-UpdateDownload {
 
     $script:UpdateState = 'ready'
     Send-UpdateState @{ state = 'ready'; name = (Split-Path $Ctx.Out -Leaf); path = $Ctx.Out; sha256 = $Ctx.Sha }
-    Write-AppLog ("更新包已下载并通过本地校验: $($Ctx.Out)（源 " + [string]$res.url + "）")
+    Write-AppLog ("更新包已下载并通过本地校验: $($Ctx.Out)（源 " + [string]$res.url + "，proxy=" + [string]$res.proxy + "）")
 }
 
 # ---------- 计时器总入口 ----------

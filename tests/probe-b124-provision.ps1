@@ -27,6 +27,7 @@ function Send-ToUi([hashtable]$payload) { [void]$script:UiMessages.Add($payload)
 function Save-Config { }
 $script:Cfg = @{ extensions = @{} }
 
+. (Join-Path $root 'src\app\06-NetProxy.ps1')
 . (Join-Path $root 'src\app\rtss-shm.ps1')
 . (Join-Path $root 'src\app\80-Extensions.ps1')
 . (Join-Path $root 'src\app\85-ExtensionProvision.ps1')
@@ -166,7 +167,7 @@ $spec.targetDir = $badDir
 $spec.cacheDir = Join-Path $script:DataDir 'bad-cache'
 # 直接跑 worker 的结果，验证失败路径本身（Start-ExtensionProvision 走同样 spec）。
 $ps = [PowerShell]::Create()
-[void]$ps.AddScript($script:ExtensionProvisionWorker).AddArgument($spec).AddArgument($script:ExtProvQueue)
+[void]$ps.AddScript($script:ExtensionProvisionWorker).AddArgument($spec).AddArgument($script:ExtProvQueue).AddArgument('').AddArgument([string]$script:NetProxyHelper)
 $badResult = @($ps.Invoke())[0]
 $ps.Dispose()
 Assert (-not $badResult.ok -and $badResult.reason -eq 'hashMismatch') "校验失败如实报 hashMismatch（实际 $($badResult.reason)）" '哈希失败未被识别'

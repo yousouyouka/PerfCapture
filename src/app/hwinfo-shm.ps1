@@ -167,6 +167,38 @@ function Get-HwinfoFps($Snapshot) {
     }
     return $null
 }
+
+# 帧快照：与 RTSS 读取器同契约，供 35-Metrics 数据源仲裁直接消费。
+# 帧时间：HWiNFO 若暴露 'Frame Time' / 'Frametime'（ms）就换算成微秒；没有就由 FPS 反推，
+# 并在 source 字段标注推导来源——不拿推导值冒充 HWiNFO 原生测量。
+function Get-HwinfoFrameSnapshot([string]$Name = 'Global\HWiNFO_SENS_SM2') {
+    $res = [pscustomobject]@{
+        ok = $false; reason = ''; detail = ''; fps = $null; fpsLow1 = $null
+        frameTimeUs = $null; sampleCount = 0; processName = ''; version = ''
+        source = 'hwinfo-shm'; at = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+    }
+    $snap = Get-HwinfoSnapshot $Name
+    if (-not $snap.ok) { $res.reason = $snap.reason; return $res }
+    $fps = Get-HwinfoFps $snap
+    if (-not $fps) {
+        # 共享内存可读但没在统计游戏：待机（noFrames），不是故障。
+        $res.reason = 'noFrames'
+        $res.sampleCount = $snap.readings.Count
+        return $res
+    }
+    $res.ok = $true
+    $res.fps = [math]::Round([double]$fps.value, 2)
+    $res.sampleCount = $snap.readings.Count
+    $ftUs = $null
+    foreach ($label in 'Frame Time', 'Frametime', 'Frame time') {
+        $r = Find-HwinfoReading $snap $label
+        if ($r -and $r.value -gt 0) { $ftUs = [math]::Round([double]$r.value * 1000.0, 1); break }
+    }
+    if ($null -eq $ftUs -and $res.fps -gt 0) { $ftUs = [math]::Round(1000000.0 / [double]$res.fps, 1) }
+    $res.frameTimeUs = $ftUs
+    $res.detail = if ($ftUs) { 'frameTime=derived-or-reading' } else { '' }
+    return $res
+}
 '@
 
 # 本文件被 dot-source 时把源码字符串保存下来，供后台 worker / 探针注入（与 rtss-shm.ps1 同模式）。

@@ -7,7 +7,11 @@
       "name": "RTSS 共享内存桥接",
       "desc": "软件内静默下载并安装一份独立的 RTSS，读取它暴露的帧数据，提供亚秒级 FPS 与 1% Low。绝大多数游戏正常，极少数游戏（如终末地）可能误判并关闭 DLSS；关闭该扩展会结束本软件安装的整套运行时（含注入器），关闭后重启游戏即可恢复原有图形选项，无需卸载。",
       "category": "datasource",
-      "metrics": ["FPS", "帧时间", "1% Low"],
+      "metrics": [
+        "FPS",
+        "帧时间",
+        "1% Low"
+      ],
       "depends": "由扩展中心下载安装（本机已有 RTSS 会被无视）",
       "size": "约 25 MB（安装后约 50 MB）",
       "permission": "安装时一次 UAC 确认；不设开机自启",
@@ -18,7 +22,10 @@
       "available": true,
       "mode": "external-shm",
       "shmName": "RTSSSharedMemoryV2",
-      "detect": { "process": [] },
+      "shmReader": "rtss",
+      "detect": {
+        "process": []
+      },
       "payload": "",
       "lifecycle": {
         "managed": true,
@@ -56,7 +63,13 @@
         "elevateInstall": true,
         "requireSignature": true,
         "configFiles": [
-          { "relative": "ProfileTemplates\\Config", "entries": { "Silent": "1" }, "verify": true }
+          {
+            "relative": "ProfileTemplates\\Config",
+            "entries": {
+              "Silent": "1"
+            },
+            "verify": true
+          }
         ],
         "processCommand": "{DIR}\\RTSS.exe",
         "processArgs": "",
@@ -66,26 +79,46 @@
     {
       "id": "hwinfo-shm",
       "name": "HWiNFO 共享内存读数",
-      "desc": "读取本机 HWiNFO 共享内存中的帧率与传感器项。若其帧率来自 RTSS，则继承相同的兼容性说明与关闭兜底。",
+      "desc": "读取本机 HWiNFO 暴露的共享内存帧率项（用户自装 HWiNFO 并开启 Shared Memory Support）。帧率来源可能是 RTSS；若某游戏因此关闭 DLSS，关闭本扩展即可完全消除影响，无需卸载。",
       "category": "datasource",
-      "metrics": ["FPS", "CPU 温度", "GPU 温度"],
+      "metrics": [
+        "FPS",
+        "帧时间"
+      ],
       "depends": "用户自装 HWiNFO",
       "size": "极小（只读共享内存）",
       "permission": "无需管理员 / 驱动",
       "platform": "Windows · 全平台",
       "cost": "低",
       "source": "第三方工具 · 用户自装",
-      "version": "",
-      "available": false,
-      "detect": { "process": ["HWiNFO64", "HWiNFO32"] },
-      "payload": ""
+      "version": "1.0.0",
+      "available": true,
+      "detect": {
+        "process": [
+          "HWiNFO64",
+          "HWiNFO32"
+        ]
+      },
+      "payload": "",
+      "mode": "external-shm",
+      "shmName": "Global\\HWiNFO_SENS_SM2",
+      "shmReader": "hwinfo",
+      "lifecycle": {
+        "managed": false,
+        "ownsProcess": false,
+        "autoStart": false,
+        "stopOnDisable": false
+      }
     },
     {
       "id": "frameview",
       "name": "NVIDIA FrameView 适配",
       "desc": "经由厂商官方接口提供帧率与帧时间。仅限 NVIDIA 显卡，授权条款待评估。",
       "category": "datasource",
-      "metrics": ["FPS", "帧时间"],
+      "metrics": [
+        "FPS",
+        "帧时间"
+      ],
       "depends": "NVIDIA 显卡 + 官方 SDK",
       "size": "小",
       "permission": "无需驱动级权限",
@@ -94,7 +127,11 @@
       "source": "厂商官方 SDK",
       "version": "",
       "available": false,
-      "detect": { "process": ["FrameViewSDK"] },
+      "detect": {
+        "process": [
+          "FrameViewSDK"
+        ]
+      },
       "payload": ""
     },
     {
@@ -102,7 +139,10 @@
       "name": "CPU 温度与降频",
       "desc": "经用户态传感器组件提供 CPU 温度与降频原因。涉及组件由用户自行选择，安装须二次授权。",
       "category": "sensor",
-      "metrics": ["CPU 温度", "降频原因"],
+      "metrics": [
+        "CPU 温度",
+        "降频原因"
+      ],
       "depends": "用户态传感器库",
       "size": "中",
       "permission": "安装需二次授权",
@@ -111,7 +151,9 @@
       "source": "开源组件 · 用户自选",
       "version": "",
       "available": false,
-      "detect": { "process": [] },
+      "detect": {
+        "process": []
+      },
       "payload": ""
     },
     {
@@ -119,7 +161,11 @@
       "name": "自研高频 ETW 数据源",
       "desc": "以独立消费者常驻采集帧事件，零注入。作为备选扩展实现，风险与开发成本由需要的用户自行承担，不再是主程序默认路线。",
       "category": "datasource",
-      "metrics": ["FPS", "帧时间", "1% Low"],
+      "metrics": [
+        "FPS",
+        "帧时间",
+        "1% Low"
+      ],
       "depends": "无第三方依赖",
       "size": "小",
       "permission": "无需管理员 / 驱动",
@@ -128,7 +174,9 @@
       "source": "项目自研 · 备选",
       "version": "",
       "available": false,
-      "detect": { "process": [] },
+      "detect": {
+        "process": []
+      },
       "payload": ""
     }
   ]

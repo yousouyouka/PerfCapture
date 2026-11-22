@@ -48,6 +48,8 @@ function Get-ExtensionRegistry {
                 available = [bool]$e.available
                 mode      = if ($e.mode) { [string]$e.mode } else { 'payload' }
                 shmName   = if ($e.shmName) { [string]$e.shmName } else { '' }
+                # 外部共享内存读取器：rtss（默认，兼容旧配置）/ hwinfo。决定依赖探测与采样用哪个读取器。
+                shmReader = if ($e.shmReader) { [string]$e.shmReader } else { 'rtss' }
                 detectProcess = $dproc
                 payload   = if ($e.payload) { [string]$e.payload } else { '' }
                 # 批次 E：package/lifecycle 来自 extensions.json，是供应层唯一配置源。
@@ -123,6 +125,21 @@ function Clear-ExtensionPersistState([string]$Id) {
     try { Save-Config } catch { Write-AppLog ('扩展状态清除失败: ' + $_.Exception.Message) 'WARN' }
 }
 
+# ---------- 外部共享内存读取器分派（rtss / hwinfo，配置化，不硬编码扩展类型）----------
+# 注册表声明 shmReader，宿主与采样 runspace 都按这个函数选读取器；
+# 未声明时按 rtss 兼容旧配置。任一步失败都返回 ok=false + reason，绝不返回 0 冒充。
+function Get-ExtensionShmSnapshot($Entry, [string]$ShmName = '') {
+    if (-not $Entry) { return $null }
+    $nm = if ($ShmName) { $ShmName } else { [string]$Entry.shmName }
+    $reader = if ($Entry.shmReader) { [string]$Entry.shmReader } else { 'rtss' }
+    if ($reader -eq 'hwinfo') {
+        if (Get-Command Get-HwinfoFrameSnapshot -ErrorAction SilentlyContinue) { return Get-HwinfoFrameSnapshot $nm }
+        return [pscustomobject]@{ ok = $false; reason = 'readerMissing'; detail = ''; fps = $null; fpsLow1 = $null; frameTimeUs = $null; sampleCount = 0; processName = ''; source = 'hwinfo-shm' }
+    }
+    if (Get-Command Get-RtssFrameSnapshot -ErrorAction SilentlyContinue) { return Get-RtssFrameSnapshot -ShmName $nm }
+    return [pscustomobject]@{ ok = $false; reason = 'readerMissing'; detail = ''; fps = $null; fpsLow1 = $null; frameTimeUs = $null; sampleCount = 0; processName = ''; source = 'rtss-shm' }
+}
+
 # ---------- 依赖探测（真实：查进程 + 外部共享内存服务是否就绪） ----------
 function Test-ExtensionDependency($Entry) {
     # 批次 E：托管型扩展只看「扩展中心自己装的那一份」。本机预装的 RTSS 一律无视：
@@ -143,15 +160,13 @@ function Test-ExtensionDependency($Entry) {
         }
         $shmState = ''
         if ($Entry.mode -eq 'external-shm' -and $Entry.shmName) {
-            if (Get-Command Get-RtssFrameSnapshot -ErrorAction SilentlyContinue) {
-                $snap = Get-RtssFrameSnapshot -ShmName $Entry.shmName
-                $shmState = [string]$snap.reason
-                # 依赖就绪 = 共享内存对象真的存在且能打开。签名/版本/帧数据属于「能不能用」，
-                # 由状态机单独判，不在这里混进 missing，否则报错会都笼统变成「依赖未就绪」。
-                if ($shmState -in @('shmNotFound', 'shmOpenFailed')) {
-                    $miss += ('shm:' + $Entry.shmName)
-                }
-            } else { $miss += 'readerMissing' }
+            $snap = Get-ExtensionShmSnapshot $Entry
+            $shmState = [string]$snap.reason
+            # 依赖就绪 = 共享内存对象真的存在且能打开。签名/版本/帧数据属于「能不能用」，
+            # 由状态机单独判，不在这里混进 missing，否则报错会都笼统变成「依赖未就绪」。
+            if ($shmState -in @('shmNotFound', 'shmOpenFailed', 'readerMissing')) {
+                $miss += ('shm:' + $Entry.shmName)
+            }
         }
         return [pscustomobject]@{ ok = ($miss.Count -eq 0); missing = $miss; shmState = $shmState }
     }
@@ -166,14 +181,10 @@ function Test-ExtensionDependency($Entry) {
     # 只要对象存在（即便暂时 staleData/noFrames）就算依赖就绪——新鲜度由状态机单独判。
     $shmState = ''
     if ($Entry.mode -eq 'external-shm' -and $Entry.shmName) {
-        if (Get-Command Get-RtssFrameSnapshot -ErrorAction SilentlyContinue) {
-            $snap = Get-RtssFrameSnapshot -ShmName $Entry.shmName
-            $shmState = [string]$snap.reason
-            if ($snap.reason -eq 'shmNotFound' -or $snap.reason -eq 'shmOpenFailed') {
-                $missing += ('shm:' + $Entry.shmName)
-            }
-        } else {
-            $missing += 'readerMissing'
+        $snap = Get-ExtensionShmSnapshot $Entry
+        $shmState = [string]$snap.reason
+        if ($shmState -in @('shmNotFound', 'shmOpenFailed', 'readerMissing')) {
+            $missing += ('shm:' + $Entry.shmName)
         }
     }
     return [pscustomobject]@{ ok = ($missing.Count -eq 0); missing = $missing; shmState = $shmState }
@@ -183,9 +194,12 @@ function Test-ExtensionDependency($Entry) {
 # 待机：RTSS 服务在跑、共享内存可读，只是当前没有被统计的游戏（noEntry/noFrames/staleData）。
 #       这不是故障：用户完全可以先启用扩展、再开游戏。判成 failed 会导致数据源永远切不过去。
 # 故障：结构不兼容（签名/版本/布局）、读取异常、对象或依赖消失。
-$script:ShmIdleReasons   = @('noEntry', 'noFrames', 'staleData')
+# noReadings：HWiNFO 共享内存对象在但还没发布读数（用户刚开共享内存），与 RTSS 待机同义。
+$script:ShmIdleReasons   = @('noEntry', 'noFrames', 'staleData', 'noReadings')
+# versionMismatch：HWiNFO 结构版本不认识（RTSS 对应 oldVersion），同属结构不兼容。
 $script:ShmBrokenReasons = @('badSignature', 'oldVersion', 'badLayout', 'readException',
-                             'shmNotFound', 'shmOpenFailed', 'readerMissing')
+                             'shmNotFound', 'shmOpenFailed', 'readerMissing',
+                             'versionMismatch')
 
 function Test-ExtensionShmIdle([string]$Reason) {
     return ($script:ShmIdleReasons -contains $Reason)
@@ -241,9 +255,9 @@ function Get-ExtensionStateReason([string]$Id, [string]$State) {
         'failed' {
             # 外部共享内存型：把读取器的细分失败原因透出（不笼统写 dependencyMissing）
             $e = Get-ExtensionEntry $Id
-            if ($e -and $e.mode -eq 'external-shm' -and $e.shmName -and (Get-Command Get-RtssFrameSnapshot -ErrorAction SilentlyContinue)) {
-                $snap = Get-RtssFrameSnapshot -ShmName $e.shmName
-                if ($snap.reason) { return [string]$snap.reason }
+            if ($e -and $e.mode -eq 'external-shm' -and $e.shmName) {
+                $snap = Get-ExtensionShmSnapshot $e
+                if ($snap -and $snap.reason) { return [string]$snap.reason }
             }
             return 'dependencyMissing'
         }
@@ -323,6 +337,9 @@ function Set-FpsSource([string]$Source) {
         $script:MetricsCtl.fpsSource = $Source
         # 顺带同步故障口径：采样侧据此区分「待机」与「真故障」。
         $script:MetricsCtl.brokenReasons = @($script:ShmBrokenReasons)
+        # 告诉采样侧该用哪个共享内存读取器（rtss / hwinfo）；缺省 rtss 兼容旧配置。
+        $srcEntry = if ($Source -ne 'presentmon') { Get-ExtensionEntry $Source } else { $null }
+        $script:MetricsCtl.shmReader = if ($srcEntry -and $srcEntry.shmReader) { [string]$srcEntry.shmReader } else { 'rtss' }
     }
     # 数据源变了，回推 UI 让卡片上的「当前数据源」标记即时刷新
     Send-ToUi @{ type = 'fpsSource'; source = $Source }
@@ -337,8 +354,7 @@ function Get-ActiveExtensionFps {
     if ($src -eq 'presentmon' -or -not $src) { return $null }
     $e = Get-ExtensionEntry $src
     if (-not $e -or $e.mode -ne 'external-shm' -or -not $e.shmName) { return $null }
-    if (-not (Get-Command Get-RtssFrameSnapshot -ErrorAction SilentlyContinue)) { return $null }
-    return Get-RtssFrameSnapshot -ShmName $e.shmName
+    return Get-ExtensionShmSnapshot $e
 }
 
 # ---------- 运行时归属：自有副本目录内的全部进程 ----------

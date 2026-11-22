@@ -40,10 +40,12 @@ $script:MetricsFpsErrAt = $null
 
 # ---------- 一轮采样（runspace 里执行；单引号 here-string，禁止变量展开） ----------
 $script:MetricsSampleScript = @'
-param($SmiPath, $Queue, $IntervalMs, $Ctl, $PmExe, $FpsCsv, $FpsPid, $FpsFixed, $RtssReaderCode)
+param($SmiPath, $Queue, $IntervalMs, $Ctl, $PmExe, $FpsCsv, $FpsPid, $FpsFixed, $RtssReaderCode, $HwinfoReaderCode)
 
-# 批次 D：在本 runspace 内定义 RTSS 读取器（源码由宿主以参数传入，避免跨作用域依赖）。
+# 批次 D：在本 runspace 内定义外部共享内存读取器（源码由宿主以参数传入，避免跨作用域依赖）。
+# 两种读取器同契约（ok/reason/fps/fpsLow1/frameTimeUs），按 Ctl.shmReader 分派。
 if ($RtssReaderCode) { . ([scriptblock]::Create($RtssReaderCode)) }
+if ($HwinfoReaderCode) { . ([scriptblock]::Create($HwinfoReaderCode)) }
 
 # ---- 实时 FPS：PresentMon burst（短窗口采集 → 进程退出后解析）----
 # 为什么不能「边采边读」：PresentMon 用 --output_file 时是**独占**打开（FileShare.None），
@@ -573,7 +575,10 @@ while ($true) {
     if ($fpsSrc -and $fpsSrc -ne 'presentmon') {
         if ($fps.proc) { Stop-FpsStream }   # 切源瞬间：停掉上一源残留的 PresentMon
         $snap = $null
-        if (Get-Command Get-RtssFrameSnapshot -ErrorAction SilentlyContinue) {
+        $readerKind = if ($Ctl -and $Ctl.shmReader) { [string]$Ctl.shmReader } else { 'rtss' }
+        if ($readerKind -eq 'hwinfo' -and (Get-Command Get-HwinfoFrameSnapshot -ErrorAction SilentlyContinue)) {
+            $snap = Get-HwinfoFrameSnapshot
+        } elseif (Get-Command Get-RtssFrameSnapshot -ErrorAction SilentlyContinue) {
             $snap = Get-RtssFrameSnapshot
         }
         if ($snap -and $snap.ok) {
@@ -1100,6 +1105,7 @@ function Start-MetricsWorker {
         [void]$ps.AddParameter('FpsFixed', [bool]$script:MetricsFpsFixed)
         # 批次 D：把读取器源码作为参数传入，采样脚本在自身作用域点源定义函数。
         [void]$ps.AddParameter('RtssReaderCode', $script:RtssReaderSource)
+        if ($script:HwinfoReaderSource) { [void]$ps.AddParameter('HwinfoReaderCode', $script:HwinfoReaderSource) }
         $handle = $ps.BeginInvoke()
         $script:MetricsWorker = @{ PS = $ps; Handle = $handle; Started = (Get-Date) }
         Write-AppLog '监控采样线程已启动（常驻 runspace）'

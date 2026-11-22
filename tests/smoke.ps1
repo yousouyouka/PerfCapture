@@ -18,7 +18,7 @@ $structure = @(
     'src\PerfCapture.ps1',
     'src\app\00-Prelude.ps1', 'src\app\05-Paths.ps1', 'src\app\10-Bootstrap.ps1',
     'src\app\15-Logging.ps1', 'src\app\20-Settings.ps1', 'src\app\30-Tools.ps1', 'src\app\35-Metrics.ps1', 'src\app\55-Overlay.ps1',
-    'src\app\40-Bridge.ps1', 'src\app\50-Host.ps1', 'src\app\60-Capture.ps1', 'src\app\68-UpdateWrapper.ps1', 'src\app\rtss-shm.ps1', 'src\app\80-Extensions.ps1', 'src\app\85-ExtensionProvision.ps1', 'src\app\90-Main.ps1',
+    'src\app\40-Bridge.ps1', 'src\app\50-Host.ps1', 'src\app\60-Capture.ps1', 'src\app\68-UpdateWrapper.ps1', 'src\app\rtss-shm.ps1', 'src\app\hwinfo-shm.ps1', 'src\app\80-Extensions.ps1', 'src\app\85-ExtensionProvision.ps1', 'src\app\90-Main.ps1',
     'src\engine\Measure-GamePerf.ps1',
     'ui\index.html',
     'ui\css\tokens.css', 'ui\css\layout.css', 'ui\css\components.css',
@@ -747,6 +747,27 @@ if ($readerPs -notmatch '1000000\.0 / \$slowAvgUs') { Bad '1% Low 未按项目�
 # 结果真机读到正确数据也判 badSignature，用户看到「版本不兼容」。
 if ($readerPs -notmatch '0x52545353') { Bad '读取器未按官方多字符常量 0x52545353 校验签名' }
 if ($readerPs -notmatch '\$sigAccepted') { Bad '读取器未同时接受兼容签名写法（0x53535452）' }
+# HWiNFO 共享内存数据源（hwinfo-shm）：配置化读取器分派，不硬编码 RTSS
+$hwPs = Get-Content (Join-Path $root 'src\app\hwinfo-shm.ps1') -Raw -Encoding UTF8
+foreach ($need in 'Get-HwinfoSnapshot', 'Get-HwinfoFrameSnapshot', 'HWiNFO_SENS_SM2', 'noReadings', 'versionMismatch', 'HwinfoReaderSource') {
+    if ($hwPs -notmatch [regex]::Escape($need)) { Bad "hwinfo-shm.ps1 缺关键实现：$need" }
+}
+$entryPs2 = Get-Content (Join-Path $root 'src\PerfCapture.ps1') -Raw -Encoding UTF8
+if ($entryPs2 -notmatch 'hwinfo-shm\.ps1') { Bad '入口未加载 hwinfo-shm.ps1' }
+if ($extHostPs -notmatch 'function Get-ExtensionShmSnapshot') { Bad '宿主缺共享内存读取器分派入口' }
+if ($extHostPs -notmatch "shmReader -eq 'hwinfo'") { Bad '宿主未按 shmReader 分派 HWiNFO 读取器' }
+if ($metPs -notmatch 'HwinfoReaderCode') { Bad '采样 runspace 未注入 HWiNFO 读取器源码' }
+if ($metPs -notmatch "\$readerKind -eq 'hwinfo'") { Bad '采样侧未按 shmReader 选 HWiNFO 读取器' }
+$hwReg = @($published | Where-Object { $_.id -eq 'hwinfo-shm' })
+if ($hwReg.Count -ne 1 -or -not $hwReg[0].available) { Bad 'hwinfo-shm 未在注册表发布（available=true）' }
+else {
+    if ($hwReg[0].shmReader -ne 'hwinfo') { Bad 'hwinfo-shm 未声明 shmReader=hwinfo' }
+    if ($hwReg[0].package) { Bad 'hwinfo-shm 不应捆绑组件（用户自装）' }
+}
+foreach ($key in 'versionMismatch', 'noReadings') {
+    $n = ([regex]::Matches($i18nText, [regex]::Escape("'extensions.reason." + $key + "':"))).Count
+    if ($n -ne 3) { Bad "i18n 缺 extensions.reason.$key（需 3 语，实际 $n）" }
+}
 # 待机 vs 故障：noEntry/noFrames/staleData 属正常待机，判成 failed 会让数据源永远切不过去。
 $idleBlock = [regex]::Match($extHostPs, '\$script:ShmIdleReasons\s*=\s*@\(([^)]*)\)')
 if (-not $idleBlock.Success -or $idleBlock.Groups[1].Value -notmatch 'noEntry') { Bad '缺待机口径 ShmIdleReasons（noEntry/noFrames/staleData）' }

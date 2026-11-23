@@ -29,6 +29,10 @@
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
   }
   function itemById(id) { return S.items.find((it) => it.id === id) || null; }
+  /* bridge.js 的 send() 只接受**一个对象**（{cmd:...}）。
+     早先这里按「先命令、再参数」两段式调用，宿主收到的是裸字符串、$msg.cmd 为空被静默丢弃，
+     表现为「列表空的、打开目录没反应」。统一走这个包装，别再直接传字符串。 */
+  function sendCmd(cmd, extra) { send(Object.assign({ cmd: cmd }, extra || {})); }
   /* send() 来自 bridge.js 的全局函数；本文件不重复定义，避免两份实现走岔 */
 
   function num(v, digits) {
@@ -279,7 +283,7 @@
       else if (S.picked.length === 0 && panel()) { panel().hidden = true; }
       return;
     }
-    if (act === 'detail') { send('reportDetail', { id }); return; }
+    if (act === 'detail') { sendCmd('reportDetail', { id }); return; }
     if (act === 'del') {
       if (S.pendingDelete !== id) {
         S.pendingDelete = id;
@@ -289,7 +293,7 @@
         return;
       }
       S.pendingDelete = '';
-      send('reportDelete', { id, withAssets: true });
+      sendCmd('reportDelete', { id, withAssets: true });
     }
   }
 
@@ -300,7 +304,7 @@
       const ax = itemById(x), ay = itemById(y);
       return ((ax && ax.mtime) || 0) - ((ay && ay.mtime) || 0);
     });
-    send('reportCompare', { ids });
+    sendCmd('reportCompare', { ids });
   }
 
   function onPanelClick(e) {
@@ -308,7 +312,7 @@
     if (act === 'closePanel') { e.target.closest('.rep-panel').hidden = true; return; }
     if (act === 'open') {
       if (!S.detailId) return;
-      send('reportOpenFile', { id: S.detailId, kind: e.target.dataset.kind });
+      sendCmd('reportOpenFile', { id: S.detailId, kind: e.target.dataset.kind });
     }
   }
 
@@ -336,7 +340,7 @@
       const n = (msg.removed || []).length;
       S.picked = S.picked.filter((id) => id !== msg.id);
       if (S.detailId === msg.id) { S.detailId = ''; if (panel()) panel().hidden = true; }
-      send('reportsList');
+      sendCmd('reportsList');
       const p = panel();
       if (p) { p.hidden = false; p.innerHTML = `<p class="rep-note">${escapeHtml(fillParams(t('reports.deleted', '已删除 {n} 个文件（移到回收站）'), { n }))}</p>`; }
       return;
@@ -345,7 +349,7 @@
 
   /* ── 打开页面时加载 ── */
   function ensureLoaded(force) {
-    if (!S.loaded || force) send('reportsList');
+    if (!S.loaded || force) sendCmd('reportsList');
   }
 
   function bind() {
@@ -365,7 +369,7 @@
     const refresh = document.getElementById('repRefresh');
     if (refresh) refresh.addEventListener('click', () => { ensureLoaded(true); });
     const openFolder = document.getElementById('repOpenFolder');
-    if (openFolder) openFolder.addEventListener('click', () => send('openReports'));
+    if (openFolder) openFolder.addEventListener('click', () => sendCmd('openReports'));
     const clear = document.getElementById('repClearPick');
     if (clear) clear.addEventListener('click', () => { S.picked = []; renderList(); if (panel()) panel().hidden = true; });
     // 切到本页时懒加载（首次进入才请求，避免启动就扫目录）

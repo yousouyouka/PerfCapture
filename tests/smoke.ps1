@@ -1075,6 +1075,10 @@ if (-not (Test-Path -LiteralPath $repJsPath)) { Bad '缺少 ui\js\reports.js' } 
     }
     # 红线：条件不可比时不许出现百分比结论（必须有 blocked 分支）
     if ($repJsText -notmatch 'blocked\s*\?\s*') { Bad 'reports.js 缺「不可比就不给百分比」的分支' }
+    # 回归守卫（2.1.14 实测踩坑）：bridge 的 send() 只收一个对象，写成 send('cmd', {...}) 会被宿主静默丢弃
+    if ($repJsText -match "send\(\s*'") { Bad 'reports.js 不得用 send(字符串, 参数)——bridge.send 只接受 {cmd:...} 对象' }
+    if ($repJsText -notmatch 'function sendCmd') { Bad 'reports.js 缺 sendCmd 包装（消息体形状的唯一出口）' }
+    if (-not (Test-Path (Join-Path $root 'tests\probe-reports-ui.js'))) { Bad '缺少 tests\probe-reports-ui.js（消息体形状探针）' }
 }
 if ((Get-Content (Join-Path $root 'ui\js\bridge.js') -Raw -Encoding UTF8) -notmatch 'PerfReports') { Bad 'bridge.js 没有分发报告库消息' }
 # i18n：本批新增键必须三语齐全（抽查关键文案）

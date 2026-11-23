@@ -19,7 +19,7 @@ window.PerfUpdateAreas = ['capture', 'realtime', 'other'];
 
 window.PerfUpdates = [
   {
-    date: '2026-11-23', version: '2.1.14',
+    date: '2026-11-23', version: '2.1.15',
     title: '新增历史报告：把历次采集翻出来对比',
     items: [
       ['feature', '侧边栏新增「历史报告」：历次采集按时间列出，可按游戏筛选、按关键字搜索，每条都能直接打开原始报告。', 'other'],

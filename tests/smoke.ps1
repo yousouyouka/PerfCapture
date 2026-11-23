@@ -1260,6 +1260,7 @@ if ($iTodayCell -lt 0 -or $iMonthCell -lt 0 -or $iTodayCell -gt $iMonthCell) { B
 if ($mainPs -match '\.ShowInTaskbar\s*=') { Bad '90-Main.ps1 不应再给 ShowInTaskbar 赋值（会重建句柄导致托盘还原闪回）' }
 if ($mainPs -notmatch 'class PcTrayWindow') { Bad '90-Main.ps1 缺 PcTrayWindow（无句柄重建的托盘隐藏）' }
 if ($mainPs -notmatch 'function Ensure-PcTrayWindow') { Bad '90-Main.ps1 缺 Ensure-PcTrayWindow' }
+if ($mainPs -notmatch 'DeleteTab' -or $mainPs -notmatch 'AddTab') { Bad '托盘隐藏必须调用 ITaskbarList 的 DeleteTab/AddTab（只改扩展样式任务栏不刷新）' }
 if ($netPs -notmatch 'Add_MouseDoubleClick') { Bad '托盘缺双击还原处理' }
 if ($netPs -notmatch 'Write-AppLog ''窗口已从托盘还原''') { Bad '托盘还原没有日志（无法定位闪回）' }
 $overlayPs = Get-Content (Join-Path $root 'src\app\55-Overlay.ps1') -Raw -Encoding UTF8

@@ -17,6 +17,29 @@ public class PcTrayWindow {
     [DllImport("user32.dll", SetLastError = true)]
     public static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
 
+    // 任务栏按钮的权威开关：只改 WS_EX_TOOLWINDOW 时，已经显示过的窗口任务栏不会立即刷新，
+    // 必须显式 DeleteTab；还原时 AddTab。两者都不碰窗口句柄与可见性。
+    [ComImport, Guid("56FDF344-FD6D-11d0-958A-006097C9A090")]
+    public class CTaskbarList { }
+
+    [ComImport, Guid("56FDF342-FD6D-11d0-958A-006097C9A090"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface ITaskbarList {
+        void HrInit();
+        void AddTab(IntPtr hwnd);
+        void DeleteTab(IntPtr hwnd);
+        void ActivateTab(IntPtr hwnd);
+        void SetActiveAlt(IntPtr hwnd);
+    }
+
+    private static ITaskbarList _taskbar;
+    private static ITaskbarList Taskbar() {
+        if (_taskbar == null) {
+            _taskbar = (ITaskbarList)new CTaskbarList();
+            _taskbar.HrInit();
+        }
+        return _taskbar;
+    }
+
     const int GWL_EXSTYLE = -20;
     const int WS_EX_TOOLWINDOW = 0x00000080;
     const int WS_EX_APPWINDOW = 0x00040000;
@@ -31,6 +54,7 @@ public class PcTrayWindow {
         SetWindowLong(h, GWL_EXSTYLE, (ex | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW);
         SetWindowPos(h, IntPtr.Zero, x, y, 0, 0,
             SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+        try { Taskbar().DeleteTab(h); } catch { }
     }
 
     public static void Show(IntPtr h, int x, int y) {
@@ -38,6 +62,7 @@ public class PcTrayWindow {
         SetWindowLong(h, GWL_EXSTYLE, (ex & ~WS_EX_TOOLWINDOW) | WS_EX_APPWINDOW);
         SetWindowPos(h, IntPtr.Zero, x, y, 0, 0,
             SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+        try { Taskbar().AddTab(h); } catch { }
     }
 }
 '@
@@ -70,8 +95,10 @@ function Hide-PerfWindowToTray {
             else { $script:TrayHomeLocation = $form.RestoreBounds.Location }
         }
         $script:TrayHidden = $true
-        [PcTrayWindow]::Hide($form.Handle, -32000, -32000)
+        # 先透明再改样式/删任务栏页签：Opacity 变化会触发 WinForms 重绘，放在 DeleteTab 之后
+        # 有可能把页签又加回来。
         $form.Opacity = 0
+        [PcTrayWindow]::Hide($form.Handle, -32000, -32000)
         Write-AppLog '窗口已缩小到托盘'
     } catch {
         Write-AppLog ('缩小到托盘失败: ' + $_.Exception.Message) 'WARN'

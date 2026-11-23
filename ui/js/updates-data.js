@@ -19,6 +19,13 @@ window.PerfUpdateAreas = ['capture', 'realtime', 'other'];
 
 window.PerfUpdates = [
   {
+    date: '2026-11-23', version: '2.2.4',
+    title: '托盘收起后任务栏不再残留',
+    items: [
+      ['fix', '修复缩小到托盘后任务栏仍保留按钮：只改扩展样式时任务栏不会立即刷新，现显式调用 ITaskbarList 的 DeleteTab（还原时 AddTab），不重建句柄、不影响还原。', 'other']
+    ]
+  },
+  {
     date: '2026-11-23', version: '2.2.3',
     title: '托盘还原修复、启动与关闭提速',
     items: [

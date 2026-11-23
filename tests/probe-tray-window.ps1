@@ -62,6 +62,19 @@ Assert (($exShow -band 0x80) -eq 0) '还原后 WS_EX_TOOLWINDOW 已清除'
 Assert (($exShow -band 0x40000) -ne 0) '还原后带 WS_EX_APPWINDOW（任务栏恢复）'
 Assert ($loc.X -eq 80 -and $loc.Y -eq 80) '还原回原位置' ("x=$($loc.X) y=$($loc.Y)")
 
+Write-Host '== 3. 第二轮（复用任务栏 COM 对象） ==' -ForegroundColor Cyan
+[PcTrayWindow]::Hide($h2, -32000, -32000)
+[System.Windows.Forms.Application]::DoEvents()
+$h3 = $form.Handle
+Assert ($h3 -eq $h0) '第二次隐藏句柄仍不变'
+Assert ($form.Visible) '第二次隐藏仍保持 Visible'
+Assert (([PcTrayWindow]::GetWindowLong($h3, -20) -band 0x80) -ne 0) '第二次隐藏仍带 WS_EX_TOOLWINDOW'
+[PcTrayWindow]::Show($h3, 80, 80)
+[System.Windows.Forms.Application]::DoEvents()
+$h4 = $form.Handle
+Assert ($h4 -eq $h0) '第二次还原句柄仍不变'
+Assert (([PcTrayWindow]::GetWindowLong($h4, -20) -band 0x80) -eq 0) '第二次还原已清除 WS_EX_TOOLWINDOW'
+
 try { $form.Close(); $form.Dispose() } catch { }
 
 Write-Host ''

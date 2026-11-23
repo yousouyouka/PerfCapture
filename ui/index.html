@@ -8,15 +8,15 @@
 <link rel="stylesheet" href="css/layout.css">
 <link rel="stylesheet" href="css/components.css">
 <link rel="stylesheet" href="css/terminal.css">
-<link rel="stylesheet" href="css/report.css?v=2.2.0">
+<link rel="stylesheet" href="css/report.css?v=2.2.1">
 <link rel="stylesheet" href="css/popup.css">
 <link rel="stylesheet" href="css/updates.css">
 <link rel="stylesheet" href="css/survey.css">
 <!-- 2.1.8：扩展中心相关资源带版本查询，绕开 WebView2 持久 UDF 的旧缓存；后续改这些文件需同步递增查询串。 -->
-<link rel="stylesheet" href="css/extensions.css?v=2.2.0">
-<link rel="stylesheet" href="css/reports.css?v=2.2.0">
+<link rel="stylesheet" href="css/extensions.css?v=2.2.1">
+<link rel="stylesheet" href="css/reports.css?v=2.2.1">
 <link rel="stylesheet" href="css/realtime.css">
-<link rel="stylesheet" href="css/network.css?v=2.2.0">
+<link rel="stylesheet" href="css/network.css?v=2.2.1">
 </head>
 <body>
 <div class="app" id="app">
@@ -92,7 +92,7 @@
           </svg>
           <span class="nav-label" data-i18n="nav.settings">设置</span>
         </button>
-        <div class="sidebar-version" id="sidebarVersion">v2.2.0</div>
+        <div class="sidebar-version" id="sidebarVersion">v2.2.1</div>
       </div>
     </nav>
   </aside>
@@ -320,6 +320,8 @@
               <label class="field-label" for="netAlertMonth" data-i18n="settings.netMonth">每月阈值 (MB)</label>
               <input id="netAlertMonth" class="input input-num" type="number" min="0" max="1000000" step="100" value="0">
             </div>
+            <label class="ext-check"><input type="checkbox" id="chkNetDns"><span data-i18n="settings.netDns">连接视图显示远程主机名（反向 DNS）</span></label>
+            <div class="setting-label"><small data-i18n="settings.netDnsHint">默认关闭；开启后会对连接的远程地址做有限次的域名反查，只在本机使用</small></div>
           </div>
         </section>
 
@@ -328,7 +330,7 @@
           <div class="setting-block">
             <div class="setting-label">
               <strong>PerfCapture</strong>
-              <small>v2.2.0 · PresentMon ETW · 默认零注入</small>
+              <small>v2.2.1 · PresentMon ETW · 默认零注入</small>
             </div>
           </div>
 
@@ -597,12 +599,34 @@
         </section>
 
         <div class="net-ifs" id="netIfs"></div>
+
+        <section class="net-conn">
+          <div class="nt-conn-head">
+            <h2 data-i18n="net.connTitle">当前连接</h2>
+            <span class="nt-hint" id="netConnHint"></span>
+          </div>
+          <div class="nt-conn-scroll">
+            <table>
+              <thead><tr>
+                <th data-i18n="net.colProc">进程</th>
+                <th data-i18n="net.colProto">协议</th>
+                <th data-i18n="net.colLocal">本地地址</th>
+                <th data-i18n="net.colRemote">远程地址</th>
+                <th data-i18n="net.colSvc">服务（按端口推断）</th>
+              </tr></thead>
+              <tbody id="netConnBody"></tbody>
+            </table>
+            <div class="net-empty" id="netConnEmpty" hidden>
+              <div class="nt-empty-main" data-i18n="net.connEmpty">暂无连接快照</div>
+            </div>
+          </div>
+        </section>
         <div class="net-empty" id="netEmpty" hidden>
           <div class="nt-empty-main" data-i18n="net.emptyMain">未发现活跃网卡</div>
           <div class="nt-empty-sub" data-i18n="net.emptySub">接入网络后这里会显示每块网卡的实时速率</div>
         </div>
 
-        <footer class="net-caliber" data-i18n="net.caliber">口径：实时速率为接口总量（网卡计数器差分），今日 / 本月与历史图表为物理接口的按日累计，都不是按进程的统计；VPN 激活时物理与虚拟网卡各计一层流量，属正常现象。进程级归因在后续版本提供。</footer>
+        <footer class="net-caliber" data-i18n="net.caliber">口径：实时速率为接口总量（网卡计数器差分），今日 / 本月与历史图表为物理接口的按日累计，连接视图是当前快照不计字节——这些都不是按进程的统计；按进程的用量在报告里（需开启「进程网络用量」采集项）。VPN 激活时物理与虚拟网卡各计一层流量，属正常现象。</footer>
       </div>
     </section>
 
@@ -732,24 +756,24 @@
 
 <script src="js/util.js"></script>
 <!-- 与 css/extensions.css 同一缓存版本；宿主 Navigate 也带同一查询串。 -->
-<script src="js/i18n.js?v=2.2.0"></script>
+<script src="js/i18n.js?v=2.2.1"></script>
 <script src="js/capture-options.js"></script>
-<script src="js/bridge.js?v=2.2.0"></script>
+<script src="js/bridge.js?v=2.2.1"></script>
 <script src="js/theme.js"></script>
 <script src="js/popup.js"></script>
 <script src="js/capture-help.js"></script>
 <script src="js/terminal.js"></script>
 <script src="js/ui-state.js"></script>
-<script src="js/report.js?v=2.2.0"></script>
+<script src="js/report.js?v=2.2.1"></script>
 <script src="js/updates-data.js"></script>
 <script src="js/updates.js"></script>
 <script src="js/survey-data.js"></script>
 <script src="js/survey.js"></script>
-<script src="js/extensions-data.js?v=2.2.0"></script>
-<script src="js/extensions.js?v=2.2.0"></script>
-<script src="js/realtime.js?v=2.2.0"></script>
-<script src="js/network.js?v=2.2.0"></script>
-<script src="js/reports.js?v=2.2.0"></script>
+<script src="js/extensions-data.js?v=2.2.1"></script>
+<script src="js/extensions.js?v=2.2.1"></script>
+<script src="js/realtime.js?v=2.2.1"></script>
+<script src="js/network.js?v=2.2.1"></script>
+<script src="js/reports.js?v=2.2.1"></script>
 <script src="js/update.js"></script>
 <script src="js/collapse.js"></script>
 <script src="js/split.js"></script>

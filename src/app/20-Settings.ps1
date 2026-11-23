@@ -14,6 +14,8 @@ function New-DefaultConfig {
         updateCheck = @{ auto = $true; lastCheckAt = ''; skippedVersion = '' }
         # 网络流量告警（2.2.0）：今日/本月累计（物理接口）超过阈值（MB）时提醒一次；0 = 关闭
         netAlertDayMB = 0; netAlertMonthMB = 0
+        # 反向 DNS（2.2.1）：连接视图里把远程 IP 解析成主机名；默认关（隐私优先）
+        netReverseDns = $false
         # 浮窗：items 是 16 项逐项勾选（老配置的 metrics 四族会一次性迁移过来，见 55-Overlay.ps1）
         overlay     = @{ visible = $false; x = -1; y = -1; opacity = 0; collapsed = $false; anchor = 'tr'; px = 100; py = 0; fontSize = 'normal'; fontColor = 'white'; layout = 'linear'; items = @('fps', 'gpuutil', 'gputemp', 'gpupower', 'ram'); hotkey = @{ ctrl = $true; alt = $true; shift = $false; key = 'M' } }
         # 扩展中心：id -> 状态对象（status/reason/installedAt/updatedAt）。老配置没有就空表。
@@ -93,6 +95,7 @@ function Set-ConfigValue {
             }
             else { Write-AppLog ("配置 $_=$Value 越界（0-1000000），已忽略") 'WARN' }
         }
+        'netReverseDns' { if ($Value -is [bool]) { $script:Cfg.netReverseDns = $Value; if (Get-Command Set-NetReverseDns -ErrorAction SilentlyContinue) { Set-NetReverseDns $Value } } }
         default { Write-AppLog ("未知配置项 $Key，已忽略") 'WARN' }
     }
 }
@@ -106,7 +109,7 @@ if (Test-Path $script:CfgPath) {
         # 以前只写不读，重启后又被默认值覆盖（用户选的档位与预热时长静默丢失）。
         foreach ($k in 'theme', 'language', 'seconds', 'minimize', 'sound', 'skip',
                        'preset', 'customBase', 'warmup', 'lastPid', 'windowW', 'windowH',
-                       'netAlertDayMB', 'netAlertMonthMB') {
+                       'netAlertDayMB', 'netAlertMonthMB', 'netReverseDns') {
             if ($null -ne $j.$k) { Set-ConfigValue $k $j.$k }
         }
         # 实时监控目标进程（新增键，老配置没有就用默认 0 = 跟随前台）

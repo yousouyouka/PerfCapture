@@ -32,6 +32,8 @@ function handleMessage(msg) {
       const dayEl = document.getElementById('netAlertDay'), monEl = document.getElementById('netAlertMonth');
       if (dayEl) dayEl.value = (Number.isFinite(nd) && nd >= 0) ? nd : 0;
       if (monEl) monEl.value = (Number.isFinite(nm) && nm >= 0) ? nm : 0;
+      const dnsEl = document.getElementById('chkNetDns');
+      if (dnsEl) dnsEl.checked = s.netReverseDns === true;
 
       /* 顺序不能反：先按 capture-options.json 渲染出勾选框，再套用配置里保存的 skip。
          反过来的话，新增或改名的采集项会拿到错误状态。 */

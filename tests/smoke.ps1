@@ -1031,7 +1031,7 @@ if ($idx -notmatch 'js/network\.js') { Bad 'index.html 未加载 network.js' }
 $iNet = $idx.IndexOf('js/network.js')
 $iMain = $idx.IndexOf('js/main.js')
 if ($iNet -lt 0 -or $iMain -lt 0 -or $iNet -gt $iMain) { Bad 'network.js 必须在 main.js 之前加载' }
-foreach ($nk in 'nav.network', 'net.title', 'net.desc', 'net.stateOn', 'net.stateOff', 'net.totalRecv', 'net.totalSent', 'net.totals', 'net.kind.wifi', 'net.kind.virtual', 'net.status.Up', 'net.caliber', 'net.today', 'net.month', 'net.histTitle', 'net.histDays', 'net.histMonths', 'net.histEmpty', 'settings.net', 'settings.netAlert', 'settings.netAlertHint', 'settings.netDay', 'settings.netMonth') {
+foreach ($nk in 'nav.network', 'net.title', 'net.desc', 'net.stateOn', 'net.stateOff', 'net.totalRecv', 'net.totalSent', 'net.totals', 'net.kind.wifi', 'net.kind.virtual', 'net.status.Up', 'net.caliber', 'net.today', 'net.month', 'net.histTitle', 'net.histDays', 'net.histMonths', 'net.histEmpty', 'settings.net', 'settings.netAlert', 'settings.netAlertHint', 'settings.netDay', 'settings.netMonth', 'net.connTitle', 'net.colProc', 'net.colRemote', 'net.colSvc', 'net.connEmpty', 'settings.netDns', 'settings.netDnsHint', 'capture.item.nettraffic', 'report.net.title', 'report.net.unable') {
     $n2 = ([regex]::Matches($i18nText, [regex]::Escape("'" + $nk + "':"))).Count
     if ($n2 -lt 3) { Bad "i18n 缺 $nk（三语都要有，现仅 $n2 处）" }
 }
@@ -1113,7 +1113,7 @@ foreach ($impure in 'Get-CimInstance', 'Get-WinEvent', 'Get-ItemProperty', 'Star
 }
 # 引擎：点源该模块，并把可信度与指纹写进汇总
 if ($engPs -notmatch [regex]::Escape('quality-rules.ps1')) { Bad '采集引擎没有点源 quality-rules.ps1' }
-foreach ($need in 'Get-CaptureQuality', 'quality          = $quality', 'driver_version', 'bios_version', 'os_version', 'schema_version   = 4') {
+foreach ($need in 'Get-CaptureQuality', 'quality          = $quality', 'driver_version', 'bios_version', 'os_version', 'schema_version   = 5', 'network          = $netBlock', 'logman create trace PerfCapNet', 'logman stop PerfCapNet') {
     if ($engPs -notmatch [regex]::Escape($need)) { Bad "采集引擎缺数据可信度/指纹：$need" }
 }
 if ($engPs -notmatch 'ConvertTo-Json\s+-Depth\s+6') { Bad '报告 JSON 深度不足（quality.checks 会被压成字符串）' }
@@ -1283,8 +1283,33 @@ foreach ($k in 'diag.limit.thermal', 'diag.limit.indistinct', 'diag.limitWhy.noD
     $n = ([regex]::Matches($i18nText, [regex]::Escape("'" + $k + "'"))).Count
     if ($n -lt 3) { Bad "i18n 的 $k 只有 $n 种语言（应 3）" }
 }
-foreach ($tf in 'probe-limit-rules.ps1', 'probe-bgproc.ps1', 'probe-report-verdicts.js') {
+foreach ($tf in 'probe-limit-rules.ps1', 'probe-bgproc.ps1', 'probe-report-verdicts.js', 'probe-net-rules.ps1') {
     if (-not (Test-Path (Join-Path $root ('tests\' + $tf)))) { Bad ('缺少 tests\' + $tf) }
+}
+# 2.2.1：进程归因与连接视图守卫
+$netRules = Join-Path $root 'src\app\net-rules.ps1'
+if (-not (Test-Path $netRules)) { Bad '缺少 src\app\net-rules.ps1（进程归因聚合）' }
+else {
+    $nrTxt = Get-Content $netRules -Raw -Encoding UTF8
+    foreach ($fn in 'Test-NetEtlRow', 'Get-NetProcessEventStats', 'Get-NetServiceName') {
+        if ($nrTxt -notmatch ('function ' + $fn)) { Bad "net-rules.ps1 缺函数 $fn" }
+    }
+}
+$engPs21 = Get-Content (Join-Path $root 'src\engine\Measure-GamePerf.ps1') -Raw -Encoding UTF8
+foreach ($need in "'nettraffic'", 'Get-NetProcessEventStats', 'netproc.csv', 'Microsoft-Windows-Kernel-Network', 'net.etl') {
+    if ($engPs21 -notmatch [regex]::Escape($need)) { Bad "引擎缺进程归因要素 $need" }
+}
+$optJson = Get-Content (Join-Path $root 'capture-options.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+$netOpt = @($optJson.options | Where-Object { $_.skip -eq 'nettraffic' })
+if ($netOpt.Count -ne 1) { Bad 'capture-options.json 缺 nettraffic 采集项' }
+elseif ($netOpt[0].default -ne $false) { Bad 'nettraffic 采集项必须默认关（隐私优先）' }
+$netJs21 = Get-Content (Join-Path $root 'ui\js\network.js') -Raw -Encoding UTF8
+foreach ($need in 'renderConns', 'netConnBody', 'connTruncated') {
+    if ($netJs21 -notmatch [regex]::Escape($need)) { Bad "network.js 缺连接视图要素 $need" }
+}
+$netPs21 = Get-Content $netPsFile -Raw -Encoding UTF8
+foreach ($need in 'Get-NetTCPConnection', 'Get-NetUDPEndpoint', 'GetHostEntryAsync', 'Wait(700)') {
+    if ($netPs21 -notmatch [regex]::Escape($need)) { Bad "网络采样器缺连接视图要素 $need" }
 }
 # 全项目审查修复的回归守卫
 $setPs = Get-Content (Join-Path $root 'src\app\20-Settings.ps1') -Raw -Encoding UTF8

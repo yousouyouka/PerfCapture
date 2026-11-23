@@ -19,6 +19,16 @@ window.PerfUpdateAreas = ['capture', 'realtime', 'other'];
 
 window.PerfUpdates = [
   {
+    date: '2026-11-23', version: '2.2.1',
+    title: '网络进阶：进程归因与连接视图',
+    items: [
+      ['feature', '报告新增「进程网络用量」：开启采集项后按进程归因采集窗口内的收发字节（游戏 vs 其它 Top 5），原始数据在 netproc.csv。', 'other'],
+      ['feature', '网络页新增「当前连接」视图：TCP / UDP 快照含进程、地址端口与按端口的服务推断（HTTPS / DNS / HTTPS-QUIC? 等）。', 'other'],
+      ['feature', '反向 DNS 可选开启：连接视图对远程地址做有限次域名反查，默认关闭，只在本机使用。', 'other'],
+      ['compat', '不猜的三道防线：异常行防御校验并计数、解析不到有效数据如实写「无法确认」、远程地址不记录。', 'other']
+    ]
+  },
+  {
     date: '2026-11-23', version: '2.2.0',
     title: '网络监控：实时网速与历史用量',
     items: [

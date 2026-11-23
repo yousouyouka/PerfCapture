@@ -143,6 +143,7 @@ function saveSettings() {
       language: state.language || LANG,
       netAlertDayMB: parseInt($('#netAlertDay').value, 10) || 0,
       netAlertMonthMB: parseInt($('#netAlertMonth').value, 10) || 0,
+      netReverseDns: !!$('#chkNetDns').checked,
     },
   });
 }
@@ -152,6 +153,8 @@ function saveSettings() {
 ['#netAlertDay', '#netAlertMonth'].forEach(sel => {
   $(sel).addEventListener('change', () => saveSettings());
 });
+const netDnsEl = $('#chkNetDns');
+if (netDnsEl) netDnsEl.addEventListener('change', () => saveSettings());
 /* 勾选框是运行时渲染的，用事件委托，避免渲染顺序影响绑定 */
 $('.collect-grid').addEventListener('change', () => { markPresetCustom(); saveSettings(); });
 

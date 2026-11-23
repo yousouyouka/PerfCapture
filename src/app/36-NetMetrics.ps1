@@ -53,6 +53,46 @@ $meta = @{}
 $prev = @{}
 $wall = $null
 $tick = 0
+$pnames = @{}    # pid -> 进程名（连接视图用）
+$dnsCache = @{}  # ip -> 主机名（'' = 已查无/未解析）；反向 DNS 默认关，开了也限预算
+$dnsBudget = 0
+
+# 端口 → 服务推断（按端口映射，如实标注；QUIC 与 HTTPS 同为 UDP 443 不可分）
+function Get-NetSvc([int]$Port, [string]$Proto) {
+    if ($Port -le 0) { return '' }
+    switch ($Port) {
+        22 { return 'SSH' }
+        53 { return 'DNS' }
+        80 { return 'HTTP' }
+        123 { return 'NTP' }
+        443 { if ($Proto -eq 'UDP') { return 'HTTPS/QUIC?' } else { return 'HTTPS' } }
+        1900 { return 'SSDP' }
+        3306 { return 'MySQL' }
+        5353 { return 'mDNS' }
+        5432 { return 'PostgreSQL' }
+        8080 { return 'HTTP-alt' }
+        3478 { return 'STUN' }
+        default { return '' }
+    }
+}
+
+# 反向 DNS：异步解析 + 700ms 预算 + 每次 tick 最多 2 个新查询，绝不阻塞采样循环
+function Resolve-NetHost([string]$Ip) {
+    if (-not $Ip -or $dnsCache.ContainsKey($Ip)) { return $dnsCache[$Ip] }
+    if ($dnsBudget -le 0) { return '' }
+    $dnsBudget--
+    try {
+        $t = [System.Net.Dns]::GetHostEntryAsync($Ip)
+        if ($t.Wait(700)) {
+            $hn = ''
+            try { $hn = [string]$t.Result.HostName } catch { }
+            $dnsCache[$Ip] = $hn
+            return $hn
+        }
+        $dnsCache[$Ip] = ''
+    } catch { $dnsCache[$Ip] = '' }
+    return ''
+}
 while ($true) {
     if ($Ctl -and $Ctl.stop) { break }
     try {
@@ -67,6 +107,57 @@ while ($true) {
         $now = Get-Date
         $seen = @{}
         $ifs = New-Object System.Collections.Generic.List[object]
+        $dnsBudget = 2
+        $wantDns = ($Ctl -and $Ctl.reverseDns)
+        # 连接/会话快照（L3 口径：只列「现在谁连着谁」，不计字节）
+        $conns = New-Object System.Collections.Generic.List[object]
+        try {
+            if (($tick % 5) -eq 1 -or $pnames.Count -eq 0) {
+                $pnames = @{}
+                foreach ($p in @(Get-Process -ErrorAction SilentlyContinue)) {
+                    try { $pnames[[int]$p.Id] = [string]$p.ProcessName } catch { }
+                }
+            }
+            foreach ($tc in @(Get-NetTCPConnection -State Established -ErrorAction SilentlyContinue)) {
+                if ($conns.Count -ge 100) { break }
+                $op = 0
+                try { $op = [int]$tc.OwningProcess } catch { }
+                if ($op -le 0) { continue }
+                $ra = [string]$tc.RemoteAddress
+                $hn = ''
+                if ($wantDns -and $ra -ne '0.0.0.0' -and $ra -ne '::') { $hn = Resolve-NetHost $ra }
+                $rp = 0
+                try { $rp = [int]$tc.RemotePort } catch { }
+                $conns.Add([ordered]@{
+                    p  = $op
+                    n  = if ($pnames.ContainsKey($op)) { $pnames[$op] } else { '' }
+                    pr = 'TCP'
+                    la = [string]$tc.LocalAddress; lp = [int]$tc.LocalPort
+                    ra = $ra; rp = $rp
+                    st = 'ESTABLISHED'
+                    sv = Get-NetSvc $rp 'TCP'
+                    hn = $hn
+                })
+            }
+            foreach ($ud in @(Get-NetUDPEndpoint -ErrorAction SilentlyContinue)) {
+                if ($conns.Count -ge 100) { break }
+                $op = 0
+                try { $op = [int]$ud.OwningProcess } catch { }
+                if ($op -le 0) { continue }
+                $lp2 = 0
+                try { $lp2 = [int]$ud.LocalPort } catch { }
+                $conns.Add([ordered]@{
+                    p  = $op
+                    n  = if ($pnames.ContainsKey($op)) { $pnames[$op] } else { '' }
+                    pr = 'UDP'
+                    la = [string]$ud.LocalAddress; lp = $lp2
+                    ra = '*'; rp = 0
+                    st = ''
+                    sv = Get-NetSvc $lp2 'UDP'
+                    hn = ''
+                })
+            }
+        } catch { }
         foreach ($s in @(Get-NetAdapterStatistics -ErrorAction SilentlyContinue)) {
             $idx = 0
             try { $idx = [int]$s.ifIndex } catch { }
@@ -121,8 +212,10 @@ while ($true) {
         foreach ($gone in @($prev.Keys | Where-Object { -not $seen.ContainsKey($_) })) { [void]$prev.Remove($gone) }
         $wall = $now
         [void]$Queue.Enqueue(@{
-            at  = $now.ToString('yyyy-MM-dd HH:mm:ss')
-            ifs = $ifs
+            at   = $now.ToString('yyyy-MM-dd HH:mm:ss')
+            ifs  = $ifs
+            conns= $conns
+            connTruncated = ($conns.Count -ge 100)
         })
     } catch {
         # 任何一次异常都不许弄死采样线程：丢这一秒，下秒重来
@@ -497,6 +590,7 @@ function Start-NetWorker {
         [void]$ps.AddParameter('Queue', $script:NetQueue)
         if (-not $script:NetCtl) { $script:NetCtl = @{ stop = $false } }
         $script:NetCtl.stop = $false
+        $script:NetCtl.reverseDns = [bool]$script:NetReverseDnsWant
         [void]$ps.AddParameter('Ctl', $script:NetCtl)
         $handle = $ps.BeginInvoke()
         $script:NetWorker = @{ PS = $ps; Handle = $handle }
@@ -609,6 +703,12 @@ function Set-NetConsumer([string]$Key, [bool]$On) {
 }
 
 # ---------- 退出落盘（90-Main FormClosing 调用） ----------
+# 反向 DNS 开关（默认关）：设置保存时由 Set-ConfigValue 调用，运行中即时生效
+function Set-NetReverseDns([bool]$On) {
+    $script:NetReverseDnsWant = $On
+    if ($script:NetCtl) { $script:NetCtl.reverseDns = $On }
+}
+
 function Flush-NetStatsOnExit {
     try { Flush-NetStats } catch { }
     Remove-NetTray

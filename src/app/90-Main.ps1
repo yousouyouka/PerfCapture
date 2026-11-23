@@ -43,6 +43,7 @@ try {
 try {
     if (Get-Command Initialize-NetPersistence -ErrorAction SilentlyContinue) { Initialize-NetPersistence }
     if (Get-Command Set-NetConsumer -ErrorAction SilentlyContinue) { Set-NetConsumer 'persist' $true }
+    if (Get-Command Set-NetReverseDns -ErrorAction SilentlyContinue) { Set-NetReverseDns ([bool]$script:Cfg.netReverseDns) }
 } catch { }
 
 # 启动自愈：撤销「已装但未启用」扩展留在系统里的注册痕迹。

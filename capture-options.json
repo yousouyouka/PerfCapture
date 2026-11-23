@@ -31,6 +31,7 @@
     { "skip": "cputemp",     "module": "thermal",   "kind": "optional", "label": "capture.item.cputemp",     "tip": "capture.tip.cputemp",     "default": true },
     { "skip": "cputhrottle", "module": "thermal",   "kind": "optional", "label": "capture.item.cputhrottle", "tip": "capture.tip.cputhrottle", "default": true },
     { "skip": "bgproc",      "module": "cpu",        "kind": "optional", "label": "capture.item.bgproc",      "tip": "capture.tip.bgproc",      "default": true },
+    { "skip": "nettraffic",  "module": "cpu",        "kind": "optional", "label": "capture.item.nettraffic",  "tip": "capture.tip.nettraffic",  "default": false },
 
     { "skip": "gpubusy",   "module": "bottleneck",  "kind": "core",     "label": "capture.item.gpubusy" },
     { "skip": "diagnosis", "module": "bottleneck",  "kind": "derived",  "label": "capture.item.diagnosis", "note": "capture.derive.diagnosis" },

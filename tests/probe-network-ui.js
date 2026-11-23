@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 /* 网络页 DOM 探针（2.1.18）：不依赖宿主，喂构造样本验证渲染与启停消息。
    断言目标：消息形状、每接口卡片/曲线/累计、合计口径（只算物理）、
    计数器回退不造数、接口消失清行、启停命令、语言刷新。 */
@@ -30,6 +30,13 @@ class FakeEl {
       if (i >= 0) this.parentNode.children.splice(i, 1);
     }
   }
+  removeChild(c) {
+    const i = this.children.indexOf(c);
+    if (i >= 0) this.children.splice(i, 1);
+    c.parentNode = null;
+    return c;
+  }
+  get firstChild() { return this.children.length ? this.children[0] : null; }
   querySelector(sel) {
     const m = sel.startsWith('.');
     const want = m ? sel.slice(1) : null;
@@ -41,7 +48,8 @@ class FakeEl {
 }
 const ids = {};
 ['netState', 'netStateText', 'netTotalRecv', 'netTotalSent', 'netTotalAcc', 'netTotalScope', 'netIfs', 'netEmpty',
- 'netToday', 'netMonth', 'netBarsDays', 'netBarsMonths', 'netHistEmpty'].forEach((id) => { ids[id] = new FakeEl('div'); });
+ 'netToday', 'netMonth', 'netBarsDays', 'netBarsMonths', 'netHistEmpty',
+ 'netConnBody', 'netConnEmpty', 'netConnHint'].forEach((id) => { ids[id] = new FakeEl('div'); });
 const pageEl = new FakeEl('section');
 pageEl.hidden = true;
 
@@ -170,6 +178,28 @@ const zeroTotals = { today: { recv: 0, sent: 0 }, month: { recv: 0, sent: 0 },
 P.handle({ type: 'netTotals', totals: zeroTotals });
 ok(ids.netHistEmpty.hidden === false, '全零历史显示空状态');
 P.handle({ type: 'netTotals', totals: totals1 });
+
+/* ---- 连接/会话视图 ---- */
+const conns = [
+  { p: 1000, n: 'game', pr: 'TCP', la: '192.168.1.5', lp: 52300, ra: '203.0.113.9', rp: 443, st: 'ESTABLISHED', sv: 'HTTPS', hn: 'cdn.example.com' },
+  { p: 4004, n: 'svchost', pr: 'UDP', la: '0.0.0.0', lp: 5353, ra: '*', rp: 0, st: '', sv: 'mDNS', hn: '' }
+];
+P.handle({ type: 'netSample', sample: { at: 'x', ifs: s1.sample.ifs, conns: conns, connTruncated: false } });
+ok(ids.netConnBody.children.length === 2, '两条连接渲染两行', '实际 ' + ids.netConnBody.children.length);
+ok(ids.netConnEmpty.hidden === true, '有连接时空状态隐藏');
+const row0 = ids.netConnBody.children[0];
+ok(row0.children[0].textContent === 'game', '连接行首列是进程名');
+ok(row0.children[3].textContent.indexOf('cdn.example.com') >= 0, '开了反查时远程列显示主机名');
+ok(row0.children[3].textContent.indexOf('203.0.113.9') >= 0, '远程列同时保留 IP');
+const row1 = ids.netConnBody.children[1];
+ok(row1.children[3].textContent === '—', 'UDP 远程列显示 —（无对端概念）');
+ok(row1.children[4].textContent === 'mDNS', '服务推断列输出 mDNS');
+const before = ids.netConnBody.children[0];
+P.handle({ type: 'netSample', sample: { at: 'y', ifs: s1.sample.ifs, conns: conns, connTruncated: false } });
+ok(ids.netConnBody.children[0] === before, '连接未变化时不重建 DOM');
+P.handle({ type: 'netSample', sample: { at: 'z', ifs: s1.sample.ifs, conns: [], connTruncated: false } });
+ok(ids.netConnEmpty.hidden === false && ids.netConnBody.children.length === 0, '无连接时显示空状态');
+P.handle({ type: 'netSample', sample: { at: 'w', ifs: s1.sample.ifs, conns: conns, connTruncated: false } });
 
 /* ---- 语言切换刷新不崩且重画 ---- */
 P.handle({ type: 'netSample', sample: s1.sample });

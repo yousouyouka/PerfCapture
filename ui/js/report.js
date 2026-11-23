@@ -249,6 +249,7 @@ function renderReport(r) {
      不编号——卡顿时刻已经有过「两个 02」的教训。 */
   html += limitBlock(r);
   html += bgProcBlock(r);
+  html += netProcBlock(r);
 
   const sec06 = haveDict ? renderMetricModules(r, ['perf', 'thermal']) : '';
   if (sec06) html += rpSec('06', 'report.s6', '完整明细') + sec06;
@@ -383,6 +384,48 @@ function limitBlock(r) {
 
 /* ── 2.1.17 / F4-2：后台干扰 Top 3 ──
    只在确实采到样本时占版面；关掉或没采到就什么都不写，不写「无干扰」这种结论。 */
+/* ── 2.2.1：进程网络用量（采集窗口内，内核网络 ETW 归因）──
+   只有 state=ok 才有数字；其它状态如实给「无法确认」+原因，不编 0。 */
+function fmtNetBytes(b) {
+  const n = Number(b);
+  if (!(n >= 0) || !Number.isFinite(n)) return '—';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let v = n, i = 0;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i += 1; }
+  return (i === 0 ? String(Math.round(v)) : v.toFixed(v >= 100 ? 0 : 1)) + ' ' + units[i];
+}
+function netProcBlock(r) {
+  const b = r && r.network;
+  if (!b) return '';
+  const why = {
+    unavailable: t('report.net.unavailable', '本次未能启动内核网络 ETW 会话（未以管理员身份运行），没有采集进程级网络数据'),
+    noData: t('report.net.noData', 'ETW 会话在跑，但没有解析到有效的网络事件行'),
+    parseFailed: t('report.net.parseFailed', 'ETL 解析失败，事件布局可能随系统版本变化'),
+    moduleMissing: t('report.net.moduleMissing', '解析模块缺失，本次未做归因')
+  };
+  const title = t('report.net.title', '进程网络用量（采集窗口内）');
+  if (b.state !== 'ok') {
+    if (b.state === 'skipped' || !why[b.state]) return '';
+    return `<div class="rp-section">${escapeHtml(title)}</div>` +
+           `<div class="rp-note">${escapeHtml(t('report.net.unable', '无法确认') + ' —— ' + why[b.state])}</div>`;
+  }
+  const rows = Array.isArray(b.top) ? b.top : [];
+  if (!rows.length) return '';
+  let h = `<div class="rp-section">${escapeHtml(title)}</div>` +
+          `<div class="rp-note">${escapeHtml(t('report.net.cap', '内核网络 ETW 按 socket 拥有者归因，只统计本采集窗口内的收发字节；短命 UDP 的归因有天然缺口。远程地址不记录（隐私口径）。'))}</div>` +
+          '<div class="rp-rows rp-netrows">' +
+          rows.map((p) => {
+            const nm = String((p && p.name) || ('PID ' + (p && p.pid)));
+            const tag = (p && p.game) ? t('report.net.gameTag', '（游戏）') : '';
+            const val = `↓ ${fmtNetBytes(p && p.recv)} · ↑ ${fmtNetBytes(p && p.sent)} · Σ ${fmtNetBytes((Number(p && p.recv) || 0) + (Number(p && p.sent) || 0))}`;
+            return `<div class="row" data-pid="${escapeHtml(String((p && p.pid) || ''))}">` +
+                   `<span class="k">${escapeHtml(nm)}<span class="rp-bg-sub">${escapeHtml(tag)}</span></span>` +
+                   `<span class="v">${escapeHtml(val)}</span></div>`;
+          }).join('') +
+          '</div>';
+  return h;
+}
+
 function bgProcBlock(r) {
   const b = r && r.background_proc;
   if (!b || b.state !== 'ok' || !Array.isArray(b.procs) || !b.procs.length) return '';

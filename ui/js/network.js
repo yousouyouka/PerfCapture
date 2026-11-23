@@ -191,6 +191,7 @@
     if (msg.type === 'netSample') {
       if (msg.caps && typeof msg.caps.running === 'boolean') setRunning(msg.caps.running);
       renderSample(msg.sample);
+      renderConns(msg.sample && msg.sample.conns, !!(msg.sample && msg.sample.connTruncated));
     } else if (msg.type === 'netCaps') {
       if (msg.caps && typeof msg.caps.running === 'boolean') setRunning(msg.caps.running);
     } else if (msg.type === 'netTotals') {
@@ -254,10 +255,50 @@
     observer.observe(page, { attributes: true, attributeFilter: ['hidden'] });
   }
 
+  /* ---- 连接/会话视图（L3 口径：只列「现在谁连着谁」，不计字节）---- */
+  let lastConnKey = '';
+  const CONN_MAX = 60;
+  function renderConns(conns, truncated) {
+    const body = $('netConnBody'), empty = $('netConnEmpty'), hint = $('netConnHint');
+    if (!body) return;
+    const list = Array.isArray(conns) ? conns : [];
+    if (!list.length) {
+      while (body.firstChild) body.removeChild(body.firstChild);
+      if (empty) empty.hidden = false;
+      if (hint) hint.textContent = '';
+      lastConnKey = '';
+      return;
+    }
+    if (empty) empty.hidden = true;
+    /* 稳定排序：TCP 在前，按远程端口分组无意义，保持采样顺序即可 */
+    const key = list.map((c) => [c.pr, c.p, c.lp, c.ra, c.rp, c.st, c.hn || ''].join('|')).join('\n');
+    if (key === lastConnKey) return;
+    lastConnKey = key;
+    while (body.firstChild) body.removeChild(body.firstChild);
+    const shown = list.slice(0, CONN_MAX);
+    for (const c of shown) {
+      const tr = el('tr', 'nt-conn-row');
+      const name = String(c.n || '') || ('PID ' + c.p);
+      tr.appendChild(el('td', '', name));
+      tr.appendChild(el('td', 'nt-conn-proto', String(c.pr || '')));
+      tr.appendChild(el('td', '', `${String(c.la || '')}:${c.lp != null ? c.lp : ''}`));
+      const remote = (c.pr === 'UDP') ? '—' : (c.hn ? `${String(c.ra)} (${String(c.hn)})` : String(c.ra || '—'));
+      tr.appendChild(el('td', '', remote));
+      tr.appendChild(el('td', 'nt-conn-svc', String(c.sv || '')));
+      body.appendChild(tr);
+    }
+    const extra = list.length - shown.length;
+    if (hint) {
+      hint.textContent = (truncated || extra > 0)
+        ? t('net.connTrunc', '快照最多 100 条，这里显示前 ' + shown.length + ' 条')
+        : t('net.connCount', '{n} 条').replace('{n}', String(list.length));
+    }
+  }
+
   /* 语言切换后重画 JS 生成的文案 */
   function refresh() {
     setRunning(state.running);
-    if (state.lastSample) renderSample(state.lastSample);
+    if (state.lastSample) { renderSample(state.lastSample); renderConns(state.lastSample.conns, !!(state.lastSample && state.lastSample.connTruncated)); }
     if (lastTotals) renderTotals(lastTotals);
   }
 

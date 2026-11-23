@@ -48,6 +48,8 @@ $collectCpuTemp  = -not ($skipList -contains 'cputemp')
 $collectCpuThrottle = -not ($skipList -contains 'cputhrottle')
 # 2.1.17：后台进程 CPU 干扰（每 5 秒一次差分采样，只读 CPU 时间，不碰其它进程 GPU）
 $collectBgProc   = -not ($skipList -contains 'bgproc')
+# 2.2.1：进程级网络归因（内核网络 ETW 报告级；需要提权，默认关）
+$collectNetTraffic = -not ($skipList -contains 'nettraffic')
 $collectFeatures = -not ($skipList -contains 'features')
 $collectRes      = -not ($skipList -contains 'res')
 $collectChart    = $true      # 图表始终生成：UI 不再提供开关，报告里必定含曲线
@@ -59,7 +61,7 @@ $ErrorActionPreference = 'Stop'
 # 平台规则 / 厂商温度 / 降频这三个模块无 UI 依赖，直接点源即可；
 # 缺文件时对应能力降级为 N/A，不影响帧采集（见《数据源与平台覆盖规则.md》§5）。
 $script:AppModuleDir = Join-Path (Split-Path $PSScriptRoot -Parent) 'app'
-foreach ($m in @('platform-rules.ps1', 'vendor-sensor.ps1', 'cpu-throttle.ps1', 'quality-rules.ps1', 'stutter-context.ps1', 'limit-rules.ps1', 'bgproc.ps1')) {
+foreach ($m in @('platform-rules.ps1', 'vendor-sensor.ps1', 'cpu-throttle.ps1', 'quality-rules.ps1', 'stutter-context.ps1', 'limit-rules.ps1', 'bgproc.ps1', 'net-rules.ps1')) {
     $mp = Join-Path $script:AppModuleDir $m
     if (Test-Path -LiteralPath $mp) { . $mp }
 }
@@ -128,6 +130,7 @@ $pmCsv   = Join-Path $OutDir ($runName + '.presentmon.csv')
 $sensCsv = Join-Path $OutDir ($runName + '.sensors.csv')
 # 2.1.17：后台进程 CPU 一对多行，不能塞进传感器 CSV（一行一个时刻），单独存
 $bgCsv   = Join-Path $OutDir ($runName + '.bgproc.csv')
+$netCsv  = Join-Path $OutDir ($runName + '.netproc.csv')
 $htmlOut = if ($HtmlPath) { $HtmlPath } else { Join-Path $OutDir ($runName + '.html') }
 $htmlDir = Split-Path -Parent $htmlOut
 if ($htmlDir -and -not (Test-Path $htmlDir)) { New-Item -ItemType Directory -Path $htmlDir -Force | Out-Null }
@@ -144,6 +147,20 @@ Write-Host ''
 # ---------------------------------------------------------------- clear stale ETW session
 & logman stop EndfieldPerf -ets  2>$null | Out-Null
 & logman stop PresentMon  -ets  2>$null | Out-Null
+
+# ---------------------------------------------------------------- net traffic session (2.2.1)
+# 内核网络 ETW：报告级进程归因（Event 10 = 发送 / 11 = 接收，Properties[0]=PID、[1]=字节）。
+# 会话起不来（未提权等）就如实降级为 unavailable，绝不编数。ETL 放临时目录，解析后即删。
+$netEtl = Join-Path $env:TEMP 'PerfCapture\net.etl'
+$netSessionOk = $false
+if ($collectNetTraffic) {
+    & logman stop PerfCapNet -ets 2>$null | Out-Null
+    try {
+        if (Test-Path -LiteralPath $netEtl) { Remove-Item -LiteralPath $netEtl -Force -ErrorAction SilentlyContinue }
+        & logman create trace PerfCapNet -ow -o $netEtl -p '{7DD42A49-5329-4832-8DFD-43D979153A88}' 0xffffffff -ets 2>$null | Out-Null
+        $netSessionOk = $true
+    } catch { $netSessionOk = $false }
+}
 
 # ---------------------------------------------------------------- sensor sampler (background job)
 # 批次 C：一次 nvidia-smi 取全部 GPU 字段（时钟/功耗/风扇/PCIe/降频原因），
@@ -742,6 +759,7 @@ Show-Console
 if ($fgSamples -gt 0) { $fgPct = [math]::Round(100.0 * $fgHits / $fgSamples, 0) } else { $fgPct = $null }
 
 & logman stop EndfieldPerf -ets 2>$null | Out-Null
+& logman stop PerfCapNet -ets 2>$null | Out-Null
 try { Wait-Job $sampler -Timeout 20 | Out-Null; Stop-Job $sampler -ErrorAction SilentlyContinue; Remove-Job $sampler -Force -ErrorAction SilentlyContinue } catch { }
 
 # ---------------------------------------------------------------- analyse
@@ -1226,6 +1244,63 @@ if (-not $collectBgProc) {
     $bgProc = [ordered]@{ state = 'noSamples'; sample_count = 0; interval_sec = 5; procs = @() }
 }
 
+# ── 2.2.1 / P4：进程级网络归因（内核网络 ETW，报告级）──
+# 口径：按 socket 拥有者归因，字节数为 Event 10/11 的调用级聚合；短命 UDP 有天然缺口，
+# 布局随系统版本漂移时防御校验会拦下异常行——解析不到有效行就如实写 noData / unavailable。
+$netStats = $null
+$netProc = $null
+$netState = 'skipped'
+if (-not $collectNetTraffic) {
+    $netState = 'skipped'
+} elseif (-not $netSessionOk) {
+    $netState = 'unavailable'   # ETW 会话没起来（未提权等）：如实说明，不编数
+} elseif (Get-Command Get-NetProcessEventStats -ErrorAction SilentlyContinue) {
+    try {
+        $netEvs = @(Get-WinEvent -Path $netEtl -Oldest -ErrorAction Stop | Where-Object {
+                $_.ProviderName -eq 'Microsoft-Windows-Kernel-Network' -and ($_.Id -eq 10 -or $_.Id -eq 11)
+            })
+        $netRows = foreach ($e in $netEvs) {
+            $sz = -1.0
+            try { $sz = [double]$e.Properties[1].Value } catch { }
+            @{ pid = $e.Properties[0].Value; dir = if ($e.Id -eq 10) { 'sent' } else { 'recv' }; size = $sz }
+        }
+        $netStats = Get-NetProcessEventStats -Rows @($netRows) -GamePid $GamePid
+        if ($netStats.validRows -gt 0) { $netState = 'ok' } else { $netState = 'noData' }
+    } catch {
+        $netState = 'parseFailed'
+        Write-Host ('  [!] net ETL parse failed: ' + $_.Exception.Message) -ForegroundColor Yellow
+    }
+} else {
+    $netState = 'moduleMissing'
+}
+try { if ($netEtl -and (Test-Path -LiteralPath $netEtl)) { Remove-Item -LiteralPath $netEtl -Force -ErrorAction SilentlyContinue } } catch { }
+
+if ($netState -eq 'ok') {
+    $nameCache = @{}
+    $netProc = New-Object System.Collections.Generic.List[object]
+    foreach ($o in $netStats.other) {
+        $nm = ''
+        try {
+            $oi = [int]$o.pid
+            if (-not $nameCache.ContainsKey($oi)) {
+                $np = Get-Process -Id $oi -ErrorAction SilentlyContinue
+                $nameCache[$oi] = if ($np) { [string]$np.ProcessName } else { '' }
+            }
+            $nm = $nameCache[$oi]
+        } catch { }
+        $netProc.Add([ordered]@{ pid = $o.pid; name = $nm; recv = $o.recv; sent = $o.sent; game = $false })
+    }
+    $gnm = ''
+    try { $gp = Get-Process -Id $GamePid -ErrorAction SilentlyContinue; $gnm = if ($gp) { [string]$gp.ProcessName } else { '' } } catch { }
+    $netProc.Insert(0, [ordered]@{ pid = $GamePid; name = $gnm; recv = $netStats.game.recv; sent = $netStats.game.sent; game = $true })
+    try {
+        'pid,name,recv,sent,game' | Out-File -FilePath $netCsv -Encoding UTF8
+        foreach ($n in $netProc) {
+            ('{0},{1},{2},{3},{4}' -f $n.pid, ((([string]$n.name) -replace '[,"\r\n]', '_')), $n.recv, $n.sent, $n.game) | Out-File -FilePath $netCsv -Append -Encoding UTF8
+        }
+    } catch { }
+}
+
 # ── 2.1.17 / F4-1：限制类型判读 ──
 # 驱动有没有回报限流状态，看传感器行里 thr_* 列是否取到过值（不是看 $throttle 是否非空：
 # 引擎只在触发时写键，空字典也可能只是「采到了但没触发」）。
@@ -1243,6 +1318,21 @@ $limit = if (Get-Command Get-LimitType -ErrorAction SilentlyContinue) {
         -GpuThrottleAvailable $thrSeen -CpuTempAvailable ($cpuTempState -eq 'ok')
 } else {
     [ordered]@{ kind = 'indistinct'; reason_code = 'moduleMissing'; evidence = @() }
+}
+
+# ── 2.2.1：网络归因结果块（state 之外只有 ok 才带数字）──
+$netBlock = [ordered]@{
+    state    = $netState
+    provider = if ($collectNetTraffic) { 'etw-kernel-network' } else { '' }
+    period   = 'capture'
+}
+if ($netState -eq 'ok' -and $netStats) {
+    $netBlock.game      = $netStats.game
+    $netBlock.total     = $netStats.total
+    $netBlock.procCount = $netStats.procCount
+    $netBlock.invalid   = $netStats.invalidRows
+    $netBlock.top       = @($netProc)
+    $netBlock.csv       = (Split-Path $netCsv -Leaf)
 }
 
 $latStat = if ($collectLatency) { Get-Stat $dispLat } else { $null }
@@ -1660,7 +1750,7 @@ try {
 
 $summary = [ordered]@{
     # 2.1.17：新增 limit / background_proc 两个顶层块，读取方按 4 处理；3 及更早按缺字段显示 —
-    schema_version   = 4
+    schema_version   = 5
     na_metrics       = @($naMetrics)
     # 本次数据是否足以支撑结论：level = ok / caution / blocked / unknown（模块缺失）
     # checks 里只列「确实触发的项」，没触发不等于逐项检查过（见 quality-rules.ps1 的说明）
@@ -1693,6 +1783,9 @@ $summary = [ordered]@{
     # 口径为「整机全部核心满载 = 100%」（与游戏进程 proc_cpu_pct 同一公式：除以核心数），
     # 所以 8 核机器上占满 1 核显示 12.5%，不是 100%。文案必须照实说，别让人低估。
     background_proc  = $bgProc
+    # 2.2.1：进程级网络归因（state: ok/noData/unavailable/parseFailed/moduleMissing/skipped；
+    # 只有 ok 才带 game/total/top 与 netproc.csv，其余状态不带任何数字——没看到不等于没发生）
+    network          = $netBlock
     memory           = [ordered]@{
         proc_ram_max_mb = $(if ($procRam) { [math]::Round($procRam.Max, 0) } else { $null })
         sys_ram_avg_pct = $(if ($sysRam) { [math]::Round($sysRam.Avg, 1) } else { $null })
@@ -2219,6 +2312,40 @@ if ($bgProc -and $bgProc.state -eq 'ok' -and @($bgProc.procs).Count -gt 0) {
              '<table class="det"><tr class="sec"><td>进程</td><td>平均占用</td><td>峰值</td><td>出现采样</td></tr>' + $bgRowsHtml + '</table>' + "`n"
 }
 
+# ── 2.2.1 / P4：进程级网络归因（导出 HTML）──
+function FmtNetBytes([double]$b) {
+    if ($b -ge 1GB) { return ('{0:0.00} GB' -f ($b / 1GB)) }
+    if ($b -ge 1MB) { return ('{0:0.0} MB' -f ($b / 1MB)) }
+    if ($b -ge 1KB) { return ('{0:0.0} KB' -f ($b / 1KB)) }
+    return ('{0:0} B' -f $b)
+}
+$secNet = ''
+if ($netBlock.state -eq 'ok' -and @($netProc).Count -gt 0) {
+    $netRowsHtml = ''
+    foreach ($n in @($netProc)) {
+        $nm2 = ([string]$n.name) -replace '&', '&amp;' -replace '<', '&lt;' -replace '>', '&gt;'
+        if (-not $nm2) { $nm2 = ('PID ' + $n.pid) }
+        $tag = if ($n.game) { '（游戏）' } else { '' }
+        $netRowsHtml += '<tr><td>' + $nm2 + $tag + '</td><td>' + (FmtNetBytes ([double]$n.recv)) + '</td><td>' +
+                        (FmtNetBytes ([double]$n.sent)) + '</td><td>' + (FmtNetBytes ([double]$n.recv + [double]$n.sent)) + '</td></tr>'
+    }
+    $secNet = '<h2>进程网络用量（采集窗口内）</h2>' + "`n" +
+              '<div class="cap">内核网络 ETW 按 socket 拥有者归因，只统计本采集窗口内的收发字节；短命 UDP 的归因有天然缺口，不是所有流量都能落到进程。远程地址不记录（隐私口径）。</div>' + "`n" +
+              '<table class="det"><tr class="sec"><td>进程</td><td>接收</td><td>发送</td><td>合计</td></tr>' + $netRowsHtml + '</table>' + "`n"
+} elseif ($netBlock.state -ne 'skipped') {
+    $whyNet = @{
+        unavailable  = '本次未能启动内核网络 ETW 会话（未以管理员身份运行），没有采集进程级网络数据'
+        noData       = 'ETW 会话在跑，但没有解析到有效的网络事件行'
+        parseFailed  = 'ETL 解析失败，事件布局可能随系统版本变化'
+        moduleMissing= '解析模块缺失，本次未做归因'
+    }
+    $w = $whyNet[[string]$netBlock.state]
+    if ($w) {
+        $secNet = '<h2>进程网络用量</h2>' + "`n" +
+                  '<div class="item warn"><div><b>无法确认</b> —— ' + $w + '</div></div>' + "`n"
+    }
+}
+
 # ── 详细数据：按指标字典的板块分组 ──
 # 板块标题行（同一张表里用跨列的标题行分节，导出后直接可读）
 function SecRow([string]$title) {
@@ -2575,6 +2702,7 @@ $secStutter
 $secDiag
 $secLimit
 $secBg
+$secNet
 <table class="det">
 $detOrdered
 </table>

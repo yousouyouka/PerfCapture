@@ -17,6 +17,12 @@ function New-DefaultConfig {
         # 扩展中心：id -> 状态对象（status/reason/installedAt/updatedAt）。老配置没有就空表。
         # 键是扩展 id，不是固定字段——载入侧必须整块遍历属性，别只挑几个键（overlay 整块丢失的教训）。
         extensions  = @{}
+        # 全局热键（2.1.16）：enabled 关掉即注销；键位只支持 F1–F12，避免和输入法/组合键冲突
+        hotkeys     = @{
+            enabled = $true
+            start   = @{ ctrl = $true; alt = $true; shift = $false; key = 'F9' }
+            stop    = @{ ctrl = $true; alt = $true; shift = $false; key = 'F10' }
+        }
     }
 }
 
@@ -99,6 +105,21 @@ if (Test-Path $script:CfgPath) {
             # 否则用户以前选的四族会被新版本的默认 6 项顶掉。
             if ($null -ne $j.overlay.metrics -and $null -eq $j.overlay.items) {
                 if ($script:Cfg.overlay -is [hashtable]) { [void]$script:Cfg.overlay.Remove('items') }
+            }
+        }
+        # 全局热键（2.1.16）：整块读；键名只认 F1–F12，非法就保留默认并记日志。
+        # 字段级覆盖而不是整块替换——老配置缺 shift 时不该把它当 false 以外的值。
+        if ($null -ne $j.hotkeys) {
+            if ($null -ne $j.hotkeys.enabled) { $script:Cfg.hotkeys.enabled = [bool]$j.hotkeys.enabled }
+            foreach ($side in 'start', 'stop') {
+                $v = $j.hotkeys.$side
+                if ($null -eq $v) { continue }
+                $key = ([string]$v.key).ToUpperInvariant()
+                if ($key -match '^F([1-9]|1[0-2])$') {
+                    $script:Cfg.hotkeys[$side] = @{ ctrl = [bool]$v.ctrl; alt = [bool]$v.alt; shift = [bool]$v.shift; key = $key }
+                } else {
+                    Write-AppLog ("热键 $side 的键名非法（$key），保留默认") 'WARN'
+                }
             }
         }
         # 扩展状态：整块遍历属性（每个 id 一项），不做固定键挑选——否则新增扩展装过一次后重启就丢。

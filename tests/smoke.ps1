@@ -1125,6 +1125,40 @@ foreach ($sk in 'report.sc.title', 'report.sc.cap', 'report.sc.noSamples') {
 }
 if (-not (Test-Path (Join-Path $root 'tests\probe-stutter-context.ps1'))) { Bad '缺少 tests\probe-stutter-context.ps1' }
 
+# ---- 2.1.16 流程摩擦：全局热键 / 再采一次 / 完成提醒 ----
+$hkMod = Join-Path $root 'src\app\52-Hotkeys.ps1'
+if (-not (Test-Path -LiteralPath $hkMod)) { Bad '缺少 src\app\52-Hotkeys.ps1' }
+$hkPs = if (Test-Path -LiteralPath $hkMod) { Get-Content $hkMod -Raw -Encoding UTF8 } else { '' }
+foreach ($fn in 'Register-PerfHotkeys', 'Unregister-PerfHotkeys', 'Invoke-HotkeyCommand', 'Get-HotkeyVk', 'Flash-PerfTaskbar') {
+    if ($hkPs -notmatch [regex]::Escape('function ' + $fn)) { Bad "52-Hotkeys.ps1 缺函数 $fn" }
+}
+if ($hkPs -notmatch 'RegisterHotKey') { Bad '52-Hotkeys.ps1 未用 RegisterHotKey（不许用全局键盘钩子）' }
+if ($hkPs -match 'SetWindowsHookEx|GetAsyncKeyState') { Bad '52-Hotkeys.ps1 不许用键盘钩子/轮询键状态' }
+# 红线：热键回调里不能直接开采集（参数会与界面走岔），只能通知前端
+if ($hkPs -notmatch "type = 'hotkey'") { Bad '热键回调必须只发 hotkey 消息给前端' }
+if ($hkPs -match 'Start-Capture') { Bad '热键回调不得直接调用 Start-Capture' }
+if ($entryPsX -notmatch [regex]::Escape('52-Hotkeys.ps1')) { Bad '入口未加载 52-Hotkeys.ps1' }
+foreach ($cmd in 'setHotkeys', 'getHotkeys') {
+    if ($capPs -notmatch [regex]::Escape("'" + $cmd + "'")) { Bad "命令白名单缺 $cmd" }
+}
+if ($capPs -notmatch 'Register-PerfHotkeys') { Bad 'ready 时没有按配置注册热键' }
+if ((Get-Content (Join-Path $root 'src\app\90-Main.ps1') -Raw -Encoding UTF8) -notmatch 'Unregister-PerfHotkeys') { Bad '关闭窗口时没有注销热键' }
+if ($capPs -notmatch 'Flash-PerfTaskbar 3') { Bad '采集结束没有任务栏提醒' }
+# 前端：再采一次 / 每游戏记忆 / 热键开关
+if ($idx -notmatch 'id="btnRerun"') { Bad 'index.html 缺「再采一次」按钮' }
+if ($idx -notmatch 'id="chkHotkeys"') { Bad '设置页缺热键开关' }
+$mainJs = Get-Content (Join-Path $root 'ui\js\main.js') -Raw -Encoding UTF8
+foreach ($need in 'GAME_PREFS_KEY', 'applyGamePref', 'PerfHotkeyAction', 'btnRerun') {
+    if ($mainJs -notmatch [regex]::Escape($need)) { Bad "main.js 缺 $need" }
+}
+if ((Get-Content (Join-Path $root 'ui\js\bridge.js') -Raw -Encoding UTF8) -notmatch "'hotkey'") { Bad 'bridge.js 没有分发 hotkey 消息' }
+if ((Get-Content (Join-Path $root 'ui\js\settings.js') -Raw -Encoding UTF8) -notmatch 'PerfHotkeysUI') { Bad 'settings.js 没有热键状态绑定' }
+foreach ($k in 'capture.rerun', 'settings.hotkeys', 'settings.hotkeyStart') {
+    $n = ([regex]::Matches($i18nText, [regex]::Escape("'" + $k + "'"))).Count
+    if ($n -lt 3) { Bad "i18n 的 $k 只有 $n 种语言（应 3）" }
+}
+if (-not (Test-Path (Join-Path $root 'tests\probe-hotkeys.ps1'))) { Bad '缺少 tests\probe-hotkeys.ps1' }
+
 $rtJs = Get-Content (Join-Path $root 'ui\js\realtime.js') -Raw -Encoding UTF8
 foreach ($need in 'window.PerfRealtime', '__refreshRealtime', 'metricsStart', 'metricsStop', 'is-na', 'FIELDS') {
     if ($rtJs -notmatch [regex]::Escape($need)) { Bad "realtime.js 缺 $need" }

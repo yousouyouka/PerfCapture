@@ -3,6 +3,48 @@
 /* ── 事件绑定 ── */
 /* 主题切换已移到设置页；顶栏不再有全局设置入口 */
 
+
+/* ── 每游戏记忆（2.1.16 / F3-2）──
+   只记「上次怎么采的」：秒数、勾选项、预热。存 localStorage（界面偏好，与采集数据无关）；
+   读不到或结构不对就当没有记录，不抛错、不覆盖用户当前设置。 */
+const GAME_PREFS_KEY = 'perf.gamePrefs';
+function loadGamePrefs() {
+  try {
+    const o = JSON.parse(localStorage.getItem(GAME_PREFS_KEY) || '{}');
+    return (o && typeof o === 'object') ? o : {};
+  } catch (e) { return {}; }
+}
+function saveGamePref(name, pref) {
+  if (!name || !pref) return;
+  const all = loadGamePrefs();
+  all[name] = pref;
+  try { localStorage.setItem(GAME_PREFS_KEY, JSON.stringify(all)); } catch (e) { }
+}
+/** 把上次该游戏的参数套回界面；没有记录就什么都不做 */
+function applyGamePref(name) {
+  const pref = name ? loadGamePrefs()[name] : null;
+  if (!pref) return;
+  if (Number.isFinite(Number(pref.seconds)) && pref.seconds >= 10) $('#seconds').value = pref.seconds;
+  if (Array.isArray(pref.checked)) {
+    $$('.collect-grid input').forEach((el) => {
+      if (!el.disabled) el.checked = pref.checked.indexOf(el.dataset.skip) >= 0;
+    });
+  }
+}
+function currentPref() {
+  return {
+    seconds: parseInt($('#seconds').value, 10) || 180,
+    checked: $$('.collect-grid input').filter((el) => el.checked && !el.disabled).map((el) => el.dataset.skip),
+  };
+}
+window.PerfApplyGamePrefs = applyGamePref;
+/* 热键动作：宿主只负责报「按了哪个键」，这里复用按钮自己的校验与忙碌判断 */
+window.PerfHotkeyAction = function (action) {
+  const btn = action === 'stop' ? $('#btnStop') : $('#btnStart');
+  if (btn && !btn.disabled && !btn.hidden) { btn.click(); return; }
+  if (action === 'stop' && $('#btnStop') && !$('#btnStop').hidden) $('#btnStop').click();
+};
+
 $('#btnProc').addEventListener('click', (e) => {
   const anchor = e.currentTarget;
   // 同一个按钮再点一次 = 收起；这条必须放在"列表为空就刷新"之前
@@ -14,6 +56,7 @@ $('#btnProc').addEventListener('click', (e) => {
     state.selectedName = it.name;
     state.selectedText = it.text;
     $('#procText').textContent = it.text;
+    applyGamePref(it.name);
     addLog('> 目标进程: ' + it.name + ' (PID ' + it.pid + ')', 'ln-accent');
   }, active);
 });
@@ -37,6 +80,7 @@ $('#btnStart').addEventListener('click', () => {
   const skip = $$('.collect-grid input').filter(el => !el.checked).map(el => el.dataset.skip).join(',');
   const warmup = (typeof currentWarmup === 'function') ? currentWarmup() : 0;
   saveSettings();
+  saveGamePref(state.selectedName || state.selectedText, currentPref());
   setBusy(true);
   setProgress(0);
   termLines.length = 0;
@@ -122,5 +166,9 @@ if (window.matchMedia) {
 setLanguage((state.language || 'zh-CN'));
 if (window.__syncSettingsUI) window.__syncSettingsUI(state.themeMode, LANG);
 applyTranslations();
+
+/* 再采一次：参数与目标都还在界面上，等同于点一次开始（校验与忙碌判断走同一段代码） */
+const btnRerun = document.getElementById('btnRerun');
+if (btnRerun) btnRerun.addEventListener('click', () => { if (!btnRerun.disabled) $('#btnStart').click(); });
 
 send({ cmd: 'ready' });

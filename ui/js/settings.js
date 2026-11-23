@@ -56,3 +56,37 @@
     if (lang) syncLangButtons(lang);
   };
 })();
+
+/* ── 全局热键（2.1.16）──
+   状态以宿主为准：注册成功与否由宿主回传，前端不自己猜。
+   这里只做「开关」与「显示组合键」，不提供自定义键位——避免用户编出与输入法冲突的组合。 */
+(function initHotkeys() {
+  const chk = document.getElementById('chkHotkeys');
+  const sLab = document.getElementById('hkStartLabel');
+  const eLab = document.getElementById('hkStopLabel');
+  const failRow = document.getElementById('hkFailRow');
+  const failTxt = document.getElementById('hkFailText');
+
+  function update(msg) {
+    if (!msg) return;
+    if (chk && msg.enabled != null) chk.checked = !!msg.enabled;
+    if (sLab && msg.start) sLab.textContent = msg.start;
+    if (eLab && msg.stop) eLab.textContent = msg.stop;
+    if (failRow && failTxt) {
+      const bad = msg.ok === false && msg.fail;
+      failRow.hidden = !bad;
+      failTxt.textContent = bad ? msg.fail : '';
+    }
+  }
+
+  window.PerfHotkeysUI = {
+    update,
+    request: () => { if (typeof send === 'function') send({ cmd: 'getHotkeys' }); },
+  };
+
+  if (chk) {
+    chk.addEventListener('change', () => {
+      if (typeof send === 'function') send({ cmd: 'setHotkeys', enabled: chk.checked });
+    });
+  }
+})();

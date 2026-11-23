@@ -8,6 +8,8 @@ $form.Add_FormClosing({
         if ($r -ne 'Yes') { $e.Cancel = $true; return }
         Stop-Capture
     }
+    # 注销全局热键：退出后不该继续占着系统组合键
+    try { if (Get-Command Unregister-PerfHotkeys -ErrorAction SilentlyContinue) { Unregister-PerfHotkeys } } catch { }
     try {
         $script:Cfg.windowW = [int]($form.ClientSize.Width / $script:DpiScale)
         $script:Cfg.windowH = [int]($form.ClientSize.Height / $script:DpiScale)

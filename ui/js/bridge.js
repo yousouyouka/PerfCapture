@@ -44,6 +44,7 @@ function handleMessage(msg) {
       applyTheme(s.theme || 'system');
       if (s.language) { state.language = s.language; setLanguage(s.language); }
       if (window.PerfUpdate) window.PerfUpdate.init(s.updateCheck);
+      if (window.PerfHotkeysUI) window.PerfHotkeysUI.request();
       if (msg.procs) setProcs(msg.procs);
       /* 扩展中心状态随 init 下发；宿主侧是唯一事实来源，前端不再只靠本地镜像 */
       if (msg.extensions && window.PerfExtensionsUI) window.PerfExtensionsUI.apply(msg.extensions, msg.fpsSource);
@@ -55,6 +56,8 @@ function handleMessage(msg) {
     case 'exportable': {
       $('#btnExport').disabled = !msg.value;
       $('#btnExportPng').disabled = !msg.value;
+      // 有报告才有「再采一次」的意义（否则等于普通开始）
+      const rr = $('#btnRerun'); if (rr) rr.disabled = !msg.value;
       break;
     }
     case 'pngDone': {
@@ -81,6 +84,9 @@ function handleMessage(msg) {
     case 'extensionState': if (window.PerfExtensionsUI) window.PerfExtensionsUI.state(msg); break;
     case 'extensionError': if (window.PerfExtensionsUI) window.PerfExtensionsUI.error(msg); break;
     case 'extensionProgress': if (window.PerfExtensionsUI) window.PerfExtensionsUI.progress(msg); break;
+    /* 2.1.16 全局热键：宿主只通知「按了哪个键」，真正的开始/停止仍走界面同一条路径 */
+    case 'hotkey': if (window.PerfHotkeyAction) window.PerfHotkeyAction(msg.action); break;
+    case 'hotkeys': if (window.PerfHotkeysUI) window.PerfHotkeysUI.update(msg); break;
     // 2.1.8：手动导入——宿主弹完文件框后把选中的路径回传，前端据此发起导入
     case 'extensionPackagePicked': if (window.PerfExtensionsUI) window.PerfExtensionsUI.picked(msg); break;
     case 'extensionPackagePickCancelled': if (window.PerfExtensionsUI) window.PerfExtensionsUI.pickCancelled(msg); break;

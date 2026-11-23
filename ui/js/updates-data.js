@@ -19,6 +19,16 @@ window.PerfUpdateAreas = ['capture', 'realtime', 'other'];
 
 window.PerfUpdates = [
   {
+    date: '2026-11-23', version: '2.1.16',
+    title: '全局热键、每游戏记忆与采集结束提醒',
+    items: [
+      ['ux', '游戏里按 Ctrl+Alt+F9 开始、Ctrl+Alt+F10 停止，不用切回工具；组合键被别的程序占用时会明确提示。', 'realtime'],
+      ['feature', '按游戏记住上次的采集秒数与采集项，下次选中同一个游戏自动套回；报告出来后可以「再采一次」。', 'capture'],
+      ['ux', '采集结束时闪三下任务栏提醒，不用一直盯着窗口。', 'realtime'],
+      ['ui', '设置页新增「快捷键」卡，可以关掉热键，也能看到当前绑定的是哪组键。', 'other']
+    ]
+  },
+  {
     date: '2026-11-23', version: '2.1.15',
     title: '报告新增卡顿时刻：看清楚卡的那一下在干什么',
     items: [

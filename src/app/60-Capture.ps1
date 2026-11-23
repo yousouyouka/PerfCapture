@@ -11,7 +11,9 @@ $script:KnownCommands = @('ready', 'refreshProcs', 'saveSettings', 'openReports'
     # 2.1.8：网络不可达时的手动导入（选包 / 导入）与官方下载页
     'pickExtensionPackage', 'importExtensionPackage', 'openExtensionPage',
     # 2.1.13：历史报告库（列表 / 详情 / 对比 / 打开伴随文件 / 删除）
-    'reportsList', 'reportDetail', 'reportCompare', 'reportOpenFile', 'reportDelete')
+    'reportsList', 'reportDetail', 'reportCompare', 'reportOpenFile', 'reportDelete',
+    # 2.1.16：全局热键设置
+    'setHotkeys', 'getHotkeys')
 
 function Handle-UiMessage($msg) {
     if ($null -eq $msg -or -not $msg.cmd) { return }
@@ -45,6 +47,12 @@ function Handle-UiMessage($msg) {
         catch { Write-AppLog ('扩展命令执行失败: ' + $_.Exception.Message) 'WARN' }
         return
     }
+    # 全局热键命令（宿主侧在 52-Hotkeys.ps1）
+    if ($msg.cmd -in @('setHotkeys', 'getHotkeys')) {
+        try { Invoke-HotkeyCommand $msg }
+        catch { Write-AppLog ('热键命令执行失败: ' + $_.Exception.Message) 'WARN' }
+        return
+    }
     # 历史报告库命令（宿主侧在 62-Reports.ps1）
     if ($msg.cmd -in @('reportsList', 'reportDetail', 'reportCompare', 'reportOpenFile', 'reportDelete')) {
         try { Invoke-ReportCommand $msg }
@@ -66,6 +74,10 @@ function Handle-UiMessage($msg) {
                 $init.extensions = @(Get-ExtensionStates)
                 $init.fpsSource = $script:ActiveFpsSource
                 Send-ToUi $init
+                # 全局热键（2.1.16）：UI 就绪即按配置注册；关闭时会注销
+                if (Get-Command Register-PerfHotkeys -ErrorAction SilentlyContinue) {
+                    try { [void](Register-PerfHotkeys) } catch { Write-AppLog ('注册热键失败: ' + $_.Exception.Message) 'WARN' }
+                }
                 # 上次退出时浮窗是开着的就恢复（位置/透明度都从配置读）
                 if (Get-Command Restore-OverlayIfNeeded -ErrorAction SilentlyContinue) { Restore-OverlayIfNeeded }
                 Set-TitleBarDark ($script:Cfg.theme -eq 'dark')
@@ -320,6 +332,8 @@ $script:Timer.Add_Tick({
 
     if ($script:Job.State -ne 'Running') {
         $script:Timer.Stop()
+        # 结束提醒：先闪任务栏（不抢焦点），最小化时再恢复窗口
+        if (Get-Command Flash-PerfTaskbar -ErrorAction SilentlyContinue) { try { Flash-PerfTaskbar 3 } catch { } }
         if ($form.WindowState -eq 'Minimized') { $form.WindowState = 'Normal'; $form.Activate() }
         Send-ToUi @{ type = 'progress'; pct = 100 }
 

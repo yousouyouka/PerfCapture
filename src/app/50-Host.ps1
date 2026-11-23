@@ -96,6 +96,7 @@ $script:LastJson = $null
 $script:LastRun = ''
 
 $form.Add_Shown({
+    try { Write-BootMark '窗口已显示' } catch { }
     try {
         $udfRoot = Join-Path $env:LOCALAPPDATA 'PerfCapture\WebView2'
         if (-not (Test-Path $udfRoot)) { New-Item -ItemType Directory -Path $udfRoot -Force | Out-Null }
@@ -126,6 +127,7 @@ $form.Add_Shown({
         }
         $coreEnv = $envTask.Result
         Write-AppLog ('WebView2 浏览器版本: ' + $coreEnv.BrowserVersionString)
+        try { Write-BootMark 'WebView2 环境就绪' } catch { }
         $script:WV2Version = [string]$coreEnv.BrowserVersionString
 
         $task = $wv.EnsureCoreWebView2Async($coreEnv)
@@ -163,8 +165,9 @@ $form.Add_Shown({
         # WebView2 UDF 是持久的，同 URL 的 index.html / 脚本会被旧缓存拦住：
         # 扩展中心上线后仍显示「暂无扩展」就是缓存命中了批次 B 的空数据镜像。
         # 查询串与 index.html 内扩展相关 css/js 的 ?v= 保持一致；改这些文件后同步递增。
-        $script:UiCacheKey = '2.2.1'
+        $script:UiCacheKey = '2.2.2'
         $script:Core.Navigate('https://perf.local/ui/index.html?v=' + $script:UiCacheKey)
+        try { Write-BootMark '页面已提交加载' } catch { }
 
         $script:Core.add_WebMessageReceived({
             param($sender, $e)

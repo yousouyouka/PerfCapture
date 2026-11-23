@@ -498,7 +498,7 @@ body.is-col-resizing * { cursor: col-resize !important; user-select: none !impor
   padding-right: 0.4rem;
 }
 #capHelpModal .upd-modal-actions { flex: 0 0 auto; margin-top: 0.6rem; }
-/* 全局热键编辑（2.2.1：从设置页移入采集设置卡） */
+/* 全局热键编辑（2.2.2：按钮捕获，去掉修饰键勾选与下拉） */
 .hotkey-block { display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.5rem; }
 .hotkey-rows { display: flex; flex-direction: column; gap: 0.35rem; }
 .hotkey-row {
@@ -508,5 +508,12 @@ body.is-col-resizing * { cursor: col-resize !important; user-select: none !impor
 }
 .hotkey-row > .field-label { flex: none; width: 5rem; }
 .hotkey-row .check { margin: 0; }
-.hotkey-row select.input-num { width: 5.5rem; }
+.hk-capture-btn { min-width: 9.5rem; justify-content: center; font-variant-numeric: tabular-nums; }
+.hk-capture-btn.is-capturing {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.hk-capture-btn.is-off { color: var(--muted); }
+.hk-hint { color: var(--muted); }
 .hk-fail { color: #e07a5f; }

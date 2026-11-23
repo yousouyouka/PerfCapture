@@ -3,6 +3,8 @@
 function New-DefaultConfig {
     [pscustomobject]@{
         theme = 'system'; seconds = 180; minimize = $true; sound = $true; skip = ''
+        # 关闭窗口时缩小到托盘 / 开机自启（2.2.2）：默认都关闭，开关即生效
+        closeToTray = $false; autoStart = $false
         # 采集预设：首次安装默认「专业」档（180 秒 / 预热 5 秒 / 全部采集项），与 capture-options.json 的 pro 一致
         # customBase = 自定义是从哪一档改出来的（界面显示「自定义 · 基于专业」用）
         preset = 'pro'; customBase = 'pro'; warmup = 5
@@ -59,6 +61,8 @@ function Set-ConfigValue {
         }
         'minimize' { if ($Value -is [bool]) { $script:Cfg.minimize = $Value } }
         'sound'    { if ($Value -is [bool]) { $script:Cfg.sound = $Value } }
+        'closeToTray' { if ($Value -is [bool]) { $script:Cfg.closeToTray = $Value } }
+        'autoStart'   { if ($Value -is [bool]) { $script:Cfg.autoStart = $Value; Set-PerfAutoStart $Value } }
         'skip'     { if ($Value -is [string]) { $script:Cfg.skip = $Value } }
         'preset'   {
             # 只接受清单里存在的档位；空串 = 自定义
@@ -119,6 +123,48 @@ function Set-ConfigValue {
     }
 }
 
+# ---------- 开机自启（2.2.2）----------
+# 只写 HKCU 的 Run 键（无需管理员、不装服务、不建计划任务）。
+# 配置是唯一事实来源：启动时按配置校正一次，用户切换开关时立即生效。
+function Get-PerfAutoStartCommand {
+    $candidates = @(
+        (Join-Path $script:Root 'PerfCapture.exe'),
+        (Join-Path $env:LOCALAPPDATA 'Programs\PerfCapture\PerfCapture.exe')
+    )
+    foreach ($p in $candidates) {
+        if ($p -and (Test-Path -LiteralPath $p)) { return ('"' + $p + '" --autostart') }
+    }
+    return $null
+}
+
+function Set-PerfAutoStart {
+    param([bool]$Enabled)
+    $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+    try {
+        if ($Enabled) {
+            $cmd = Get-PerfAutoStartCommand
+            if (-not $cmd) {
+                Write-AppLog '开机自启：未找到 PerfCapture.exe（开发态），未写入注册表' 'WARN'
+                return
+            }
+            if (-not (Test-Path -LiteralPath $runKey)) { New-Item -Path $runKey -Force | Out-Null }
+            Set-ItemProperty -Path $runKey -Name 'PerfCapture' -Value $cmd -Type String
+            Write-AppLog ('开机自启已开启: ' + $cmd)
+        } else {
+            if (Test-Path -LiteralPath $runKey) {
+                Remove-ItemProperty -Path $runKey -Name 'PerfCapture' -ErrorAction SilentlyContinue
+            }
+            Write-AppLog '开机自启已关闭'
+        }
+    } catch {
+        Write-AppLog ('开机自启设置失败: ' + $_.Exception.Message) 'WARN'
+    }
+}
+
+function Sync-PerfAutoStart {
+    Set-PerfAutoStart ([bool]$script:Cfg.autoStart)
+}
+
 # ---------- 载入 ----------
 $script:Cfg = New-DefaultConfig
 if (Test-Path $script:CfgPath) {
@@ -128,7 +174,8 @@ if (Test-Path $script:CfgPath) {
         # 以前只写不读，重启后又被默认值覆盖（用户选的档位与预热时长静默丢失）。
         foreach ($k in 'theme', 'language', 'seconds', 'minimize', 'sound', 'skip',
                        'preset', 'customBase', 'warmup', 'lastPid', 'windowW', 'windowH',
-                       'netAlertDayMB', 'netAlertMonthMB', 'netReverseDns') {
+                       'netAlertDayMB', 'netAlertMonthMB', 'netReverseDns',
+                       'closeToTray', 'autoStart') {
             if ($null -ne $j.$k) { Set-ConfigValue $k $j.$k }
         }
         # 实时监控目标进程（新增键，老配置没有就用默认 0 = 跟随前台）

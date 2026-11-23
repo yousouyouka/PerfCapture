@@ -247,6 +247,8 @@
   line-height: 1.45;
 }
 .setting-label { display: flex; flex-direction: column; gap: 0.18rem; min-width: 0; }
+/* 设置项右侧的勾选组（2.2.2：关闭到托盘 / 开机自启） */
+.setting-checks { display: flex; flex-direction: column; gap: 0.4rem; align-items: flex-start; }
 .setting-label strong { font-weight: 400; color: var(--text-strong); font-size: 0.9rem; }
 .setting-label small { color: var(--faint); font-size: 0.74rem; }
 /* 关于页的联系方式：竖向堆叠；值可一键全选（.about-v 继承 user-select: all），复制不用拖选 */

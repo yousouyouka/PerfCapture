@@ -12,6 +12,7 @@
 $script:HotkeyIdStart = 0x5043   # 'PC'
 $script:HotkeyIdStop = 0x5044
 $script:HotkeyFilter = $null
+$script:HotkeyHwnd = [IntPtr]::Zero
 $script:HotkeyRegistered = @()
 
 $hotkeyCs = @'
@@ -108,9 +109,17 @@ function Register-PerfHotkeys {
     Unregister-PerfHotkeys
     if ($null -eq $hk -or -not $hk.enabled) { return $false }
 
-    if ($null -eq $script:HotkeyFilter) {
+    # ShowInTaskbar 切换（收起/还原托盘）会重建窗口句柄，旧句柄上的注册随之失效；
+    # 句柄变了就必须换一个新 filter 重新 AddMessageFilter，否则托盘期间热键静默失灵。
+    $hwnd = $form.Handle
+    if ($null -eq $script:HotkeyFilter -or $script:HotkeyHwnd -ne $hwnd) {
+        if ($null -ne $script:HotkeyFilter) {
+            try { [System.Windows.Forms.Application]::RemoveMessageFilter($script:HotkeyFilter) } catch { }
+            $script:HotkeyFilter = $null
+        }
         if (-not ('PerfHotkeyFilter' -as [type])) { Add-Type -TypeDefinition $hotkeyCs -Language CSharp }
-        $script:HotkeyFilter = New-Object PerfHotkeyFilter($form.Handle)
+        $script:HotkeyFilter = New-Object PerfHotkeyFilter($hwnd)
+        $script:HotkeyHwnd = $hwnd
         # 回调里不能直接跑采集（会在消息泵里递归）：交回 UI，由前端走「点开始/停止」同一条路径
         $script:HotkeyFilter.add_Pressed({
             param($sender, $id)

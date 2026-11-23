@@ -21,3 +21,18 @@ function Write-AppLog {
         Add-Content -Path $script:LogFile -Value $line -Encoding UTF8 -ErrorAction Stop
     } catch { }
 }
+
+# ---------- 启动 / 关闭耗时埋点（2.2.2）----------
+# 从进程启动算起（含 launcher 与 PowerShell 自身启动），日志里可以直接对比各阶段耗时。
+$script:ProcT0 = try { (Get-Process -Id $PID).StartTime } catch { $null }
+
+function Get-BootElapsedMs {
+    if (-not $script:ProcT0) { return -1 }
+    return [int]((Get-Date) - $script:ProcT0).TotalMilliseconds
+}
+
+function Write-BootMark([string]$Stage) {
+    Write-AppLog ('启动耗时 · ' + $Stage + ': ' + (Get-BootElapsedMs) + ' ms')
+}
+
+Write-BootMark '宿主模块载入完成'

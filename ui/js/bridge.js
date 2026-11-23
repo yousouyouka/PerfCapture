@@ -34,6 +34,11 @@ function handleMessage(msg) {
       if (monEl) monEl.value = (Number.isFinite(nm) && nm >= 0) ? nm : 0;
       const dnsEl = document.getElementById('chkNetDns');
       if (dnsEl) dnsEl.checked = s.netReverseDns === true;
+      /* 窗口与启动（2.2.2）：默认关闭，只有明确 true 才勾上 */
+      const trayEl = document.getElementById('chkCloseToTray');
+      if (trayEl) trayEl.checked = s.closeToTray === true;
+      const autoEl = document.getElementById('chkAutoStart');
+      if (autoEl) autoEl.checked = s.autoStart === true;
 
       /* 顺序不能反：先按 capture-options.json 渲染出勾选框，再套用配置里保存的 skip。
          反过来的话，新增或改名的采集项会拿到错误状态。 */

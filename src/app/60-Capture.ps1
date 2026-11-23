@@ -68,6 +68,7 @@ function Handle-UiMessage($msg) {
     try {
         switch ($msg.cmd) {
             'ready' {
+                try { Write-BootMark '界面就绪（ready）' } catch { }
                 $procs = Get-ProcessChoices
                 # 采集项清单随 init 下发；清单缺失时不下发该字段，界面自动回退内置清单
                 $init = @{ type = 'init'; settings = $script:Cfg; procs = $procs }
@@ -114,7 +115,8 @@ function Handle-UiMessage($msg) {
                 if ($msg.settings) {
                     # 2.2.1 修正：netAlert / netReverseDns / hotkeys 之前漏在循环里，用户改了不落盘
                     foreach ($k in 'theme', 'language', 'seconds', 'minimize', 'sound', 'skip', 'preset', 'customBase', 'warmup',
-                                   'netAlertDayMB', 'netAlertMonthMB', 'netReverseDns', 'hotkeys') {
+                                   'netAlertDayMB', 'netAlertMonthMB', 'netReverseDns', 'hotkeys',
+                                   'closeToTray', 'autoStart') {
                         Set-ConfigValue $k $msg.settings.$k
                     }
                     Save-Config

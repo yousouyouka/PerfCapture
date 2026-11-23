@@ -8,15 +8,15 @@
 <link rel="stylesheet" href="css/layout.css">
 <link rel="stylesheet" href="css/components.css">
 <link rel="stylesheet" href="css/terminal.css">
-<link rel="stylesheet" href="css/report.css?v=2.2.1">
+<link rel="stylesheet" href="css/report.css?v=2.2.2">
 <link rel="stylesheet" href="css/popup.css">
 <link rel="stylesheet" href="css/updates.css">
 <link rel="stylesheet" href="css/survey.css">
 <!-- 2.1.8：扩展中心相关资源带版本查询，绕开 WebView2 持久 UDF 的旧缓存；后续改这些文件需同步递增查询串。 -->
-<link rel="stylesheet" href="css/extensions.css?v=2.2.1">
-<link rel="stylesheet" href="css/reports.css?v=2.2.1">
+<link rel="stylesheet" href="css/extensions.css?v=2.2.2">
+<link rel="stylesheet" href="css/reports.css?v=2.2.2">
 <link rel="stylesheet" href="css/realtime.css">
-<link rel="stylesheet" href="css/network.css?v=2.2.1">
+<link rel="stylesheet" href="css/network.css?v=2.2.2">
 </head>
 <body>
 <div class="app" id="app">
@@ -92,7 +92,7 @@
           </svg>
           <span class="nav-label" data-i18n="nav.settings">设置</span>
         </button>
-        <div class="sidebar-version" id="sidebarVersion">v2.2.1</div>
+        <div class="sidebar-version" id="sidebarVersion">v2.2.2</div>
       </div>
     </nav>
   </aside>
@@ -144,19 +144,14 @@
                 <div class="hotkey-rows">
                   <div class="hotkey-row">
                     <span class="field-label" data-i18n="settings.hotkeyStart">开始采集</span>
-                    <label class="check"><input id="hkStartCtrl" type="checkbox"><span>Ctrl</span></label>
-                    <label class="check"><input id="hkStartAlt" type="checkbox"><span>Alt</span></label>
-                    <label class="check"><input id="hkStartShift" type="checkbox"><span>Shift</span></label>
-                    <select id="hkStartKey" class="input input-num"></select>
+                    <button id="hkStartBtn" class="btn hk-capture-btn" type="button">Ctrl+Alt+F9</button>
                   </div>
                   <div class="hotkey-row">
                     <span class="field-label" data-i18n="settings.hotkeyStop">停止采集</span>
-                    <label class="check"><input id="hkStopCtrl" type="checkbox"><span>Ctrl</span></label>
-                    <label class="check"><input id="hkStopAlt" type="checkbox"><span>Alt</span></label>
-                    <label class="check"><input id="hkStopShift" type="checkbox"><span>Shift</span></label>
-                    <select id="hkStopKey" class="input input-num"></select>
+                    <button id="hkStopBtn" class="btn hk-capture-btn" type="button">Ctrl+Alt+F10</button>
                   </div>
                 </div>
+                <div class="setting-label"><small id="hkCaptureHint" class="hk-hint" data-i18n="settings.hotkeySetHint">点按钮后按下新的组合键（需按 F1–F12，可加 Ctrl / Alt / Shift）；Esc 取消</small></div>
                 <div class="setting-label"><small id="hkFailText" class="hk-fail" hidden></small></div>
                 <div class="setting-label"><small data-i18n="settings.hotkeysHint2">默认关闭；开启但未设置时使用默认键（开始 Ctrl+Alt+F9 / 停止 Ctrl+Alt+F10）；组合键被其它程序占用时会在这里提示</small></div>
               </div>
@@ -300,6 +295,16 @@
               <button type="button" data-lang="ja-JP">日本語</button>
             </div>
           </div>
+          <div class="setting-block">
+            <div class="setting-label">
+              <strong data-i18n="settings.behavior">窗口与启动</strong>
+              <small data-i18n="settings.behaviorHint">只影响本机行为，可随时改回</small>
+            </div>
+            <div class="setting-checks">
+              <label class="check"><input id="chkCloseToTray" type="checkbox"><span data-i18n="settings.closeToTray">关闭窗口时缩小到托盘</span></label>
+              <label class="check"><input id="chkAutoStart" type="checkbox"><span data-i18n="settings.autoStart">开机时自动启动</span></label>
+            </div>
+          </div>
         </section>
 
         <section class="card">
@@ -307,7 +312,7 @@
           <div class="setting-block">
             <div class="setting-label">
               <strong>PerfCapture</strong>
-              <small>v2.2.1 · PresentMon ETW · 默认零注入</small>
+              <small>v2.2.2 · PresentMon ETW · 默认零注入</small>
             </div>
           </div>
 
@@ -542,17 +547,17 @@
             <span class="nt-big" id="netTotalSent">—</span>
           </div>
           <div class="net-total-cell">
-            <span class="nt-label" data-i18n="net.today">今日</span>
-            <span class="nt-big" id="netToday">—</span>
-          </div>
-          <div class="net-total-cell">
-            <span class="nt-label" data-i18n="net.month">本月</span>
-            <span class="nt-big" id="netMonth">—</span>
-          </div>
-          <div class="net-total-cell">
             <span class="nt-label" data-i18n="net.totalAccLabel">累计（自计数器重置）</span>
             <span class="nt-big" id="netTotalAcc">—</span>
             <span class="nt-label" id="netTotalScope"></span>
+          </div>
+          <div class="net-total-cell is-today">
+            <span class="nt-label" data-i18n="net.today">今日</span>
+            <span class="nt-big" id="netToday">—</span>
+          </div>
+          <div class="net-total-cell is-month">
+            <span class="nt-label" data-i18n="net.month">本月</span>
+            <span class="nt-big" id="netMonth">—</span>
           </div>
         </div>
 
@@ -752,24 +757,24 @@
 
 <script src="js/util.js"></script>
 <!-- 与 css/extensions.css 同一缓存版本；宿主 Navigate 也带同一查询串。 -->
-<script src="js/i18n.js?v=2.2.1"></script>
+<script src="js/i18n.js?v=2.2.2"></script>
 <script src="js/capture-options.js"></script>
-<script src="js/bridge.js?v=2.2.1"></script>
+<script src="js/bridge.js?v=2.2.2"></script>
 <script src="js/theme.js"></script>
 <script src="js/popup.js"></script>
 <script src="js/capture-help.js"></script>
 <script src="js/terminal.js"></script>
 <script src="js/ui-state.js"></script>
-<script src="js/report.js?v=2.2.1"></script>
+<script src="js/report.js?v=2.2.2"></script>
 <script src="js/updates-data.js"></script>
 <script src="js/updates.js"></script>
 <script src="js/survey-data.js"></script>
 <script src="js/survey.js"></script>
-<script src="js/extensions-data.js?v=2.2.1"></script>
-<script src="js/extensions.js?v=2.2.1"></script>
-<script src="js/realtime.js?v=2.2.1"></script>
-<script src="js/network.js?v=2.2.1"></script>
-<script src="js/reports.js?v=2.2.1"></script>
+<script src="js/extensions-data.js?v=2.2.2"></script>
+<script src="js/extensions.js?v=2.2.2"></script>
+<script src="js/realtime.js?v=2.2.2"></script>
+<script src="js/network.js?v=2.2.2"></script>
+<script src="js/reports.js?v=2.2.2"></script>
 <script src="js/update.js"></script>
 <script src="js/collapse.js"></script>
 <script src="js/split.js"></script>

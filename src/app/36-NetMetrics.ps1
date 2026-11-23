@@ -493,6 +493,23 @@ function Format-NetRateText([double]$Bps) {
     return ('{0:0} B/s' -f $Bps)
 }
 
+# 从托盘还原主窗口（左键 / 右键菜单共用）。
+# ShowInTaskbar 会被重建窗口句柄，还原后必须重新注册热键，否则托盘期间热键失效。
+function Restore-PerfWindowFromTray {
+    try {
+        $f = $script:MainForm
+        if (-not $f) { return }
+        $f.ShowInTaskbar = $true
+        $f.Show()
+        $f.WindowState = 'Normal'
+        $f.Activate()
+        try { $f.TopMost = $true; $f.TopMost = $false } catch { }
+        if (Get-Command Register-PerfHotkeys -ErrorAction SilentlyContinue) {
+            try { [void](Register-PerfHotkeys) } catch { }
+        }
+    } catch { }
+}
+
 function Initialize-NetTray {
     if ($script:NetTray) { return }
     try {
@@ -503,16 +520,23 @@ function Initialize-NetTray {
             if (Test-Path $ico) { $tray.Icon = New-Object System.Drawing.Icon($ico) }
         } catch { }
         $tray.Text = 'PerfCapture'
+        # 右键菜单：收起后这是唯一可见入口，必须能还原与真正退出
+        $menu = New-Object System.Windows.Forms.ContextMenuStrip
+        $miShow = New-Object System.Windows.Forms.ToolStripMenuItem('显示主界面')
+        $miShow.Add_Click({ Restore-PerfWindowFromTray })
+        [void]$menu.Items.Add($miShow)
+        [void]$menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator))
+        $miExit = New-Object System.Windows.Forms.ToolStripMenuItem('退出')
+        $miExit.Add_Click({
+            $script:ForceExit = $true
+            try { if ($script:MainForm) { $script:MainForm.Close() } } catch { }
+        })
+        [void]$menu.Items.Add($miExit)
+        $tray.ContextMenuStrip = $menu
         $tray.Add_MouseClick({
             param($s, $e)
             if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
-                try {
-                    $f = $script:MainForm
-                    if ($f) {
-                        $f.Show(); $f.WindowState = 'Normal'; $f.Activate()
-                        try { $f.TopMost = $true; $f.TopMost = $false } catch { }
-                    }
-                } catch { }
+                Restore-PerfWindowFromTray
             }
         })
         $script:NetTray = $tray

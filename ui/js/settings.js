@@ -41,6 +41,12 @@
     });
   }
 
+  /* 窗口与启动（2.2.2）：关闭到托盘 / 开机自启，切换即保存并即时生效 */
+  ['chkCloseToTray', 'chkAutoStart'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', () => { if (typeof saveSettings === 'function') saveSettings(); });
+  });
+
   // 诊断包：只把命令丢给宿主，宿主弹保存对话框并打包日志 + 环境快照
   const diagBtn = document.getElementById('btnExportDiag');
   if (diagBtn) {
@@ -57,62 +63,96 @@
   };
 })();
 
-/* ── 全局热键（2.2.1）：放在采集设置里，可自定义键位 ──
-   状态以宿主为准：注册成功与否由宿主回传，前端不自己猜。
-   默认关闭；开启但未设置时宿主使用默认组合键（开始 Ctrl+Alt+F9 / 停止 Ctrl+Alt+F10）。 */
+/* ── 全局热键（2.2.2）：按钮捕获 ──
+   点「开始采集 / 停止采集」按钮进入捕获态，直接按下组合键即完成设置；
+   按钮平时显示当前生效的组合键。默认关闭；开启但未设置时宿主用默认键。
+   捕获只接受 F1–F12 + Ctrl/Alt/Shift（宿主 VK 表一致），其它键给出明确提示。 */
 (function initHotkeys() {
   const chk = document.getElementById('chkHotkeys');
   const failTxt = document.getElementById('hkFailText');
-  const rows = [
-    { side: 'start', ctrl: 'hkStartCtrl', alt: 'hkStartAlt', shift: 'hkStartShift', key: 'hkStartKey' },
-    { side: 'stop', ctrl: 'hkStopCtrl', alt: 'hkStopAlt', shift: 'hkStopShift', key: 'hkStopKey' }
-  ];
-  const KEYS = ['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12'];
+  const hintEl = document.getElementById('hkCaptureHint');
+  const btns = {
+    start: document.getElementById('hkStartBtn'),
+    stop: document.getElementById('hkStopBtn')
+  };
+  if (!chk || !btns.start || !btns.stop) return;
 
-  // 键位下拉框：F1–F12（避开与输入法/组合键冲突的组合，见 2.1.16 规则）
-  rows.forEach((r) => {
-    const sel = document.getElementById(r.key);
-    if (!sel || sel.options.length) return;
-    KEYS.forEach((k) => {
-      const o = document.createElement('option');
-      o.value = k; o.textContent = k;
-      sel.appendChild(o);
-    });
-  });
+  const DEFAULTS = {
+    enabled: false,
+    start: { ctrl: true, alt: true, shift: false, key: 'F9' },
+    stop: { ctrl: true, alt: true, shift: false, key: 'F10' }
+  };
+  let cfg = {
+    enabled: DEFAULTS.enabled,
+    start: Object.assign({}, DEFAULTS.start),
+    stop: Object.assign({}, DEFAULTS.stop)
+  };
+  let capturing = null;
+  const hintDefault = hintEl ? hintEl.textContent : '';
 
-  function readSide(r) {
-    return {
-      ctrl: document.getElementById(r.ctrl).checked,
-      alt: document.getElementById(r.alt).checked,
-      shift: document.getElementById(r.shift).checked,
-      key: document.getElementById(r.key).value || 'F9'
-    };
+  function label(c) {
+    const parts = [];
+    if (c.ctrl) parts.push('Ctrl');
+    if (c.alt) parts.push('Alt');
+    if (c.shift) parts.push('Shift');
+    parts.push(String(c.key || 'F9').toUpperCase());
+    return parts.join('+');
   }
-  function writeSide(r, c) {
-    if (!c) return;
-    document.getElementById(r.ctrl).checked = !!c.ctrl;
-    document.getElementById(r.alt).checked = !!c.alt;
-    document.getElementById(r.shift).checked = !!c.shift;
-    const sel = document.getElementById(r.key);
-    const k = String(c.key || '').toUpperCase();
-    if (sel && KEYS.includes(k)) sel.value = k;
+
+  function render() {
+    btns.start.textContent = label(cfg.start);
+    btns.stop.textContent = label(cfg.stop);
+    btns.start.classList.toggle('is-off', !cfg.enabled);
+    btns.stop.classList.toggle('is-off', !cfg.enabled);
+  }
+
+  function hintText(key, fallback) {
+    return (typeof t === 'function') ? t(key, fallback) : fallback;
+  }
+
+  function setHint(text) {
+    if (!hintEl) return;
+    /* 恢复默认文案必须走 t()：缓存的是页面初始中文，切到英/日后不能退回去 */
+    hintEl.textContent = text || hintText('settings.hotkeySetHint', hintDefault);
+  }
+
+  function endCapture() {
+    if (capturing && btns[capturing]) btns[capturing].classList.remove('is-capturing');
+    capturing = null;
+    setHint('');
+  }
+
+  function startCapture(side) {
+    if (capturing === side) { endCapture(); return; }
+    endCapture();
+    if (!btns[side]) return;
+    capturing = side;
+    btns[side].classList.add('is-capturing');
+    setHint(hintText('settings.hotkeyPress', '请按下新的组合键…（Esc 取消）'));
   }
 
   /* init 下发 s.hotkeys（enabled + start/stop 的 ctrl/alt/shift/key） */
   function apply(hk) {
     if (!hk) return;
-    if (chk && hk.enabled != null) chk.checked = !!hk.enabled;
-    rows.forEach((r) => writeSide(r, hk[r.side]));
+    cfg.enabled = !!hk.enabled;
+    ['start', 'stop'].forEach((side) => {
+      const v = hk[side];
+      if (!v) return;
+      const key = String(v.key || '').toUpperCase();
+      if (!/^F([1-9]|1[0-2])$/.test(key)) return;
+      cfg[side] = { ctrl: !!v.ctrl, alt: !!v.alt, shift: !!v.shift, key };
+    });
+    chk.checked = cfg.enabled;
+    render();
   }
 
   function update(msg) {
-    /* 宿主回执（注册成功/失败）——旧消息只有展示文本，仅用于失败提示 */
+    /* 宿主回执（注册成功/失败）——失败红字必须能清除，不能一直挂着 */
     if (!msg || !failTxt) return;
     if (msg.ok === false && msg.fail) {
       failTxt.hidden = false;
       failTxt.textContent = msg.fail;
     } else if (msg.ok === true) {
-      /* 冲突解决后要把红字清掉，不能让它一直挂着 */
       failTxt.hidden = true;
       failTxt.textContent = '';
     }
@@ -122,18 +162,51 @@
     if (typeof send !== 'function') return;
     send({
       cmd: 'setHotkeys',
-      enabled: !!(chk && chk.checked),
-      start: readSide(rows[0]),
-      stop: readSide(rows[1])
+      enabled: cfg.enabled,
+      start: Object.assign({}, cfg.start),
+      stop: Object.assign({}, cfg.stop)
     });
   }
 
-  window.PerfHotkeysUI = { update, apply, request: () => { if (typeof send === 'function') send({ cmd: 'getHotkeys' }); } };
+  function value() {
+    return {
+      enabled: cfg.enabled,
+      start: Object.assign({}, cfg.start),
+      stop: Object.assign({}, cfg.stop)
+    };
+  }
 
-  const inputs = ['chkHotkeys', 'hkStartCtrl', 'hkStartAlt', 'hkStartShift', 'hkStartKey',
-    'hkStopCtrl', 'hkStopAlt', 'hkStopShift', 'hkStopKey'];
-  inputs.forEach((id) => {
-    const el = document.getElementById(id);
-    if (el) el.addEventListener('change', push);
+  window.PerfHotkeysUI = {
+    update,
+    apply,
+    value,
+    request: () => { if (typeof send === 'function') send({ cmd: 'getHotkeys' }); }
+  };
+
+  btns.start.addEventListener('click', (e) => { e.preventDefault(); startCapture('start'); });
+  btns.stop.addEventListener('click', (e) => { e.preventDefault(); startCapture('stop'); });
+
+  document.addEventListener('keydown', (e) => {
+    if (!capturing) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.key === 'Escape') { endCapture(); return; }
+    const key = String(e.key || '').toUpperCase();
+    if (!/^F([1-9]|1[0-2])$/.test(key)) {
+      setHint(hintText('settings.hotkeyInvalid', '只支持 F1–F12，可配合 Ctrl / Alt / Shift'));
+      return;
+    }
+    cfg[capturing] = { ctrl: !!e.ctrlKey, alt: !!e.altKey, shift: !!e.shiftKey, key };
+    endCapture();
+    render();
+    push();
+  }, true);
+
+  chk.addEventListener('change', () => {
+    cfg.enabled = !!chk.checked;
+    render();
+    push();
   });
+
+  render();
 })();

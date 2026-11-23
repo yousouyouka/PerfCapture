@@ -46,6 +46,10 @@
   box-shadow: var(--shadow);
   padding: 0.7rem 0.9rem;
 }
+/* 2.2.2：今日必须在本月左侧且同一排。
+   DOM 顺序是 下行/上行/累计/今日/本月，显式定位让第二行固定为「今日 | 本月」。 */
+.net-total-cell.is-today { grid-column: 1; }
+.net-total-cell.is-month { grid-column: 2; }
 .net-total-cell .nt-label {
   font-size: 0.62rem; color: var(--muted);
   display: block; margin-bottom: 0.2rem;

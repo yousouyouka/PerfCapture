@@ -183,7 +183,9 @@ $r6 = Exec @"
   var capPage = document.querySelector('.page[data-page="capture"]');
   var netPage = document.querySelector('.page[data-page="network"]');
   var hk = document.getElementById('chkHotkeys');
-  var sel = document.getElementById('hkStartKey');
+  var startBtn = document.getElementById('hkStartBtn');
+  var stopBtn = document.getElementById('hkStopBtn');
+  var oldInputs = document.getElementById('hkStartKey') || document.getElementById('hkStartCtrl') || document.getElementById('hkStopKey');
   var alertCard = netPage ? netPage.querySelector('.net-alertcard') : null;
   var dayInput = document.getElementById('netAlertDay');
   var dayLabel = dayInput && dayInput.closest('.nt-field') ? dayInput.closest('.nt-field').querySelector('span') : null;
@@ -192,11 +194,13 @@ $r6 = Exec @"
     hkInCapture: !!(capPage && capPage.contains(hk)),
     hkInSettings: !!(setPage && setPage.contains(hk)),
     oldLabels: !!document.getElementById('hkStartLabel') || !!document.getElementById('hkFailRow'),
-    keyOptions: sel ? sel.options.length : 0,
+    startLabel: startBtn ? startBtn.textContent.trim() : '',
+    hasStopBtn: !!stopBtn,
+    oldInputs: !!oldInputs,
     alertInNet: !!alertCard,
     alertInSettings: !!(setPage && setPage.querySelector('#netAlertDay')),
     labelR: rect(dayLabel), inputR: rect(dayInput),
-    hintText: (function(){ var e=document.querySelector('[data-i18n="settings.hotkeysHint2"]'); return e ? e.textContent : ''; })(),
+    hintText: (function(){ var e=document.querySelector('[data-i18n="settings.hotkeySetHint"]'); return e ? e.textContent : ''; })(),
     alertHintText: (function(){ var e=document.querySelector('.net-alertcard [data-i18n="net.alertHint"]'); return e ? e.textContent : ''; })()
   });
 })()
@@ -204,13 +208,20 @@ $r6 = Exec @"
 Assert ($r6.hkInCapture -eq $true) '热键开关已在「采集设置」页内'
 Assert ($r6.hkInSettings -eq $false) '设置页不再有热键开关'
 Assert ($r6.oldLabels -eq $false) '设置页旧快捷键卡（hkStartLabel/hkFailRow）已删除'
-Assert ($r6.keyOptions -eq 12) "键位下拉含 F1–F12 共 12 项（实际 $($r6.keyOptions)）"
+Assert ($r6.hasStopBtn -eq $true) '停止热键捕获按钮存在（hkStopBtn）'
+Assert ($r6.oldInputs -eq $false) '旧的下拉/修饰键勾选（hkStartKey/hkStartCtrl/hkStopKey）已删除'
+Assert ($r6.startLabel -match 'Ctrl\+Alt\+F9') "开始按钮显示当前热键（实际 '$($r6.startLabel)'）"
 Assert ($r6.alertInNet -eq $true) '流量告警卡已在网络页内'
 Assert ($r6.alertInSettings -eq $false) '设置页不再有流量告警'
 Assert ($r6.labelR.w -gt 0 -and $r6.inputR.w -gt 0) '阈值标签与输入框都有实际尺寸'
 Assert ($r6.inputR.l -ge ($r6.labelR.r - 1)) "阈值标签不遮挡输入框（label 右 $($r6.labelR.r) ≤ input 左 $($r6.inputR.l)）"
-Assert ($r6.hintText -ne '' -and $r6.hintText -notmatch 'settings\.hotkeysHint2') '热键说明文案已渲染（不是 key 原文）'
+Assert ($r6.hintText -ne '' -and $r6.hintText -notmatch 'settings\.hotkeySetHint') '热键说明文案已渲染（不是 key 原文）'
 Assert ($r6.alertHintText -ne '' -and $r6.alertHintText -notmatch 'net\.alertHint') '告警说明文案已渲染（不是 key 原文）'
+
+# ---- 6. 今日必须在本月左侧且同排（2.2.2） ----
+$r7 = Exec "(function(){ var t=document.getElementById('netToday').getBoundingClientRect(); var m=document.getElementById('netMonth').getBoundingClientRect(); return JSON.stringify({ tl: t.left, tt: t.top, ml: m.left, mt: m.top }); })()"
+Assert ([double]$r7.tl -lt [double]$r7.ml) "今日在本月左侧（今日左 $($r7.tl) / 本月左 $($r7.ml)）"
+Assert ([math]::Abs([double]$r7.tt - [double]$r7.mt) -lt 1) "今日与本月同一排（top $($r7.tt) / $($r7.mt)）"
 
 if ($fail -eq 0) { Ok '网络页真 WebView2 自证全部通过' } else { Write-Host "失败 $fail 项" -ForegroundColor Red }
 try { $form.Dispose() } catch { }

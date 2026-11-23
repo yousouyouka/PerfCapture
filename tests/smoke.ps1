@@ -1225,16 +1225,37 @@ if ($idx -notmatch 'id="chkHotkeys"') { Bad '采集设置缺热键开关' }
 $iCapPage = $idx.IndexOf('<section class="page" data-page="capture"')
 $iSetPage = $idx.IndexOf('<section class="page" data-page="settings"')
 $iNetPage = $idx.IndexOf('<section class="page" data-page="network"')
-$iHkEdit = $idx.IndexOf('id="hkStartKey"')
+$iHkEdit = $idx.IndexOf('id="hkStartBtn"')
 $iAlert = $idx.IndexOf('id="netAlertDay"')
-if ($iHkEdit -lt 0) { Bad '采集设置缺热键键位下拉（hkStartKey）' }
+if ($iHkEdit -lt 0) { Bad '采集设置缺热键捕获按钮（hkStartBtn）' }
 elseif ($iCapPage -lt 0 -or $iSetPage -lt 0 -or $iHkEdit -gt $iSetPage) { Bad '热键编辑必须在采集设置页内（不得留在设置页）' }
+if ($idx -notmatch 'id="hkStopBtn"') { Bad '采集设置缺停止热键捕获按钮（hkStopBtn）' }
+if ($idx -match 'id="hkStartKey"') { Bad '旧热键下拉（hkStartKey）应已删除' }
+if ($idx -match 'id="hkStartCtrl"') { Bad '旧热键修饰键勾选（hkStartCtrl）应已删除' }
 if ($idx -match 'id="hkStartLabel"') { Bad '设置页仍残留旧快捷键卡（hkStartLabel）' }
 if ($iAlert -lt 0 -or $iNetPage -lt 0 -or $iAlert -lt $iNetPage) { Bad '流量告警必须在网络页内（不得留在设置页）' }
 if ($idx -notmatch 'net-alertcard') { Bad '网络页缺流量告警卡容器（net-alertcard）' }
 # 热键默认关闭（默认值在宿主侧，界面 init 回填）
 $setPsDef = Get-Content (Join-Path $root 'src\app\20-Settings.ps1') -Raw -Encoding UTF8
 if ($setPsDef -notmatch '(?s)hotkeys\s*=\s*@\{.*?enabled\s*=\s*\$false') { Bad '全局热键默认值必须是关闭（enabled = $false）' }
+# 2.2.2：关闭到托盘 / 开机自启（默认关闭，宿主侧是唯一事实来源）
+if ($setPsDef -notmatch 'closeToTray\s*=\s*\$false') { Bad '配置默认值缺 closeToTray = $false' }
+if ($setPsDef -notmatch 'autoStart\s*=\s*\$false') { Bad '配置默认值缺 autoStart = $false' }
+if ($setPsDef -notmatch 'CurrentVersion\\Run') { Bad '开机自启没有写 HKCU 的 Run 键' }
+if ($setPsDef -notmatch '--autostart') { Bad '开机自启命令行缺 --autostart' }
+if ($capPs -notmatch "'closeToTray'") { Bad 'saveSettings 白名单缺 closeToTray' }
+if ($capPs -notmatch "'autoStart'") { Bad 'saveSettings 白名单缺 autoStart' }
+if ($mainPs -notmatch 'ForceExit') { Bad '90-Main.ps1 缺真正退出的 ForceExit 标记' }
+if ($mainPs -notmatch 'closeToTray') { Bad 'FormClosing 没有关闭到托盘分支' }
+if ($mainPs -notmatch 'function Hide-PerfWindowToTray') { Bad '90-Main.ps1 缺 Hide-PerfWindowToTray' }
+if ($netPs -notmatch '显示主界面') { Bad '托盘右键菜单缺「显示主界面」' }
+if ($netPs -notmatch "'退出'") { Bad '托盘右键菜单缺「退出」（收起后将没有真正退出入口）' }
+if ($netPs -notmatch 'function Restore-PerfWindowFromTray') { Bad '36-NetMetrics.ps1 缺 Restore-PerfWindowFromTray' }
+if ($idx -notmatch 'id="chkCloseToTray"') { Bad '设置页缺「关闭时缩小到托盘」开关' }
+if ($idx -notmatch 'id="chkAutoStart"') { Bad '设置页缺「开机自启」开关' }
+$iTodayCell = $idx.IndexOf('net-total-cell is-today')
+$iMonthCell = $idx.IndexOf('net-total-cell is-month')
+if ($iTodayCell -lt 0 -or $iMonthCell -lt 0 -or $iTodayCell -gt $iMonthCell) { Bad '网络汇总的「今日」必须在「本月」之前（同排左侧）' }
 $mainJs = Get-Content (Join-Path $root 'ui\js\main.js') -Raw -Encoding UTF8
 foreach ($need in 'GAME_PREFS_KEY', 'applyGamePref', 'PerfHotkeyAction', 'btnRerun') {
     if ($mainJs -notmatch [regex]::Escape($need)) { Bad "main.js 缺 $need" }

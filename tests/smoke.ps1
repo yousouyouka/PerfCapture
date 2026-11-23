@@ -982,9 +982,18 @@ else {
     if ($netPs -notmatch 'Get-NetAdapterStatistics') { Bad '网络采样器没用网卡计数器（L1 口径）' }
     if ($netPs -notmatch 'ReceivedBytes' -or $netPs -notmatch 'SentBytes') { Bad '网络采样器缺收/发字节字段' }
     if ($netPs -notmatch 'type = ''netSample''') { Bad '网络采样器没有向界面推送 netSample' }
-    foreach ($fn in 'Start-NetWorker', 'Stop-NetWorker', 'Set-NetConsumer', 'Invoke-NetCommand') {
+    if ($netPs -notmatch 'type = ''netTotals''') { Bad '网络采样器没有向界面推送 netTotals（今日/本月/历史）' }
+    foreach ($fn in 'Start-NetWorker', 'Stop-NetWorker', 'Set-NetConsumer', 'Invoke-NetCommand', 'Initialize-NetPersistence', 'Flush-NetStats', 'Save-NetDays') {
         if ($netPs -notmatch ('function ' + $fn)) { Bad "36-NetMetrics.ps1 缺函数 $fn" }
     }
+    # 持久化纪律：按日累计 + 原子写 + 定期落盘 + 过期清理，不许逐秒写文件
+    if ($netPs -notmatch 'days\.json') { Bad '网络持久化缺 days.json 存储路径' }
+    if ($netPs -notmatch 'Move-Item.*-Force') { Bad 'days.json 落盘不是原子写（临时文件 + 替换）' }
+    if ($netPs -notmatch 'NetFlushSec = 60') { Bad '落盘间隔必须是 60 秒量级（不许逐秒写盘）' }
+    if ($netPs -notmatch 'NetKeepDays') { Bad '缺历史保留期清理' }
+    $mainPs18 = Get-Content (Join-Path $root 'src\app\90-Main.ps1') -Raw -Encoding UTF8
+    if ($mainPs18 -notmatch 'Set-NetConsumer ''persist''') { Bad '90-Main 缺 persist 常驻消费者（今日/本月会漏算）' }
+    if ($mainPs18 -notmatch 'Flush-NetStatsOnExit') { Bad '90-Main 退出时没有网络落盘' }
     $ns = [regex]::Match($netPs, "(?s)\`$script:NetSampleScript = @'\r?\n(.*?)\r?\n'@")
     if (-not $ns.Success) { Bad '取不到网络内嵌采样脚本' }
     else {
@@ -1010,7 +1019,7 @@ if ($idx -notmatch 'js/network\.js') { Bad 'index.html 未加载 network.js' }
 $iNet = $idx.IndexOf('js/network.js')
 $iMain = $idx.IndexOf('js/main.js')
 if ($iNet -lt 0 -or $iMain -lt 0 -or $iNet -gt $iMain) { Bad 'network.js 必须在 main.js 之前加载' }
-foreach ($nk in 'nav.network', 'net.title', 'net.desc', 'net.stateOn', 'net.stateOff', 'net.totalRecv', 'net.totalSent', 'net.totals', 'net.kind.wifi', 'net.kind.virtual', 'net.status.Up', 'net.caliber') {
+foreach ($nk in 'nav.network', 'net.title', 'net.desc', 'net.stateOn', 'net.stateOff', 'net.totalRecv', 'net.totalSent', 'net.totals', 'net.kind.wifi', 'net.kind.virtual', 'net.status.Up', 'net.caliber', 'net.today', 'net.month', 'net.histTitle', 'net.histDays', 'net.histMonths', 'net.histEmpty') {
     $n2 = ([regex]::Matches($i18nText, [regex]::Escape("'" + $nk + "':"))).Count
     if ($n2 -lt 3) { Bad "i18n 缺 $nk（三语都要有，现仅 $n2 处）" }
 }

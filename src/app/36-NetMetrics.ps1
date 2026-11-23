@@ -1,6 +1,6 @@
-﻿# 网络实时采样器（2.1.18 · 流量监控阶段 1）
+﻿# 网络实时采样器与持久化（2.2.0 · 流量监控阶段 1+2）
 #
-# 设计要点（流量监控功能规划 v2 §1.1 / §1.8）：
+# 设计要点（流量监控功能规划 v2 §1）：
 #   - L1 接口总量口径：每 1 秒对每块非隐藏网卡做 Get-NetAdapterStatistics 差分。
 #   - 常驻监控与游戏采集完全解耦：绝不启动 PresentMon / logman / 任何 ETW 会话，不编译 C#，
 #     不需要管理员权限。独立于 35-Metrics 的采样器（那台开机会拉起 PresentMon 突发窗口）。
@@ -8,16 +8,27 @@
 #   - 采不到的一律 $null（不是 0）：界面显示「—」，绝不假装有数据。
 #   - 计数器回退（网卡重连 / 驱动重置）→ 该秒速率置 null 并重置基线，绝不报负数。
 #   - 首秒只记基线不出速率：没有时间基准就不造数。
+#
+# 持久化（阶段 2）：
+#   - 存储为「按日 × 按接口」累计：traffic\days.json，体量恒小（一年约 365 行），秒级明细
+#     不落盘——日/月报表与今日/本月累计只需要按日聚合，逐秒 JSONL 每月数十 MB 且解析昂贵，
+#     纯属浪费（对规划 v2 §1.4 的调整，理由见 CHANGELOG）。
+#   - 内存累加，每 60 秒原子落盘（临时文件 + 替换）；退出时强制落盘；跨日自动翻转。
+#   - 保留 400 天，更早的日期行在落盘时清除。
+#   - 适配器种类（物理/虚拟）随样本更新进 meta，历史聚合据此只算物理接口。
 
 $script:NetIntervalMs = 1000
 $script:NetRingSize = 120        # 1 Hz × 120 点 ≈ 2 分钟窗口
+$script:NetFlushSec = 60
+$script:NetKeepDays = 400
 $script:NetSamples = New-Object System.Collections.ArrayList
 $script:NetWorker = $null
 $script:NetQueue = $null
 $script:NetTimer = $null
 $script:NetRunning = $false
-$script:NetConsumers = @{}       # 谁在要数据：page（网络页）/ 以后 overlay
+$script:NetConsumers = @{}       # 谁在要数据：page（网络页）/ persist（持久化）/ 以后 overlay
 $script:NetCaps = $null
+$script:NetLoaded = $false
 
 # ---------- 一轮采样（runspace 里执行；单引号 here-string，禁止变量展开） ----------
 $script:NetSampleScript = @'
@@ -120,12 +131,230 @@ while ($true) {
 }
 '@
 
+# ---------- 持久化存储 ----------
+$script:NetTrafficDir = $null
+$script:NetDaysPath = $null
+$script:NetDays = @{}            # 'yyyy-MM-dd' -> ifIndex -> @{ r; s }（已落盘部分）
+$script:NetDayAcc = @{}          # 今天未落盘的增量：ifIndex -> @{ r; s }
+$script:NetDayKey = ''           # 正在累加的日期
+$script:NetLastTotals = @{}      # ifIndex -> @{ r; s } 上一次计数器快照（求增量用）
+$script:NetMeta = @{}            # ifIndex -> @{ name; kind }（最近一次见到的分类）
+$script:NetLastFlush = $null
+
+function Convert-NetDayNode($node) {
+    $h = @{}
+    if ($null -eq $node) { return $h }
+    foreach ($p in $node.PSObject.Properties) {
+        try { $idx = [int]$p.Name } catch { continue }
+        $r = 0.0; $s = 0.0
+        try { $r = [double]$p.Value.r } catch { }
+        try { $s = [double]$p.Value.s } catch { }
+        $h[$idx] = @{ r = $r; s = $s }
+    }
+    return $h
+}
+
+function Initialize-NetPersistence {
+    if ($script:NetLoaded) { return }
+    $script:NetLoaded = $true
+    $script:NetTrafficDir = Join-Path $script:DataDir 'traffic'
+    $script:NetDaysPath = Join-Path $script:NetTrafficDir 'days.json'
+    try {
+        if (-not (Test-Path -LiteralPath $script:NetTrafficDir)) {
+            New-Item -ItemType Directory -Path $script:NetTrafficDir -Force | Out-Null
+        }
+    } catch { }
+    try {
+        if (Test-Path -LiteralPath $script:NetDaysPath) {
+            $doc = Get-Content -LiteralPath $script:NetDaysPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            foreach ($p in $doc.PSObject.Properties) {
+                if ($p.Name -eq '__meta') {
+                    foreach ($mp in $p.Value.PSObject.Properties) {
+                        try {
+                            $script:NetMeta[[int]$mp.Name] = @{
+                                name = [string]$mp.Value.name
+                                kind = [string]$mp.Value.kind
+                            }
+                        } catch { }
+                    }
+                    continue
+                }
+                $script:NetDays[$p.Name] = Convert-NetDayNode $p.Value
+            }
+        }
+    } catch {
+        # 坏文件不阻塞启动：当作空历史，落盘时会被新数据整体替换
+        Write-AppLog ('网络历史读取失败，按空历史处理: ' + $_.Exception.Message) 'WARN'
+        $script:NetDays = @{}
+    }
+    $script:NetDayKey = (Get-Date).ToString('yyyy-MM-dd')
+    # 过期清理：只保留最近 KeepDays 天
+    try {
+        $cutoff = (Get-Date).AddDays(-$script:NetKeepDays).ToString('yyyy-MM-dd')
+        foreach ($k in @($script:NetDays.Keys)) {
+            if ($k -lt $cutoff) { [void]$script:NetDays.Remove($k) }
+        }
+    } catch { }
+}
+
+function Add-NetSampleToAccum($sample) {
+    if (-not $sample -or -not $sample.ifs) { return }
+    $dayKey = (Get-Date).ToString('yyyy-MM-dd')
+    if ($script:NetDayKey -ne $dayKey) {
+        # 跨日：先把旧的一天落稳，再开新账本
+        try { Flush-NetStats } catch { }
+        $script:NetDayKey = $dayKey
+    }
+    foreach ($ifi in $sample.ifs) {
+        $idx = 0
+        try { $idx = [int]$ifi.ifIndex } catch { continue }
+        if ($idx -le 1) { continue }
+        try { $script:NetMeta[$idx] = @{ name = [string]$ifi.name; kind = [string]$ifi.kind } } catch { }
+        if ($null -eq $ifi.recvTotal -and $null -eq $ifi.sentTotal) { continue }
+        $r = 0.0; $s = 0.0
+        try { if ($null -ne $ifi.recvTotal) { $r = [double]$ifi.recvTotal } } catch { }
+        try { if ($null -ne $ifi.sentTotal) { $s = [double]$ifi.sentTotal } } catch { }
+        $last = if ($script:NetLastTotals.ContainsKey($idx)) { $script:NetLastTotals[$idx] } else { $null }
+        if ($last) {
+            $dr = $r - [double]$last.r
+            $ds = $s - [double]$last.s
+            if ($dr -ge 0 -and $ds -ge 0 -and ($dr -gt 0 -or $ds -gt 0)) {
+                if (-not $script:NetDayAcc.ContainsKey($idx)) {
+                    $script:NetDayAcc[$idx] = @{ r = 0.0; s = 0.0 }
+                }
+                $script:NetDayAcc[$idx].r += $dr
+                $script:NetDayAcc[$idx].s += $ds
+            }
+            # 计数器回退：不累计，基线随新值走
+        }
+        $script:NetLastTotals[$idx] = @{ r = $r; s = $s }
+    }
+}
+
+function Merge-NetAccIntoDays {
+    if ($script:NetDayAcc.Count -eq 0) { return }
+    if (-not $script:NetDays.ContainsKey($script:NetDayKey)) {
+        $script:NetDays[$script:NetDayKey] = @{}
+    }
+    $day = $script:NetDays[$script:NetDayKey]
+    foreach ($idx in $script:NetDayAcc.Keys) {
+        $a = $script:NetDayAcc[$idx]
+        if (-not $day.ContainsKey($idx)) { $day[$idx] = @{ r = 0.0; s = 0.0 } }
+        $day[$idx].r += [double]$a.r
+        $day[$idx].s += [double]$a.s
+    }
+    $script:NetDayAcc = @{}
+}
+
+function Save-NetDays {
+    if (-not $script:NetDaysPath) { return }
+    try {
+        $doc = [ordered]@{}
+        $metaOut = [ordered]@{}
+        foreach ($idx in $script:NetMeta.Keys) {
+            $metaOut[[string]$idx] = @{ name = $script:NetMeta[$idx].name; kind = $script:NetMeta[$idx].kind }
+        }
+        $doc['__meta'] = $metaOut
+        foreach ($k in ($script:NetDays.Keys | Sort-Object)) {
+            $node = [ordered]@{}
+            foreach ($idx in $script:NetDays[$k].Keys) {
+                $node[[string]$idx] = @{ r = [math]::Round([double]$script:NetDays[$k][$idx].r, 0); s = [math]::Round([double]$script:NetDays[$k][$idx].s, 0) }
+            }
+            $doc[$k] = $node
+        }
+        $json = $doc | ConvertTo-Json -Depth 6 -Compress
+        $tmp = $script:NetDaysPath + '.tmp'
+        [IO.File]::WriteAllText($tmp, $json, (New-Object Text.UTF8Encoding($false)))
+        Move-Item -LiteralPath $tmp -Destination $script:NetDaysPath -Force
+    } catch {
+        Write-AppLog ('网络历史落盘失败: ' + $_.Exception.Message) 'WARN'
+    }
+}
+
+function Flush-NetStats {
+    Merge-NetAccIntoDays
+    Save-NetDays
+    $script:NetLastFlush = Get-Date
+}
+
+# ---------- 汇总快照（下发界面） ----------
+function Get-NetDaySum([string]$Day) {
+    $r = 0.0; $s = 0.0
+    $day = $script:NetDays[$Day]
+    if ($day) {
+        foreach ($idx in $day.Keys) {
+            $kind = if ($script:NetMeta.ContainsKey($idx)) { $script:NetMeta[$idx].kind } else { 'other' }
+            if ($kind -ne 'wifi' -and $kind -ne 'ethernet') { continue }
+            $r += [double]$day[$idx].r
+            $s += [double]$day[$idx].s
+        }
+    }
+    if ($Day -eq $script:NetDayKey -and $script:NetDayAcc.Count -gt 0) {
+        foreach ($idx in $script:NetDayAcc.Keys) {
+            $kind = if ($script:NetMeta.ContainsKey($idx)) { $script:NetMeta[$idx].kind } else { 'other' }
+            if ($kind -ne 'wifi' -and $kind -ne 'ethernet') { continue }
+            $r += [double]$script:NetDayAcc[$idx].r
+            $s += [double]$script:NetDayAcc[$idx].s
+        }
+    }
+    return @{ recv = [math]::Round($r, 0); sent = [math]::Round($s, 0) }
+}
+
+function Get-NetTotalsSnapshot {
+    $today = Get-NetDaySum $script:NetDayKey
+    $monthKey = (Get-Date).ToString('yyyy-MM')
+    $mr = 0.0; $ms = 0.0
+    foreach ($k in $script:NetDays.Keys) {
+        if (-not $k.StartsWith($monthKey)) { continue }
+        $d = Get-NetDaySum $k
+        $mr += [double]$d.recv
+        $ms += [double]$d.sent
+    }
+    # 近 30 天（含今天未完的这一天）与近 12 个月；今天/本月已含未落盘增量
+    $daysArr = New-Object System.Collections.Generic.List[object]
+    for ($i = 29; $i -ge 0; $i--) {
+        $d = (Get-Date).Date.AddDays(-$i).ToString('yyyy-MM-dd')
+        $sum = Get-NetDaySum $d
+        [void]$daysArr.Add(@{ d = $d; recv = $sum.recv; sent = $sum.sent })
+    }
+    $monthsArr = New-Object System.Collections.Generic.List[object]
+    $base = Get-Date -Day 1
+    for ($i = 11; $i -ge 0; $i--) {
+        $m = $base.AddMonths(-$i).ToString('yyyy-MM')
+        $mr2 = 0.0; $ms2 = 0.0
+        foreach ($k in $script:NetDays.Keys) {
+            if (-not $k.StartsWith($m)) { continue }
+            $d2 = Get-NetDaySum $k
+            $mr2 += [double]$d2.recv
+            $ms2 += [double]$d2.sent
+        }
+        [void]$monthsArr.Add(@{ m = $m; recv = [math]::Round($mr2, 0); sent = [math]::Round($ms2, 0) })
+    }
+    $metaOut = [ordered]@{}
+    foreach ($idx in $script:NetMeta.Keys) {
+        $metaOut[[string]$idx] = @{ name = $script:NetMeta[$idx].name; kind = $script:NetMeta[$idx].kind }
+    }
+    return @{
+        today = $today
+        month = $month
+        days  = $daysArr
+        months= $monthsArr
+        meta  = $metaOut
+    }
+}
+
+function Send-NetTotals {
+    Send-ToUi @{ type = 'netTotals'; totals = (Get-NetTotalsSnapshot) }
+}
+
+# ---------- 能力表与采样调度 ----------
 function Build-NetCaps {
     $script:NetCaps = @{
         net       = $false      # 首个真实样本到达后置 true（Update-NetCapsFromSample）
         running   = $script:NetRunning
         intervalMs= $script:NetIntervalMs
         ringSize  = $script:NetRingSize
+        persist   = $script:NetConsumers.ContainsKey('persist')
     }
     return $script:NetCaps
 }
@@ -135,9 +364,8 @@ function Update-NetCapsFromSample($s) {
     if ($s -and $s.ifs -and @($s.ifs).Count -gt 0) { $script:NetCaps.net = $true }
 }
 
-# ---------- 采样调度 ----------
 function Start-NetWorker {
-    # 常驻 runspace：网络采样虽无 C# 编译，同样只创建一次，重启不清基线
+    # 常驻 runspace：网络采样无 C# 编译，同样只创建一次，重启不清基线
     if ($script:NetWorker) { return }
     try {
         if (-not $script:NetQueue) {
@@ -178,28 +406,38 @@ function Stop-NetWorker {
     } catch { }
 }
 
-# ---------- 宿主计时器：取队列 → 环形缓冲 → 推给界面 ----------
+# ---------- 宿主计时器：取队列 → 累计/环形缓冲 → 按需推给界面 ----------
 function Invoke-NetTick {
     if (-not $script:NetQueue) { return }
+    $wantUi = $script:NetConsumers.ContainsKey('page')
     $got = $false
     try {
         $sample = $null
         while ($script:NetQueue.TryDequeue([ref]$sample)) {
             $got = $true
+            Add-NetSampleToAccum $sample
             [void]$script:NetSamples.Add($sample)
             if ($script:NetSamples.Count -gt $script:NetRingSize) {
                 [void]$script:NetSamples.RemoveAt(0)
             }
             Update-NetCapsFromSample $sample
-            Send-ToUi @{ type = 'netSample'; sample = $sample; caps = $script:NetCaps }
+            if ($wantUi) { Send-ToUi @{ type = 'netSample'; sample = $sample; caps = $script:NetCaps } }
         }
     } catch {
         Write-AppLog ('网络采样分发失败: ' + $_.Exception.Message) 'WARN'
     }
     if ($got -and -not $script:NetRunning) {
         $script:NetRunning = $true
-        Send-NetCaps
+        if ($wantUi) { Send-NetCaps }
     }
+    # 持久化：内存累加，每 FlushSec 秒落盘一次（有增量才写）
+    try {
+        if ($script:NetDayAcc.Count -gt 0 -and
+            ($null -eq $script:NetLastFlush -or ((Get-Date) - $script:NetLastFlush).TotalSeconds -ge $script:NetFlushSec)) {
+            Flush-NetStats
+            if ($wantUi) { Send-NetTotals }
+        }
+    } catch { }
 }
 
 function Send-NetCaps {
@@ -210,6 +448,7 @@ function Send-NetCaps {
 
 function Start-NetSampler {
     if ($script:NetTimer) { return }
+    Initialize-NetPersistence
     Start-NetWorker
     $script:NetTimer = New-Object System.Windows.Forms.Timer
     $script:NetTimer.Interval = 250
@@ -225,20 +464,30 @@ function Stop-NetSampler {
     Stop-NetWorker
     if ($script:NetRunning) {
         $script:NetRunning = $false
-        Send-NetCaps
+        if ($script:NetConsumers.ContainsKey('page')) { Send-NetCaps }
     }
 }
 
-# 消费者门控：与 35-Metrics 同一思路——没人要数据就整组停（采样 + 计时器都停）
+# 消费者门控：persist 常驻（程序在跑就累计），page 只决定要不要往界面推
 function Set-NetConsumer([string]$Key, [bool]$On) {
     if (-not $Key) { return }
     if ($On) {
         $script:NetConsumers[$Key] = $true
         if (-not $script:NetTimer) { Start-NetSampler }
+        if ($Key -eq 'page') {
+            Send-NetCaps
+            Send-NetTotals
+        }
     } else {
         [void]$script:NetConsumers.Remove($Key)
         if ($script:NetConsumers.Count -eq 0) { Stop-NetSampler }
     }
+}
+
+# ---------- 退出落盘（90-Main FormClosing 调用） ----------
+function Flush-NetStatsOnExit {
+    try { Flush-NetStats } catch { }
+    Stop-NetSampler
 }
 
 # ---------- 桥接命令（ui→host） ----------

@@ -110,6 +110,21 @@ $inject = @'
 $null = Exec $inject
 Pump 300
 
+# 注入持久化汇总（宿主 netTotals 的形状）
+$null = Exec @'
+(function(){
+  function mk(d, recv, sent){ return { d: d, recv: recv, sent: sent }; }
+  var days = [], months = [];
+  for (var i = 29; i >= 0; i--) days.push(mk('2026-11-' + (23 - i < 10 ? '0' + (23 - i) : (23 - i)), i === 0 ? 204800 : 51200, 5120));
+  for (var j = 11; j >= 0; j--) months.push(mk('2026-' + (12 - j < 10 ? '0' + (12 - j) : (12 - j)), 31457280, 3145728));
+  window.PerfNetwork.handle({ type: 'netTotals', totals: {
+    today: { recv: 102400, sent: 10240 }, month: { recv: 3145728, sent: 524288 },
+    days: days, months: months, meta: {} } });
+  return true;
+})()
+'@
+Pump 200
+
 $r3 = Exec @"
 (function(){
   function cs(el,p){ return el ? getComputedStyle(el).getPropertyValue(p).trim() : ''; }
@@ -150,6 +165,15 @@ $null = Exec "document.documentElement.setAttribute('data-theme','dark'); true"
 Pump 200
 $r4 = Exec "(function(){ var el=document.querySelector('.nt-line-recv'); var card=document.querySelector('.nt-card'); return JSON.stringify({ stroke: getComputedStyle(el).getPropertyValue('stroke').trim(), cardBg: getComputedStyle(card).getPropertyValue('background-color') }); })()"
 Assert ($r4.stroke -match '^\s*(rgb|rgba|hsl|#)') '暗色主题下曲线颜色仍可解析'
+
+# ---- 4. 持久化汇总渲染 ----
+$r5 = Exec "(function(){ return JSON.stringify({ today: document.getElementById('netToday').textContent, month: document.getElementById('netMonth').textContent, dayBars: document.getElementById('netBarsDays').children.length, monthBars: document.getElementById('netBarsMonths').children.length, histHidden: document.getElementById('netHistEmpty').hidden, barR: getComputedStyle(document.querySelector('.nt-bar-r')).backgroundColor }); })()"
+Assert ($r5.today -eq '110.0 KB') '今日合计 = 110.0 KB（实际 ' + $r5.today + '）'
+Assert ($r5.month -eq '3.5 MB') '本月合计 = 3.5 MB（实际 ' + $r5.month + '）'
+Assert ($r5.dayBars -eq 30) '近 30 天渲染 30 根柱（实际 ' + $r5.dayBars + '）'
+Assert ($r5.monthBars -eq 12) '近 12 个月渲染 12 根柱'
+Assert ($r5.histHidden -eq $true) '有数据时历史空状态隐藏'
+Assert ($r5.barR -match 'rgb') "柱状收段颜色来自 tokens（实际 $($r5.barR)）"
 
 if ($fail -eq 0) { Ok '网络页真 WebView2 自证全部通过' } else { Write-Host "失败 $fail 项" -ForegroundColor Red }
 try { $form.Dispose() } catch { }

@@ -10,6 +10,8 @@ $form.Add_FormClosing({
     }
     # 注销全局热键：退出后不该继续占着系统组合键
     try { if (Get-Command Unregister-PerfHotkeys -ErrorAction SilentlyContinue) { Unregister-PerfHotkeys } } catch { }
+    # 网络统计退出落盘：不落盘会丢掉最后一次落盘之后的全部增量
+    try { if (Get-Command Flush-NetStatsOnExit -ErrorAction SilentlyContinue) { Flush-NetStatsOnExit } } catch { }
     try {
         $script:Cfg.windowW = [int]($form.ClientSize.Width / $script:DpiScale)
         $script:Cfg.windowH = [int]($form.ClientSize.Height / $script:DpiScale)
@@ -34,6 +36,13 @@ try {
         if (@($plat.reasons).Count -gt 0) { $platTxt += ' · 不在覆盖范围：' + (@($plat.reasons) -join ',') }
         Write-AppLog $platTxt
     }
+} catch { }
+
+# 网络统计持久化（2.2.0）：常驻 1 Hz 计数器差分只在内存累加，每 60 秒原子落盘一次；
+# persist 消费者常驻 = 程序在跑就累计（今日/本月才有意义），page 消费者只管要不要推给界面。
+try {
+    if (Get-Command Initialize-NetPersistence -ErrorAction SilentlyContinue) { Initialize-NetPersistence }
+    if (Get-Command Set-NetConsumer -ErrorAction SilentlyContinue) { Set-NetConsumer 'persist' $true }
 } catch { }
 
 # 启动自愈：撤销「已装但未启用」扩展留在系统里的注册痕迹。

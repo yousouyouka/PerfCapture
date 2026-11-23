@@ -40,7 +40,8 @@ class FakeEl {
   }
 }
 const ids = {};
-['netState', 'netStateText', 'netTotalRecv', 'netTotalSent', 'netTotalAcc', 'netTotalScope', 'netIfs', 'netEmpty'].forEach((id) => { ids[id] = new FakeEl('div'); });
+['netState', 'netStateText', 'netTotalRecv', 'netTotalSent', 'netTotalAcc', 'netTotalScope', 'netIfs', 'netEmpty',
+ 'netToday', 'netMonth', 'netBarsDays', 'netBarsMonths', 'netHistEmpty'].forEach((id) => { ids[id] = new FakeEl('div'); });
 const pageEl = new FakeEl('section');
 pageEl.hidden = true;
 
@@ -143,6 +144,32 @@ ok(sent.some((m) => m.cmd === 'netStart'), '进页面发 netStart');
 pageEl.hidden = true;
 obs();
 ok(sent.some((m) => m.cmd === 'netStop'), '离页面发 netStop');
+
+/* ---- 持久化汇总：今日 / 本月 / 柱状图 ---- */
+function mkDay(d, recv, sent) { return { d: d, recv: recv, sent: sent }; }
+const totals1 = {
+  today: { recv: 1024 * 100, sent: 1024 * 10 },
+  month: { recv: 1024 * 1024 * 3, sent: 1024 * 1024 * 0.5 },
+  days: Array.from({ length: 30 }, (_, i) => mkDay('2026-11-' + String(23 - i).padStart(2, '0'), i === 0 ? 1024 * 200 : 1024 * 50, 1024 * 5)),
+  months: Array.from({ length: 12 }, (_, i) => ({ m: '2026-' + String(12 - i).padStart(2, '0'), recv: 1024 * 1024 * 30, sent: 1024 * 1024 * 3 }))
+};
+P.handle({ type: 'netTotals', totals: totals1 });
+ok(ids.netToday.textContent === '110.0 KB', '今日 = 收+发合计（100K+10K → 110.0 KB）', '实际 ' + ids.netToday.textContent);
+ok(ids.netMonth.textContent === '3.5 MB', '本月 = 3.0M + 0.5M → 3.5 MB', '实际 ' + ids.netMonth.textContent);
+ok(ids.netBarsDays.children.length === 30, '近 30 天 30 根柱（实际 ' + ids.netBarsDays.children.length + '）');
+ok(ids.netBarsMonths.children.length === 12, '近 12 个月 12 根柱');
+const firstCol = ids.netBarsDays.children[0];
+const firstBar = firstCol.children[0];
+ok(!!firstBar.querySelector('.nt-bar-r') && !!firstBar.querySelector('.nt-bar-s'), '柱内含收（accent）与发（good）两段');
+ok(firstCol.querySelector('.nt-bar-label').textContent.length === 5, '日柱标签为 MM-dd');
+ok(ids.netHistEmpty.hidden === true, '有数据时历史空状态隐藏');
+/* 全零历史 → 空状态出现 */
+const zeroTotals = { today: { recv: 0, sent: 0 }, month: { recv: 0, sent: 0 },
+  days: Array.from({ length: 30 }, () => mkDay('x', 0, 0)),
+  months: Array.from({ length: 12 }, () => ({ m: 'y', recv: 0, sent: 0 })) };
+P.handle({ type: 'netTotals', totals: zeroTotals });
+ok(ids.netHistEmpty.hidden === false, '全零历史显示空状态');
+P.handle({ type: 'netTotals', totals: totals1 });
 
 /* ---- 语言切换刷新不崩且重画 ---- */
 P.handle({ type: 'netSample', sample: s1.sample });

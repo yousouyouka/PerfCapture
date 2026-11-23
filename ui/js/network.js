@@ -1,4 +1,4 @@
-'use strict';
+﻿'use strict';
 /* 网络页（2.1.18 · 流量监控阶段 1）
    口径：L1 接口总量 —— 每块网卡计数器（Get-NetAdapterStatistics）1 Hz 差分。
    数据全部来自宿主 netSample 推送（1 Hz），页面无 setInterval；进出页面自动启停。
@@ -193,6 +193,53 @@
       renderSample(msg.sample);
     } else if (msg.type === 'netCaps') {
       if (msg.caps && typeof msg.caps.running === 'boolean') setRunning(msg.caps.running);
+    } else if (msg.type === 'netTotals') {
+      renderTotals(msg.totals);
+    }
+  }
+
+  /* ---- 持久化汇总：今日 / 本月 + 近 30 天 / 近 12 个月柱状图 ---- */
+  let lastTotals = null;
+  function renderTotals(t) {
+    if (!t) return;
+    lastTotals = t;
+    const tv = $('netToday'), mv = $('netMonth');
+    const tSum = (t.today ? (t.today.recv || 0) + (t.today.sent || 0) : null);
+    const mSum = (t.month ? (t.month.recv || 0) + (t.month.sent || 0) : null);
+    if (tv) {
+      tv.textContent = fmtTotal(tSum);
+      tv.title = (t.today ? '↓ ' + fmtTotal(t.today.recv) + ' · ↑ ' + fmtTotal(t.today.sent) : '');
+    }
+    if (mv) {
+      mv.textContent = fmtTotal(mSum);
+      mv.title = (t.month ? '↓ ' + fmtTotal(t.month.recv) + ' · ↑ ' + fmtTotal(t.month.sent) : '');
+    }
+    renderBars($('netBarsDays'), t.days, true);
+    renderBars($('netBarsMonths'), t.months, false);
+    const any = (t.days || []).some((x) => (x.recv || 0) + (x.sent || 0) > 0) ||
+                (t.months || []).some((x) => (x.recv || 0) + (x.sent || 0) > 0);
+    const he = $('netHistEmpty');
+    if (he) he.hidden = any;
+  }
+
+  function renderBars(box, arr, isDays) {
+    if (!box) return;
+    while (box.firstChild) box.removeChild(box.firstChild);
+    if (!arr || !arr.length) return;
+    const max = Math.max(1, ...arr.map((x) => (x.recv || 0) + (x.sent || 0)));
+    for (const x of arr) {
+      const bar = el('div', 'nt-bar');
+      const label = isDays ? String(x.d || '').slice(5) : String(x.m || '');
+      bar.title = label + '\n↓ ' + fmtTotal(x.recv) + ' · ↑ ' + fmtTotal(x.sent);
+      const r = el('span', 'nt-bar-r');
+      r.style.height = Math.round((x.recv || 0) / max * 100) + '%';
+      const s = el('span', 'nt-bar-s');
+      s.style.height = Math.round((x.sent || 0) / max * 100) + '%';
+      bar.appendChild(r); bar.appendChild(s);
+      const wrap = el('div', 'nt-bar-col');
+      wrap.appendChild(bar);
+      wrap.appendChild(el('span', 'nt-bar-label', label));
+      box.appendChild(wrap);
     }
   }
 
@@ -211,6 +258,7 @@
   function refresh() {
     setRunning(state.running);
     if (state.lastSample) renderSample(state.lastSample);
+    if (lastTotals) renderTotals(lastTotals);
   }
 
   window.PerfNetwork = { handle: handle, refresh: refresh, state: state };

@@ -117,7 +117,8 @@ $null = Exec @'
   var days = [], months = [];
   for (var i = 29; i >= 0; i--) days.push(mk('2026-11-' + (23 - i < 10 ? '0' + (23 - i) : (23 - i)), i === 0 ? 204800 : 51200, 5120));
   for (var j = 11; j >= 0; j--) months.push(mk('2026-' + (12 - j < 10 ? '0' + (12 - j) : (12 - j)), 31457280, 3145728));
-  window.PerfNetwork.handle({ type: 'netTotals', totals: {
+  /* 走真实 bridge 分发（不是直接调 PerfNetwork.handle）：2.2.1 的根因就是 bridge 漏转发 netTotals */
+  handleMessage({ type: 'netTotals', totals: {
     today: { recv: 102400, sent: 10240 }, month: { recv: 3145728, sent: 524288 },
     days: days, months: months, meta: {} } });
   return true;
@@ -174,6 +175,42 @@ Assert ($r5.dayBars -eq 30) '近 30 天渲染 30 根柱（实际 ' + $r5.dayBars
 Assert ($r5.monthBars -eq 12) '近 12 个月渲染 12 根柱'
 Assert ($r5.histHidden -eq $true) '有数据时历史空状态隐藏'
 Assert ($r5.barR -match 'rgb') "柱状收段颜色来自 tokens（实际 $($r5.barR)）"
+
+# ---- 5. 第二轮验收三条：热键搬家 / 告警卡位置与排版（2.2.1） ----
+$r6 = Exec @"
+(function(){
+  var setPage = document.querySelector('.page[data-page="settings"]');
+  var capPage = document.querySelector('.page[data-page="capture"]');
+  var netPage = document.querySelector('.page[data-page="network"]');
+  var hk = document.getElementById('chkHotkeys');
+  var sel = document.getElementById('hkStartKey');
+  var alertCard = netPage ? netPage.querySelector('.net-alertcard') : null;
+  var dayInput = document.getElementById('netAlertDay');
+  var dayLabel = dayInput && dayInput.closest('.nt-field') ? dayInput.closest('.nt-field').querySelector('span') : null;
+  function rect(e){ if(!e) return null; var r=e.getBoundingClientRect(); return { l:r.left, r:r.right, t:r.top, b:r.bottom, w:r.width, h:r.height }; }
+  return JSON.stringify({
+    hkInCapture: !!(capPage && capPage.contains(hk)),
+    hkInSettings: !!(setPage && setPage.contains(hk)),
+    oldLabels: !!document.getElementById('hkStartLabel') || !!document.getElementById('hkFailRow'),
+    keyOptions: sel ? sel.options.length : 0,
+    alertInNet: !!alertCard,
+    alertInSettings: !!(setPage && setPage.querySelector('#netAlertDay')),
+    labelR: rect(dayLabel), inputR: rect(dayInput),
+    hintText: (function(){ var e=document.querySelector('[data-i18n="settings.hotkeysHint2"]'); return e ? e.textContent : ''; })(),
+    alertHintText: (function(){ var e=document.querySelector('.net-alertcard [data-i18n="net.alertHint"]'); return e ? e.textContent : ''; })()
+  });
+})()
+"@
+Assert ($r6.hkInCapture -eq $true) '热键开关已在「采集设置」页内'
+Assert ($r6.hkInSettings -eq $false) '设置页不再有热键开关'
+Assert ($r6.oldLabels -eq $false) '设置页旧快捷键卡（hkStartLabel/hkFailRow）已删除'
+Assert ($r6.keyOptions -eq 12) "键位下拉含 F1–F12 共 12 项（实际 $($r6.keyOptions)）"
+Assert ($r6.alertInNet -eq $true) '流量告警卡已在网络页内'
+Assert ($r6.alertInSettings -eq $false) '设置页不再有流量告警'
+Assert ($r6.labelR.w -gt 0 -and $r6.inputR.w -gt 0) '阈值标签与输入框都有实际尺寸'
+Assert ($r6.inputR.l -ge ($r6.labelR.r - 1)) "阈值标签不遮挡输入框（label 右 $($r6.labelR.r) ≤ input 左 $($r6.inputR.l)）"
+Assert ($r6.hintText -ne '' -and $r6.hintText -notmatch 'settings\.hotkeysHint2') '热键说明文案已渲染（不是 key 原文）'
+Assert ($r6.alertHintText -ne '' -and $r6.alertHintText -notmatch 'net\.alertHint') '告警说明文案已渲染（不是 key 原文）'
 
 if ($fail -eq 0) { Ok '网络页真 WebView2 自证全部通过' } else { Write-Host "失败 $fail 项" -ForegroundColor Red }
 try { $form.Dispose() } catch { }

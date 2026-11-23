@@ -112,7 +112,9 @@ function Handle-UiMessage($msg) {
             }
             'saveSettings' {
                 if ($msg.settings) {
-                    foreach ($k in 'theme', 'language', 'seconds', 'minimize', 'sound', 'skip', 'preset', 'customBase', 'warmup') {
+                    # 2.2.1 修正：netAlert / netReverseDns / hotkeys 之前漏在循环里，用户改了不落盘
+                    foreach ($k in 'theme', 'language', 'seconds', 'minimize', 'sound', 'skip', 'preset', 'customBase', 'warmup',
+                                   'netAlertDayMB', 'netAlertMonthMB', 'netReverseDns', 'hotkeys') {
                         Set-ConfigValue $k $msg.settings.$k
                     }
                     Save-Config

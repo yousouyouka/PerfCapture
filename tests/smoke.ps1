@@ -1020,6 +1020,8 @@ foreach ($cmd in 'netStart', 'netStop') {
 }
 $bridgeJs = Get-Content (Join-Path $root 'ui\js\bridge.js') -Raw -Encoding UTF8
 if ($bridgeJs -notmatch 'case ''netSample''') { Bad 'bridge.js 缺 netSample 分发' }
+# 2.2.1 根因回归：bridge 曾只转发 netSample/netCaps，netTotals 到不了界面 → 今日/本月/历史恒为「—」
+if ($bridgeJs -notmatch "case 'netTotals'") { Bad 'bridge.js 缺 netTotals 分发（今日/本月/历史会一直是「—」）' }
 $netJs = Get-Content (Join-Path $root 'ui\js\network.js') -Raw -Encoding UTF8
 foreach ($need in 'PerfNetwork', 'netStart', 'netStop', 'fmtRate', 'netSample') {
     if ($netJs -notmatch [regex]::Escape($need)) { Bad "network.js 缺 $need" }
@@ -1031,7 +1033,7 @@ if ($idx -notmatch 'js/network\.js') { Bad 'index.html 未加载 network.js' }
 $iNet = $idx.IndexOf('js/network.js')
 $iMain = $idx.IndexOf('js/main.js')
 if ($iNet -lt 0 -or $iMain -lt 0 -or $iNet -gt $iMain) { Bad 'network.js 必须在 main.js 之前加载' }
-foreach ($nk in 'nav.network', 'net.title', 'net.desc', 'net.stateOn', 'net.stateOff', 'net.totalRecv', 'net.totalSent', 'net.totals', 'net.kind.wifi', 'net.kind.virtual', 'net.status.Up', 'net.caliber', 'net.today', 'net.month', 'net.histTitle', 'net.histDays', 'net.histMonths', 'net.histEmpty', 'settings.net', 'settings.netAlert', 'settings.netAlertHint', 'settings.netDay', 'settings.netMonth', 'net.connTitle', 'net.colProc', 'net.colRemote', 'net.colSvc', 'net.connEmpty', 'settings.netDns', 'settings.netDnsHint', 'capture.item.nettraffic', 'report.net.title', 'report.net.unable') {
+foreach ($nk in 'nav.network', 'net.title', 'net.desc', 'net.stateOn', 'net.stateOff', 'net.totalRecv', 'net.totalSent', 'net.totals', 'net.kind.wifi', 'net.kind.virtual', 'net.status.Up', 'net.caliber', 'net.alertHint', 'net.today', 'net.month', 'net.histTitle', 'net.histDays', 'net.histMonths', 'net.histEmpty', 'settings.net', 'settings.netAlert', 'settings.netAlertHint', 'settings.netDay', 'settings.netMonth', 'settings.hotkeysHint2', 'net.connTitle', 'net.colProc', 'net.colRemote', 'net.colSvc', 'net.connEmpty', 'settings.netDns', 'settings.netDnsHint', 'capture.item.nettraffic', 'report.net.title', 'report.net.unable') {
     $n2 = ([regex]::Matches($i18nText, [regex]::Escape("'" + $nk + "':"))).Count
     if ($n2 -lt 3) { Bad "i18n 缺 $nk（三语都要有，现仅 $n2 处）" }
 }
@@ -1218,7 +1220,21 @@ if ((Get-Content (Join-Path $root 'src\app\90-Main.ps1') -Raw -Encoding UTF8) -n
 if ($capPs -notmatch 'Flash-PerfTaskbar 3') { Bad '采集结束没有任务栏提醒' }
 # 前端：再采一次 / 每游戏记忆 / 热键开关
 if ($idx -notmatch 'id="btnRerun"') { Bad 'index.html 缺「再采一次」按钮' }
-if ($idx -notmatch 'id="chkHotkeys"') { Bad '设置页缺热键开关' }
+if ($idx -notmatch 'id="chkHotkeys"') { Bad '采集设置缺热键开关' }
+# 2.2.1 位置回归：热键编辑必须在「采集设置」内、设置页不得再留旧快捷键卡
+$iCapPage = $idx.IndexOf('<section class="page" data-page="capture"')
+$iSetPage = $idx.IndexOf('<section class="page" data-page="settings"')
+$iNetPage = $idx.IndexOf('<section class="page" data-page="network"')
+$iHkEdit = $idx.IndexOf('id="hkStartKey"')
+$iAlert = $idx.IndexOf('id="netAlertDay"')
+if ($iHkEdit -lt 0) { Bad '采集设置缺热键键位下拉（hkStartKey）' }
+elseif ($iCapPage -lt 0 -or $iSetPage -lt 0 -or $iHkEdit -gt $iSetPage) { Bad '热键编辑必须在采集设置页内（不得留在设置页）' }
+if ($idx -match 'id="hkStartLabel"') { Bad '设置页仍残留旧快捷键卡（hkStartLabel）' }
+if ($iAlert -lt 0 -or $iNetPage -lt 0 -or $iAlert -lt $iNetPage) { Bad '流量告警必须在网络页内（不得留在设置页）' }
+if ($idx -notmatch 'net-alertcard') { Bad '网络页缺流量告警卡容器（net-alertcard）' }
+# 热键默认关闭（默认值在宿主侧，界面 init 回填）
+$setPsDef = Get-Content (Join-Path $root 'src\app\20-Settings.ps1') -Raw -Encoding UTF8
+if ($setPsDef -notmatch '(?s)hotkeys\s*=\s*@\{.*?enabled\s*=\s*\$false') { Bad '全局热键默认值必须是关闭（enabled = $false）' }
 $mainJs = Get-Content (Join-Path $root 'ui\js\main.js') -Raw -Encoding UTF8
 foreach ($need in 'GAME_PREFS_KEY', 'applyGamePref', 'PerfHotkeyAction', 'btnRerun') {
     if ($mainJs -notmatch [regex]::Escape($need)) { Bad "main.js 缺 $need" }

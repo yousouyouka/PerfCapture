@@ -55,6 +55,24 @@ Assert ($modText -match "type = 'hotkey'") '命中热键只通知前端，不直
 Assert ($modText -match 'UnregisterHotKey') '退出/关闭时会注销'
 Assert ($modText -match 'AddMessageFilter') '用消息过滤器接收 WM_HOTKEY（不注入、不挂钩子）'
 
+Write-Host '== 5. 采集设置里的热键结构（2.2.1）==' -ForegroundColor Cyan
+# 默认关闭；开启但未设置时用默认键；非法键名不落盘。用真实 20-Settings 校验分支驱动。
+$script:CfgPath = Join-Path $env:TEMP ('perfhotkey-cfg-' + [guid]::NewGuid().ToString('N').Substring(0, 6) + '.json')
+function Write-AppLog([string]$m, [string]$lvl = 'INFO') { }
+function Register-PerfHotkeys { return $true }   # 桩：只验配置，不碰真窗口句柄
+. (Join-Path $root 'src\app\20-Settings.ps1')
+$cfgDef = New-DefaultConfig
+Assert ($cfgDef.hotkeys.enabled -eq $false) '热键默认关闭（enabled = $false）' ('实际 ' + $cfgDef.hotkeys.enabled)
+Assert ($cfgDef.hotkeys.start.key -eq 'F9' -and $cfgDef.hotkeys.stop.key -eq 'F10') '开启但未设置时默认键为 Ctrl+Alt+F9 / F10' ('实际 ' + $cfgDef.hotkeys.start.key + '/' + $cfgDef.hotkeys.stop.key)
+$incoming = '{"enabled":true,"start":{"ctrl":true,"alt":false,"shift":true,"key":"f5"},"stop":{"ctrl":false,"alt":true,"shift":false,"key":"F12"}}' | ConvertFrom-Json
+Set-ConfigValue 'hotkeys' $incoming
+Assert ($script:Cfg.hotkeys.enabled -eq $true) '开启状态已落配置'
+Assert ($script:Cfg.hotkeys.start.key -eq 'F5' -and $script:Cfg.hotkeys.start.shift -eq $true -and $script:Cfg.hotkeys.start.alt -eq $false) '开始键结构与开关状态正确（小写 f5 归一为 F5）' ('实际 ' + ($script:Cfg.hotkeys.start | ConvertTo-Json -Compress))
+Assert ($script:Cfg.hotkeys.stop.key -eq 'F12') '停止键已更新'
+$bad = '{"enabled":true,"start":{"ctrl":false,"alt":false,"shift":false,"key":"A"}}' | ConvertFrom-Json
+Set-ConfigValue 'hotkeys' $bad
+Assert ($script:Cfg.hotkeys.start.key -eq 'F5') '非法键名被拒绝并保留原值（不静默写坏）' ('实际 ' + $script:Cfg.hotkeys.start.key)
+
 Write-Host ''
 if ($script:fail -gt 0) {
     Write-Host ('== 失败 ' + $script:fail + ' 项 / 通过 ' + $script:pass + ' 项 ==') -ForegroundColor Red

@@ -139,6 +139,27 @@
                 <label class="check"><input id="chkMin" type="checkbox" checked><span data-i18n="capture.countdown">采集前倒计时 5 秒并最小化窗口</span></label>
                 <label class="check"><input id="chkSound" type="checkbox" checked><span data-i18n="capture.sound">采集结束提示音</span></label>
               </div>
+              <div class="setting-block hotkey-block">
+                <label class="check"><input id="chkHotkeys" type="checkbox"><span data-i18n="settings.hotkeysEnable">启用全局热键</span></label>
+                <div class="hotkey-rows">
+                  <div class="hotkey-row">
+                    <span class="field-label" data-i18n="settings.hotkeyStart">开始采集</span>
+                    <label class="check"><input id="hkStartCtrl" type="checkbox"><span>Ctrl</span></label>
+                    <label class="check"><input id="hkStartAlt" type="checkbox"><span>Alt</span></label>
+                    <label class="check"><input id="hkStartShift" type="checkbox"><span>Shift</span></label>
+                    <select id="hkStartKey" class="input input-num"></select>
+                  </div>
+                  <div class="hotkey-row">
+                    <span class="field-label" data-i18n="settings.hotkeyStop">停止采集</span>
+                    <label class="check"><input id="hkStopCtrl" type="checkbox"><span>Ctrl</span></label>
+                    <label class="check"><input id="hkStopAlt" type="checkbox"><span>Alt</span></label>
+                    <label class="check"><input id="hkStopShift" type="checkbox"><span>Shift</span></label>
+                    <select id="hkStopKey" class="input input-num"></select>
+                  </div>
+                </div>
+                <div class="setting-label"><small id="hkFailText" class="hk-fail" hidden></small></div>
+                <div class="setting-label"><small data-i18n="settings.hotkeysHint2">默认关闭；开启但未设置时使用默认键（开始 Ctrl+Alt+F9 / 停止 Ctrl+Alt+F10）；组合键被其它程序占用时会在这里提示</small></div>
+              </div>
             </div></div>
           </section>
 
@@ -278,50 +299,6 @@
               <button type="button" data-lang="en-US">English</button>
               <button type="button" data-lang="ja-JP">日本語</button>
             </div>
-          </div>
-        </section>
-
-        <section class="card">
-          <h2 class="card-title" data-i18n="settings.hotkeys">快捷键</h2>
-          <div class="setting-block">
-            <div class="setting-label">
-              <strong data-i18n="settings.hotkeysEnable">启用全局热键</strong>
-              <small data-i18n="settings.hotkeysHint">游戏里不用切回工具；组合键被其它程序占用时会在这里提示</small>
-            </div>
-            <label class="ext-check"><input type="checkbox" id="chkHotkeys"><span data-i18n="settings.hotkeysOn">开启</span></label>
-          </div>
-          <div class="setting-block">
-            <div class="setting-label">
-              <strong data-i18n="settings.hotkeyStart">开始采集</strong>
-              <small id="hkStartLabel">Ctrl+Alt+F9</small>
-            </div>
-            <div class="setting-label">
-              <strong data-i18n="settings.hotkeyStop">停止采集</strong>
-              <small id="hkStopLabel">Ctrl+Alt+F10</small>
-            </div>
-          </div>
-          <div class="setting-block" id="hkFailRow" hidden>
-            <div class="setting-label"><small id="hkFailText" class="hk-fail"></small></div>
-          </div>
-        </section>
-
-        <section class="card">
-          <h2 class="card-title" data-i18n="settings.net">网络监控</h2>
-          <div class="setting-block">
-            <div class="setting-label">
-              <strong data-i18n="settings.netAlert">流量告警</strong>
-              <small data-i18n="settings.netAlertHint">今日 / 本月累计（物理接口）超过阈值时，托盘气泡与任务栏提醒一次；0 = 关闭</small>
-            </div>
-            <div class="setting-row">
-              <label class="field-label" for="netAlertDay" data-i18n="settings.netDay">每日阈值 (MB)</label>
-              <input id="netAlertDay" class="input input-num" type="number" min="0" max="1000000" step="100" value="0">
-            </div>
-            <div class="setting-row">
-              <label class="field-label" for="netAlertMonth" data-i18n="settings.netMonth">每月阈值 (MB)</label>
-              <input id="netAlertMonth" class="input input-num" type="number" min="0" max="1000000" step="100" value="0">
-            </div>
-            <label class="ext-check"><input type="checkbox" id="chkNetDns"><span data-i18n="settings.netDns">连接视图显示远程主机名（反向 DNS）</span></label>
-            <div class="setting-label"><small data-i18n="settings.netDnsHint">默认关闭；开启后会对连接的远程地址做有限次的域名反查，只在本机使用</small></div>
           </div>
         </section>
 
@@ -625,6 +602,25 @@
           <div class="nt-empty-main" data-i18n="net.emptyMain">未发现活跃网卡</div>
           <div class="nt-empty-sub" data-i18n="net.emptySub">接入网络后这里会显示每块网卡的实时速率</div>
         </div>
+
+        <section class="net-alertcard">
+          <div class="nt-conn-head">
+            <h2 data-i18n="settings.netAlert">流量告警</h2>
+            <span class="nt-hint" data-i18n="net.alertHint">达到阈值时托盘气泡与任务栏提醒一次；0 = 关闭</span>
+          </div>
+          <div class="nt-alert-fields">
+            <label class="nt-field">
+              <span data-i18n="settings.netDay">每日阈值 (MB)</span>
+              <input id="netAlertDay" class="input input-num" type="number" min="0" max="1000000" step="100" value="0">
+            </label>
+            <label class="nt-field">
+              <span data-i18n="settings.netMonth">每月阈值 (MB)</span>
+              <input id="netAlertMonth" class="input input-num" type="number" min="0" max="1000000" step="100" value="0">
+            </label>
+            <label class="check nt-dns-check"><input id="chkNetDns" type="checkbox"><span data-i18n="settings.netDns">连接视图显示远程主机名（反向 DNS）</span></label>
+          </div>
+          <div class="setting-label"><small data-i18n="settings.netDnsHint">反向 DNS 默认关闭；开启后会对连接的远程地址做有限次的域名反查，只在本机使用</small></div>
+        </section>
 
         <footer class="net-caliber" data-i18n="net.caliber">口径：实时速率为接口总量（网卡计数器差分），今日 / 本月与历史图表为物理接口的按日累计，连接视图是当前快照不计字节——这些都不是按进程的统计；按进程的用量在报告里（需开启「进程网络用量」采集项）。VPN 激活时物理与虚拟网卡各计一层流量，属正常现象。</footer>
       </div>

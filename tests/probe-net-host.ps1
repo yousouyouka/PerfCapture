@@ -71,8 +71,14 @@ $sumT = [double]$totals.today.recv + [double]$totals.today.sent
 $sumM = [double]$totals.month.recv + [double]$totals.month.sent
 if ($sumT -gt 0) { Ok ('今日汇总有值: ' + $sumT) } else { Bad '今日汇总为 0（Get-NetDaySum 没算进增量）' }
 if ($sumM -ge $sumT) { Ok ('本月汇总 ≥ 今日: ' + $sumM) } else { Bad '本月汇总比今日还小' }
-if (@($totals.days).Count -eq 30) { Ok '近 30 天序列完整' } else { Bad ('近 30 天序列异常: ' + @($totals.days).Count) }
-if (@($totals.months).Count -eq 12) { Ok '近 12 个月序列完整' } else { Bad '近 12 个月序列异常' }
+if ($totals.days.Count -eq 30) { Ok '近 30 天序列完整' } else { Bad ('近 30 天序列异常: ' + $totals.days.Count) }
+if ($totals.months.Count -eq 12) { Ok '近 12 个月序列完整' } else { Bad ('近 12 个月序列异常: ' + $totals.months.Count) }
+# 序列化自证：Send-ToUi 走 ConvertTo-Json，嵌套 List[object] 必须能原样出 JSON。
+# 注意 @($totals.days) 对 List[object] 会抛 Argument types do not match（断言会被静默跳过），
+# 取数量用 .Count，不要用 @() 包一层。
+$totalsJson = @{ type = 'netTotals'; totals = $totals } | ConvertTo-Json -Depth 6 -Compress
+$dayJsonCount = ([regex]::Matches($totalsJson, '"d":')).Count
+if ($totalsJson -match '"today"' -and $dayJsonCount -eq 30) { Ok "netTotals 可序列化为 JSON（30 天齐全，长度 $($totalsJson.Length)）" } else { Bad "netTotals JSON 序列化异常（Send-ToUi 会静默丢包）：days=$dayJsonCount" }
 
 # ---- 7. netTotals / netCaps 推送时机：打开页面应立即收到一次 ----
 Set-NetConsumer 'page' $true

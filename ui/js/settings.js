@@ -57,36 +57,83 @@
   };
 })();
 
-/* ── 全局热键（2.1.16）──
+/* ── 全局热键（2.2.1）：放在采集设置里，可自定义键位 ──
    状态以宿主为准：注册成功与否由宿主回传，前端不自己猜。
-   这里只做「开关」与「显示组合键」，不提供自定义键位——避免用户编出与输入法冲突的组合。 */
+   默认关闭；开启但未设置时宿主使用默认组合键（开始 Ctrl+Alt+F9 / 停止 Ctrl+Alt+F10）。 */
 (function initHotkeys() {
   const chk = document.getElementById('chkHotkeys');
-  const sLab = document.getElementById('hkStartLabel');
-  const eLab = document.getElementById('hkStopLabel');
-  const failRow = document.getElementById('hkFailRow');
   const failTxt = document.getElementById('hkFailText');
+  const rows = [
+    { side: 'start', ctrl: 'hkStartCtrl', alt: 'hkStartAlt', shift: 'hkStartShift', key: 'hkStartKey' },
+    { side: 'stop', ctrl: 'hkStopCtrl', alt: 'hkStopAlt', shift: 'hkStopShift', key: 'hkStopKey' }
+  ];
+  const KEYS = ['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12'];
+
+  // 键位下拉框：F1–F12（避开与输入法/组合键冲突的组合，见 2.1.16 规则）
+  rows.forEach((r) => {
+    const sel = document.getElementById(r.key);
+    if (!sel || sel.options.length) return;
+    KEYS.forEach((k) => {
+      const o = document.createElement('option');
+      o.value = k; o.textContent = k;
+      sel.appendChild(o);
+    });
+  });
+
+  function readSide(r) {
+    return {
+      ctrl: document.getElementById(r.ctrl).checked,
+      alt: document.getElementById(r.alt).checked,
+      shift: document.getElementById(r.shift).checked,
+      key: document.getElementById(r.key).value || 'F9'
+    };
+  }
+  function writeSide(r, c) {
+    if (!c) return;
+    document.getElementById(r.ctrl).checked = !!c.ctrl;
+    document.getElementById(r.alt).checked = !!c.alt;
+    document.getElementById(r.shift).checked = !!c.shift;
+    const sel = document.getElementById(r.key);
+    const k = String(c.key || '').toUpperCase();
+    if (sel && KEYS.includes(k)) sel.value = k;
+  }
+
+  /* init 下发 s.hotkeys（enabled + start/stop 的 ctrl/alt/shift/key） */
+  function apply(hk) {
+    if (!hk) return;
+    if (chk && hk.enabled != null) chk.checked = !!hk.enabled;
+    rows.forEach((r) => writeSide(r, hk[r.side]));
+  }
 
   function update(msg) {
-    if (!msg) return;
-    if (chk && msg.enabled != null) chk.checked = !!msg.enabled;
-    if (sLab && msg.start) sLab.textContent = msg.start;
-    if (eLab && msg.stop) eLab.textContent = msg.stop;
-    if (failRow && failTxt) {
-      const bad = msg.ok === false && msg.fail;
-      failRow.hidden = !bad;
-      failTxt.textContent = bad ? msg.fail : '';
+    /* 宿主回执（注册成功/失败）——旧消息只有展示文本，仅用于失败提示 */
+    if (!msg || !failTxt) return;
+    if (msg.ok === false && msg.fail) {
+      failTxt.hidden = false;
+      failTxt.textContent = msg.fail;
+    } else if (msg.ok === true) {
+      /* 冲突解决后要把红字清掉，不能让它一直挂着 */
+      failTxt.hidden = true;
+      failTxt.textContent = '';
     }
   }
 
-  window.PerfHotkeysUI = {
-    update,
-    request: () => { if (typeof send === 'function') send({ cmd: 'getHotkeys' }); },
-  };
-
-  if (chk) {
-    chk.addEventListener('change', () => {
-      if (typeof send === 'function') send({ cmd: 'setHotkeys', enabled: chk.checked });
+  function push() {
+    if (typeof send !== 'function') return;
+    send({
+      cmd: 'setHotkeys',
+      enabled: !!(chk && chk.checked),
+      start: readSide(rows[0]),
+      stop: readSide(rows[1])
     });
   }
+
+  window.PerfHotkeysUI = { update, apply, request: () => { if (typeof send === 'function') send({ cmd: 'getHotkeys' }); } };
+
+  const inputs = ['chkHotkeys', 'hkStartCtrl', 'hkStartAlt', 'hkStartShift', 'hkStartKey',
+    'hkStopCtrl', 'hkStopAlt', 'hkStopShift', 'hkStopKey'];
+  inputs.forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', push);
+  });
 })();

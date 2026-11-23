@@ -171,6 +171,20 @@
 /* 口径说明 */
 .net-caliber { font-size: 0.66rem; color: var(--faint); margin: 0; line-height: 1.6; }
 
+/* 网络页内的流量告警卡（2.2.1 从设置页移入；纵向排布避免文字遮挡） */
+.net-alertcard {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  padding: 0.7rem 0.9rem 0.8rem;
+  display: flex; flex-direction: column; gap: 0.55rem;
+}
+.nt-alert-fields { display: flex; flex-direction: column; gap: 0.45rem; }
+.nt-field { display: flex; align-items: center; gap: 0.5rem; }
+.nt-field > span { flex: none; width: 7.5rem; font-size: 0.72rem; color: var(--muted); }
+.nt-dns-check { margin-top: 0.15rem; }
+
 /* 历史用量 */
 .net-hist {
   background: var(--card);

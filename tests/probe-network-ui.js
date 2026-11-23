@@ -179,6 +179,21 @@ P.handle({ type: 'netTotals', totals: zeroTotals });
 ok(ids.netHistEmpty.hidden === false, '全零历史显示空状态');
 P.handle({ type: 'netTotals', totals: totals1 });
 
+/* ---- 消息链回归（2.2.1 根因）：bridge 必须把 netTotals 转发给 PerfNetwork ----
+   曾经 bridge 只转发 netSample / netCaps，宿主推的 netTotals 被丢掉，
+   于是「今日 / 本月 / 历史」永远是「—」而实时速率正常。这里直接驱动真实 bridge.js。 */
+vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'ui', 'js', 'bridge.js'), 'utf8'), ctx, { filename: 'bridge.js' });
+ok(typeof ctx.handleMessage === 'function', 'bridge.js 的 handleMessage 已加载');
+ids.netToday.textContent = '—';
+ids.netMonth.textContent = '—';
+ctx.handleMessage({ type: 'netTotals', totals: {
+  today: { recv: 1024, sent: 0 },
+  month: { recv: 2048, sent: 0 },
+  days: [], months: []
+} });
+ok(ids.netToday.textContent === '1.0 KB', 'bridge 转发 netTotals：今日不再是「—」', '实际 ' + ids.netToday.textContent);
+ok(ids.netMonth.textContent === '2.0 KB', 'bridge 转发 netTotals：本月不再是「—」', '实际 ' + ids.netMonth.textContent);
+
 /* ---- 连接/会话视图 ---- */
 const conns = [
   { p: 1000, n: 'game', pr: 'TCP', la: '192.168.1.5', lp: 52300, ra: '203.0.113.9', rp: 443, st: 'ESTABLISHED', sv: 'HTTPS', hn: 'cdn.example.com' },

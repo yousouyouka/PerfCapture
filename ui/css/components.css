@@ -498,3 +498,15 @@ body.is-col-resizing * { cursor: col-resize !important; user-select: none !impor
   padding-right: 0.4rem;
 }
 #capHelpModal .upd-modal-actions { flex: 0 0 auto; margin-top: 0.6rem; }
+/* 全局热键编辑（2.2.1：从设置页移入采集设置卡） */
+.hotkey-block { display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.5rem; }
+.hotkey-rows { display: flex; flex-direction: column; gap: 0.35rem; }
+.hotkey-row {
+  display: flex; align-items: center; gap: 0.55rem;
+  padding-left: 1.4rem;
+  flex-wrap: wrap;
+}
+.hotkey-row > .field-label { flex: none; width: 5rem; }
+.hotkey-row .check { margin: 0; }
+.hotkey-row select.input-num { width: 5.5rem; }
+.hk-fail { color: #e07a5f; }

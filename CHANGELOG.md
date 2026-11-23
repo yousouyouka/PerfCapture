@@ -26,7 +26,7 @@
 > **发布前自检修正（同日）**：用户验收发现网络页全部数据为空，自检抓出 3 个真实缺陷并修复：
 > 1. **跨 runspace 嵌套集合陷阱**：采样样本带 `List[object]`/OrderedDictionary 直接入队，
 >    宿主侧枚举抛「Argument types do not match」，每个样本都被吞掉——UI 一个字节都收不到。
->    现样本一律序列化成 JSON 字符串入队（新增 `tests/probe-net-host.ps1` 18 项全链自检）。
+>    现样本一律序列化成 JSON 字符串入队（新增 `tests/probe-net-host.ps1`，现 21 项全链自检）。
 > 2. **裸 runspace 缺类型数据**：`Get-NetAdapterStatistics` 的 `ifIndex` 是模块 types.ps1xml
 >    提供的别名属性，裸 runspace 里不存在 → 网卡全部被过滤、ifs 永远为空。改按网卡 Name
 >    与元数据表配对取索引。
@@ -34,6 +34,21 @@
 >    同一个变量，赋值覆盖参数 → 今日/本月永远为 0；`Get-NetTotalsSnapshot` 的 `$month`
 >    引用了未赋值变量 → 本月恒为空。均已修复。
 > 另修：连接视图 sticky 表头被行文字遮挡（`border-collapse: separate` + z-index）。
+>
+> **第二轮验收整改（同日）**：
+> 1. **今日 / 本月 / 历史仍为空（真根因）**：`ui/js/bridge.js` 的消息分发只写了
+>    `netSample` / `netCaps`，宿主推的 `netTotals` 被静默丢弃 → 实时速率正常、汇总永远是「—」。
+>    补齐 `netTotals` 转发；探针改为驱动真实 `bridge.js` 的 `handleMessage` 自证整条消息链。
+> 2. **热键搬到采集设置**：删除设置页「快捷键」独立卡，热键（启用开关 + 开始/停止的
+>    Ctrl/Alt/Shift + F1–F12）移入「采集设置」；**默认关闭**，开启但未改键时用默认
+>    `Ctrl+Alt+F9` / `Ctrl+Alt+F10`；冲突提示就地显示，解决后自动消失。
+> 3. **流量告警移入网络页**：设置页不再有「网络监控」卡；告警阈值与反向 DNS 放进网络页
+>    的连接视图之后，标签与输入框横向排布、不再互相遮挡；阈值改为随 `saveSettings` 落盘
+>    （此前漏在白名单外，改了重启会丢）。
+>
+> 顺带修正：`tests/probe-net-host.ps1` 原用 `@($totals.days).Count` 断言，在 PowerShell 里对
+> `List[object]` 会抛「Argument types do not match」导致两条断言被静默跳过；改用 `.Count`
+> 并补一条 `netTotals` 的 JSON 序列化自证。
 
 - **报告新增「进程网络用量」（P4 / 进阶功能：进程级归因·报告级）**：采集项清单新增
   「进程网络用量（ETW）」开关（**默认关**，需要提权）。开启后采集期间启动内核网络 ETW

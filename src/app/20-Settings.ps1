@@ -21,9 +21,10 @@ function New-DefaultConfig {
         # 扩展中心：id -> 状态对象（status/reason/installedAt/updatedAt）。老配置没有就空表。
         # 键是扩展 id，不是固定字段——载入侧必须整块遍历属性，别只挑几个键（overlay 整块丢失的教训）。
         extensions  = @{}
-        # 全局热键（2.1.16）：enabled 关掉即注销；键位只支持 F1–F12，避免和输入法/组合键冲突
+        # 全局热键（2.1.16 → 2.2.1）：**默认关闭**；开启但未设置时宿主用默认组合键。
+        # 键位只支持 F1–F12，避免和输入法/组合键冲突；enabled=false 时不注册任何组合键
         hotkeys     = @{
-            enabled = $true
+            enabled = $false
             start   = @{ ctrl = $true; alt = $true; shift = $false; key = 'F9' }
             stop    = @{ ctrl = $true; alt = $true; shift = $false; key = 'F10' }
         }
@@ -96,6 +97,24 @@ function Set-ConfigValue {
             else { Write-AppLog ("配置 $_=$Value 越界（0-1000000），已忽略") 'WARN' }
         }
         'netReverseDns' { if ($Value -is [bool]) { $script:Cfg.netReverseDns = $Value; if (Get-Command Set-NetReverseDns -ErrorAction SilentlyContinue) { Set-NetReverseDns $Value } } }
+        'hotkeys' {
+            # 整块校验（2.2.1：采集设置里的热键编辑随 saveSettings 走）；
+            # 键名只认 F1–F12，非法保留原值并记日志；改完即时重注册
+            if ($Value -isnot [pscustomobject] -and $Value -isnot [hashtable]) { return }
+            $hk = $script:Cfg.hotkeys
+            if ($null -ne $Value.enabled) { $hk.enabled = [bool]$Value.enabled }
+            foreach ($side in 'start', 'stop') {
+                $v = $Value.$side
+                if ($null -eq $v) { continue }
+                $key = ([string]$v.key).ToUpperInvariant()
+                if ($key -match '^F([1-9]|1[0-2])$') {
+                    $hk[$side] = @{ ctrl = [bool]$v.ctrl; alt = [bool]$v.alt; shift = [bool]$v.shift; key = $key }
+                } else {
+                    Write-AppLog ("热键 $side 的键名非法（$key），保留原值") 'WARN'
+                }
+            }
+            if (Get-Command Register-PerfHotkeys -ErrorAction SilentlyContinue) { try { [void](Register-PerfHotkeys) } catch { } }
+        }
         default { Write-AppLog ("未知配置项 $Key，已忽略") 'WARN' }
     }
 }

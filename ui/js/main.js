@@ -144,6 +144,17 @@ function saveSettings() {
       netAlertDayMB: parseInt($('#netAlertDay').value, 10) || 0,
       netAlertMonthMB: parseInt($('#netAlertMonth').value, 10) || 0,
       netReverseDns: !!$('#chkNetDns').checked,
+      hotkeys: {
+        enabled: !!$('#chkHotkeys').checked,
+        start: {
+          ctrl: $('#hkStartCtrl').checked, alt: $('#hkStartAlt').checked,
+          shift: $('#hkStartShift').checked, key: $('#hkStartKey').value || 'F9'
+        },
+        stop: {
+          ctrl: $('#hkStopCtrl').checked, alt: $('#hkStopAlt').checked,
+          shift: $('#hkStopShift').checked, key: $('#hkStopKey').value || 'F10'
+        }
+      }
     },
   });
 }

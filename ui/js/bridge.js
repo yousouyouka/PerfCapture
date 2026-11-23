@@ -51,7 +51,7 @@ function handleMessage(msg) {
       applyTheme(s.theme || 'system');
       if (s.language) { state.language = s.language; setLanguage(s.language); }
       if (window.PerfUpdate) window.PerfUpdate.init(s.updateCheck);
-      if (window.PerfHotkeysUI) window.PerfHotkeysUI.request();
+      if (window.PerfHotkeysUI) window.PerfHotkeysUI.apply(s.hotkeys);
       if (msg.procs) setProcs(msg.procs);
       /* 扩展中心状态随 init 下发；宿主侧是唯一事实来源，前端不再只靠本地镜像 */
       if (msg.extensions && window.PerfExtensionsUI) window.PerfExtensionsUI.apply(msg.extensions, msg.fpsSource);
@@ -90,6 +90,7 @@ function handleMessage(msg) {
     // 2.1.18 网络页：L1 接口总量口径的实时速率
     case 'netSample': if (window.PerfNetwork) window.PerfNetwork.handle(msg); break;
     case 'netCaps': if (window.PerfNetwork) window.PerfNetwork.handle(msg); break;
+    case 'netTotals': if (window.PerfNetwork) window.PerfNetwork.handle(msg); break;
     case 'extensions': if (window.PerfExtensionsUI) window.PerfExtensionsUI.apply(msg.extensions, msg.fpsSource); break;
     case 'extensionState': if (window.PerfExtensionsUI) window.PerfExtensionsUI.state(msg); break;
     case 'extensionError': if (window.PerfExtensionsUI) window.PerfExtensionsUI.error(msg); break;

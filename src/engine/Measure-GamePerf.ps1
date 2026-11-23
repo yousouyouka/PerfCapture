@@ -57,7 +57,7 @@ $ErrorActionPreference = 'Stop'
 # 平台规则 / 厂商温度 / 降频这三个模块无 UI 依赖，直接点源即可；
 # 缺文件时对应能力降级为 N/A，不影响帧采集（见《数据源与平台覆盖规则.md》§5）。
 $script:AppModuleDir = Join-Path (Split-Path $PSScriptRoot -Parent) 'app'
-foreach ($m in @('platform-rules.ps1', 'vendor-sensor.ps1', 'cpu-throttle.ps1', 'quality-rules.ps1')) {
+foreach ($m in @('platform-rules.ps1', 'vendor-sensor.ps1', 'cpu-throttle.ps1', 'quality-rules.ps1', 'stutter-context.ps1')) {
     $mp = Join-Path $script:AppModuleDir $m
     if (Test-Path -LiteralPath $mp) { . $mp }
 }
@@ -989,6 +989,19 @@ $gpuMemUsed = if ($collectGpuUsage) { Get-SensorStat 'gpu_mem_used_mb' } else { 
 $procVram   = if ($collectVram) { Get-SensorStat 'proc_vram_mb' } else { $null }
 $procRam    = if ($collectRam)  { Get-SensorStat 'proc_ram_mb' } else { $null }
 
+# ---- 卡顿时刻上下文（2.1.16）：把 Top 卡顿与传感器样本按采集进度对齐 ----
+# 两条流不同源、没有共同时间戳，只能按比例对齐；容差写进报告，不许说成精确对齐。
+$stutterCtx = $null
+if (Get-Command Get-StutterContext -ErrorAction SilentlyContinue) {
+    try {
+        $stutterCtx = Get-StutterContext -Segments $stutterTop -FrameTimes $frameTimes -Sensors $sensors -WindowSec 2 -Top 5
+    } catch {
+        $stutterCtx = [ordered]@{ window_seconds = 2; tolerance_seconds = $null; items = @(); reason = 'failed' }
+    }
+} else {
+    $stutterCtx = [ordered]@{ window_seconds = 2; tolerance_seconds = $null; items = @(); reason = 'moduleMissing' }
+}
+
 # 批次 C：GPU 时钟 / 功耗 / 风扇 / PCIe + 降频原因 + CPU 占用
 $gpuClock    = if ($collectGpuUsage) { Get-SensorStat 'gpu_clock_mhz' } else { $null }
 $gpuClockMax = if ($collectGpuUsage) { Get-SensorStat 'gpu_clock_max_mhz' } else { $null }
@@ -1581,6 +1594,9 @@ $summary = [ordered]@{
         worst_ms = [math]::Round($stutterWorstMs, 1)
         severe = $severeCount
         top = @($stutterTop | ForEach-Object { [ordered]@{ start_frame = $_.start; frames = $_.frames; ms = $_.ms } })
+        # 卡顿时刻上下文（2.1.16）：Top N 卡顿前后 ±window 秒的机器状态。
+        # reason 说明「为什么没有」：noStutter / noSensors / noFrames / moduleMissing，不写空数组冒充「没卡顿」。
+        context = $stutterCtx
     }
     bottleneck       = [ordered]@{
         gpu_busy_pct = $gpuBusyPct
@@ -1835,6 +1851,15 @@ foreach ($x in $features) {
 $chartSvg = ''
 $chartYlab = ''
 $chartCap = ''
+# 卡顿位置标注（2.1.16）：按 at_pct 画竖虚线，让人一眼看到「卡在哪一段」
+$markSvg = ''
+if ($stutterCtx -and $stutterCtx.items) {
+    foreach ($it in @($stutterCtx.items)) {
+        $mx = [math]::Round([double]$it.at_pct * 10.0, 1)
+        if ($mx -lt 0 -or $mx -gt 1000) { continue }
+        $markSvg += '<line x1="' + $mx + '" y1="0" x2="' + $mx + '" y2="150" stroke="' + $cBad + '" stroke-width="1" stroke-dasharray="3 4" opacity="0.55" vector-effect="non-scaling-stroke"/>'
+    }
+}
 if ($collectChart -and $chartMs -and $chartMs.Count -gt 2) {
     $limit = [double]$chartLimit
     $nBin = $chartMs.Count
@@ -1865,6 +1890,7 @@ if ($collectChart -and $chartMs -and $chartMs.Count -gt 2) {
                 '</linearGradient></defs>' + $grid + $refLine +
                 '<polygon points="' + $poly + ' 1000,150 0,150" fill="url(#ftfill)"/>' +
                 '<polyline points="' + $poly + '" fill="none" stroke="' + $cAccent + '" stroke-width="1.4" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>' +
+                $markSvg +
                 '</svg>'
 
     $lbl = New-Object System.Collections.Generic.List[string]
@@ -1974,6 +2000,38 @@ if ($trend) {
         $secTrend = '<div class="mins">' + $miniLoad + $miniTemp + $miniPower + '</div>' +
                     '<div class="cap">按时间等分 ' + $trend.bins + ' 段（段内取平均；传感器采样比帧粗，段数按样本量自适应，每段约 2 个样本）；某段没有样本就断开，不补值、不插值。</div>'
     }
+}
+
+# ── 卡顿时刻（2.1.16）：Top N 卡顿前后 ±N 秒的机器状态 ──
+# 两路数据不同源，只能按采集进度比例对齐；容差写在正文里，不许当成毫秒级因果证据。
+$secStutter = ''
+if ($stutterCtx -and @($stutterCtx.items).Count -gt 0) {
+    $tolTxt = if ($null -ne $stutterCtx.tolerance_seconds) { [string]$stutterCtx.tolerance_seconds } else { '—' }
+    $sRows = ''
+    $si = 0
+    foreach ($it in @($stutterCtx.items)) {
+        $si++
+        $parts = @()
+        if ($null -ne $it.avg.gpu_util) { $parts += ('GPU 占用 ' + (Fmt $it.avg.gpu_util '0') + ' %') }
+        if ($null -ne $it.avg.gpu_temp) {
+            $gt = 'GPU ' + (Fmt $it.avg.gpu_temp '0') + ' °C'
+            if ($null -ne $it.peak.gpu_temp -and ([double]$it.peak.gpu_temp -gt [double]$it.avg.gpu_temp)) {
+                $gt += '（峰值 ' + (Fmt $it.peak.gpu_temp '0') + ' °C）'
+            }
+            $parts += $gt
+        }
+        if ($null -ne $it.avg.vram_mb) { $parts += ('显存 ' + (Fmt $it.avg.vram_mb '0') + ' MB') }
+        if ($null -ne $it.avg.gpu_power) { $parts += ('GPU ' + (Fmt $it.avg.gpu_power '0') + ' W') }
+        if ($null -ne $it.avg.cpu_util) { $parts += ('CPU 占用 ' + (Fmt $it.avg.cpu_util '0') + ' %') }
+        if ($null -ne $it.avg.cpu_temp) { $parts += ('CPU ' + (Fmt $it.avg.cpu_temp '0') + ' °C') }
+        $sBody = if ($parts.Count -gt 0) { $parts -join ' · ' } else { '窗口内没有可用的传感器样本' }
+        $sRows += '<tr class="sec"><td colspan="2">#' + $si + ' · 位置 ' + (Fmt $it.at_pct '0.0') + '% · ' +
+                  (Fmt $it.ms '0.0') + ' ms / ' + $it.frames + ' 帧</td></tr>' +
+                  '<tr><td>前后 ±' + (Fmt $stutterCtx.window_seconds '0') + ' 秒平均（' + $it.samples + ' 个样本）</td><td>' + $sBody + '</td></tr>'
+    }
+    $secStutter = '<h2>02 卡顿时刻</h2>' +
+                  '<div class="cap">只列最严重的 ' + $si + ' 段。逐帧与传感器两路数据不同源，按采集进度比例对齐，误差约 ' + $tolTxt + ' 秒；不要把它当成精确到毫秒的因果证据。</div>' +
+                  '<table class="det">' + $sRows + '</table>'
 }
 
 # ── B3：瓶颈诊断（结论 + 依据指标）──
@@ -2359,6 +2417,7 @@ $cards</div>
 $verdictItems
 <h2>02 性能曲线</h2>
 $secChart$secTrend
+$secStutter
 $secDiag
 <table class="det">
 $detOrdered

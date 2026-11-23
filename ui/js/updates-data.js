@@ -19,6 +19,15 @@ window.PerfUpdateAreas = ['capture', 'realtime', 'other'];
 
 window.PerfUpdates = [
   {
+    date: '2026-11-23', version: '2.1.16',
+    title: '报告新增卡顿时刻：看清楚卡的那一下在干什么',
+    items: [
+      ['metrics', '报告会列出最严重的 5 段卡顿，以及每段前后 2 秒的 GPU 占用与温度、显存、功耗、CPU 占用与温度。', 'capture'],
+      ['chart', '帧时间曲线上直接标出这些卡顿的位置，不用再自己对着时间轴找。', 'capture'],
+      ['fix', '对齐方式在报告里写清楚了：两路数据来源不同，按采集进度比例对齐、误差约 1 秒，不作为毫秒级因果证据。', 'other']
+    ]
+  },
+  {
     date: '2026-11-23', version: '2.1.15',
     title: '新增历史报告：把历次采集翻出来对比',
     items: [

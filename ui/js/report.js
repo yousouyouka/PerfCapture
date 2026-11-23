@@ -39,6 +39,46 @@ function qualityBanner(r) {
          `<div class="rp-q-t">${escapeHtml(title)}</div>${lines}</div>`;
 }
 
+/** 卡顿时刻（2.1.16）：把 Top 卡顿与其前后 ±N 秒的机器状态并排列出来。
+ *  没有 context（老报告）或没有卡顿时返回空串 —— 不占版面、不写「无卡顿」这种结论。 */
+function stutterContextBlock(r) {
+  const c = r && r.stutter && r.stutter.context;
+  if (!c || !Array.isArray(c.items) || !c.items.length) return '';
+  const n = c.items.length;
+  const w = c.window_seconds != null ? c.window_seconds : 2;
+  const tol = c.tolerance_seconds;
+  const cap = tol != null
+    ? fillParams(t('report.sc.cap',
+      '最严重的 {n} 段；列出每段前后 ±{w} 秒的平均值。逐帧与传感器两路数据不同源，按采集进度比例对齐，误差约 {tol} 秒——不要当成精确到毫秒的因果证据。'),
+      { n, w, tol })
+    : fillParams(t('report.sc.capNoTol',
+      '最严重的 {n} 段；列出每段前后 ±{w} 秒的平均值。（本次没有可用的传感器样本，无法给出对齐误差。）'), { n, w });
+
+  let body = '';
+  c.items.forEach((it, i) => {
+    const a = (it && it.avg) || {};
+    const parts = [];
+    if (a.gpu_util != null) parts.push(fillParams(t('report.sc.gpuUtil', 'GPU 占用 {v} %'), { v: Math.round(a.gpu_util) }));
+    if (a.gpu_temp != null) {
+      let s = fillParams(t('report.sc.gpuTemp', 'GPU {v} °C'), { v: Math.round(a.gpu_temp) });
+      if (it.peak && it.peak.gpu_temp != null && Number(it.peak.gpu_temp) > Number(a.gpu_temp)) {
+        s += fillParams(t('report.sc.peak', '（峰值 {v} °C）'), { v: Math.round(it.peak.gpu_temp) });
+      }
+      parts.push(s);
+    }
+    if (a.vram_mb != null) parts.push(fillParams(t('report.sc.vram', '显存 {v} MB'), { v: Math.round(a.vram_mb) }));
+    if (a.gpu_power != null) parts.push(fillParams(t('report.sc.gpuPower', 'GPU {v} W'), { v: Number(a.gpu_power).toFixed(0) }));
+    if (a.cpu_util != null) parts.push(fillParams(t('report.sc.cpuUtil', 'CPU 占用 {v} %'), { v: Math.round(a.cpu_util) }));
+    if (a.cpu_temp != null) parts.push(fillParams(t('report.sc.cpuTemp', 'CPU {v} °C'), { v: Math.round(a.cpu_temp) }));
+    const text = parts.length ? parts.join(' · ') : t('report.sc.noSamples', '窗口内没有可用的传感器样本');
+    const head = `#${i + 1} · ${Number(it.at_pct).toFixed(1)}% · ${Number(it.ms).toFixed(0)} ms / ${it.frames || 1} 帧`;
+    body += `<div class="row"><span class="k">${escapeHtml(head)}</span><span class="v">${escapeHtml(text)}</span></div>`;
+  });
+  return `<div class="rp-section">${escapeHtml(t('report.sc.title', '卡顿时刻'))}</div>` +
+         `<div class="rp-note">${escapeHtml(cap)}</div>` +
+         `<div class="rp-rows">${body}</div>`;
+}
+
 function renderReport(r) {
   state.report = r;
   const box = $('#preview');
@@ -120,6 +160,10 @@ function renderReport(r) {
       html += chartBlock(id, t(key, dflt), capTrend, unit);
     });
   }
+
+  /* ── 卡顿时刻（2.1.16）：Top N 卡顿前后 ±N 秒的机器状态 ──
+     两路数据不同源，只能按采集进度比例对齐；容差必须写出来，不许说成精确对齐。 */
+  html += stutterContextBlock(r);
 
   const rows = [];
   if (r.avg_frametime_ms != null) rows.push([t('metric.ftRow', '帧时间 平均 / p95'), `${r.avg_frametime_ms} / ${r.frametime_p95_ms} ms`]);
@@ -206,6 +250,12 @@ function renderReport(r) {
 
   /* 图表要在 DOM 就位之后再画 */
   const cm = chartMetaFrom(r);           // 悬浮提示算时间轴要用
+  /* 卡顿位置（2.1.16）：把 Top 卡顿的百分比位置传给曲线，画成竖虚线 */
+  const ctx2 = r.stutter && r.stutter.context;
+  if (ctx2 && Array.isArray(ctx2.items) && ctx2.items.length) {
+    const marks = ctx2.items.map((x) => Number(x && x.at_pct)).filter((v) => isFinite(v));
+    if (marks.length) cm.marks = marks;
+  }
   if (hasAvg) drawChart('chartFps', chart.avg, 'fps', null, cm);
   if (hasMs) drawChart('chartMs', chart.ms, 'ms', chart.limit, cm);
   /* 趋势图也要能悬浮：时间轴按「第几段 / 总段数 × 采集秒数」换算 */
@@ -777,6 +827,7 @@ function renderChart(id) {
     line: css.getPropertyValue('--line').trim() || '#e3e0ec',
     lineStrong: css.getPropertyValue('--line-strong').trim() || '#c9c5d6',
     good: css.getPropertyValue('--good').trim() || '#2f8f46',
+    bad: css.getPropertyValue('--bad').trim() || '#cf3b32',
     faint: css.getPropertyValue('--faint').trim() || '#8b8a99',
     cardSolid: css.getPropertyValue('--card-solid').trim() || '#ffffff',
     strong: css.getPropertyValue('--text-strong').trim() || '#262330',
@@ -800,6 +851,22 @@ function renderChart(id) {
     g.moveTo(pad, Math.round(y) + 0.5);
     g.lineTo(pad + plotW, Math.round(y) + 0.5);
     g.stroke();
+  }
+
+  // 卡顿位置竖虚线（2.1.16）：只画在帧率/帧时间图上——其余图的 x 轴是样本序号，不代表时间
+  if (isFrame && st.meta && Array.isArray(st.meta.marks) && st.meta.marks.length) {
+    g.save();
+    g.strokeStyle = colors.bad;
+    g.globalAlpha = 0.45;
+    g.setLineDash([3, 4]);
+    st.meta.marks.forEach((pct) => {
+      const x = pad + (plotW * Math.min(100, Math.max(0, Number(pct) || 0))) / 100;
+      g.beginPath();
+      g.moveTo(Math.round(x) + 0.5, pad);
+      g.lineTo(Math.round(x) + 0.5, pad + plotH);
+      g.stroke();
+    });
+    g.restore();
   }
 
   // 基准线只对帧率/帧时间有意义（60 FPS 与 16.7 ms 等价）；百分比与绝对值图不画

@@ -1087,6 +1087,28 @@ foreach ($rk in 'nav.reports', 'reports.title', 'reports.cmpBlocked', 'reports.c
     if ($n -lt 3) { Bad "i18n 的 $rk 只有 $n 种语言（应 3）" }
 }
 
+# ---- 2.1.16 卡顿时刻快照 ----
+$scMod = Join-Path $root 'src\app\stutter-context.ps1'
+if (-not (Test-Path -LiteralPath $scMod)) { Bad '缺少 src\app\stutter-context.ps1' }
+$scPs = if (Test-Path -LiteralPath $scMod) { Get-Content $scMod -Raw -Encoding UTF8 } else { '' }
+if ($scPs -notmatch 'function\s+Get-StutterContext') { Bad 'stutter-context.ps1 没有 Get-StutterContext' }
+# 纯函数：不许有 IO / 采集调用（探针直接 dot-source 它）
+foreach ($impure in 'Get-Content', 'Import-Csv', 'Get-CimInstance', 'Start-Process', 'Get-ChildItem') {
+    if ($scPs -match [regex]::Escape($impure)) { Bad "stutter-context.ps1 必须是纯函数，不许调用 $impure" }
+}
+if ($engPs -notmatch [regex]::Escape('stutter-context.ps1')) { Bad '采集引擎没有点源 stutter-context.ps1' }
+if ($engPs -notmatch 'Get-StutterContext') { Bad '采集引擎没有调用 Get-StutterContext' }
+if ($engPs -notmatch 'context\s*=\s*\$stutterCtx') { Bad '报告 JSON 没写入 stutter.context' }
+if ($engPs -notmatch '\$secStutter') { Bad '导出 HTML 没有卡顿时刻板块' }
+if ($engPs -notmatch '\$markSvg') { Bad '帧时间曲线没有卡顿位置标注' }
+if ($repJs -notmatch 'function\s+stutterContextBlock') { Bad 'report.js 缺 stutterContextBlock' }
+if ($repJs -notmatch 'marks') { Bad 'report.js 没有把卡顿位置传给曲线' }
+foreach ($sk in 'report.sc.title', 'report.sc.cap', 'report.sc.noSamples') {
+    $n = ([regex]::Matches($i18nText, [regex]::Escape("'" + $sk + "'"))).Count
+    if ($n -lt 3) { Bad "i18n 的 $sk 只有 $n 种语言（应 3）" }
+}
+if (-not (Test-Path (Join-Path $root 'tests\probe-stutter-context.ps1'))) { Bad '缺少 tests\probe-stutter-context.ps1' }
+
 $rtJs = Get-Content (Join-Path $root 'ui\js\realtime.js') -Raw -Encoding UTF8
 foreach ($need in 'window.PerfRealtime', '__refreshRealtime', 'metricsStart', 'metricsStop', 'is-na', 'FIELDS') {
     if ($rtJs -notmatch [regex]::Escape($need)) { Bad "realtime.js 缺 $need" }

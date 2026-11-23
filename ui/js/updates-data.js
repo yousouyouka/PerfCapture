@@ -19,6 +19,15 @@ window.PerfUpdateAreas = ['capture', 'realtime', 'other'];
 
 window.PerfUpdates = [
   {
+    date: '2026-11-23', version: '2.1.13',
+    title: '报告新增数据可信度提示与条件指纹',
+    items: [
+      ['metrics', '报告顶部会先说明这次数据能不能支撑结论：样本过少、采集中断、游戏大部分时间不在前台、GPU 指标缺失过多都会被列出；正常时不显示任何提示，不打扰。', 'capture'],
+      ['chart', '报告的测试环境新增显卡驱动、操作系统与 BIOS 版本——以后要对比两次采集，先看这三项是否相同。', 'capture'],
+      ['fix', '修正报告 JSON 的嵌套深度：可信度明细不再被压成字符串。', 'other']
+    ]
+  },
+  {
     date: '2026-11-22', version: '2.1.12',
     title: '采集项补齐温度与降频、浮窗温度解锁、1%L 冷启动说明',
     items: [

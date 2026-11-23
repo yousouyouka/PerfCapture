@@ -32,6 +32,21 @@
 }
 .rp-section { font-size: 0.78rem; color: var(--muted); margin: 0.9rem 0 0.45rem; }
 
+/* 数据可信度横幅（2.1.13）：只在确实有问题时出现；不整块染色，只用左侧竖条提示级别 */
+.rp-quality {
+  background: var(--tile);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--warn);
+  border-radius: 10px;
+  padding: 0.55rem 0.7rem;
+  margin-bottom: 0.7rem;
+  font-size: 0.74rem;
+  line-height: 1.65;
+}
+.rp-quality.bad { border-left-color: var(--bad); }
+.rp-quality .rp-q-t { color: var(--text-strong); margin-bottom: 0.15rem; }
+.rp-quality .rp-q-line { color: var(--muted); }
+
 .rp-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

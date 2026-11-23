@@ -57,7 +57,7 @@ $ErrorActionPreference = 'Stop'
 # 平台规则 / 厂商温度 / 降频这三个模块无 UI 依赖，直接点源即可；
 # 缺文件时对应能力降级为 N/A，不影响帧采集（见《数据源与平台覆盖规则.md》§5）。
 $script:AppModuleDir = Join-Path (Split-Path $PSScriptRoot -Parent) 'app'
-foreach ($m in @('platform-rules.ps1', 'vendor-sensor.ps1', 'cpu-throttle.ps1')) {
+foreach ($m in @('platform-rules.ps1', 'vendor-sensor.ps1', 'cpu-throttle.ps1', 'quality-rules.ps1')) {
     $mp = Join-Path $script:AppModuleDir $m
     if (Test-Path -LiteralPath $mp) { . $mp }
 }
@@ -1539,9 +1539,38 @@ if ($stalled) { [void]$verdicts.Add(@('bad', 'verdict.stalled')) }
 elseif ($wallSec -gt 0 -and $durSec -lt ($wallSec * 0.6)) {
     [void]$verdicts.Add(@('warn', 'verdict.partial', @{ dur = [math]::Round($durSec,1); wall = $wallSec }))
 }
+# ---------------------------------------------------------------- 数据可信度与条件指纹（2.1.13）
+# 判定逻辑在 quality-rules.ps1（纯函数、无副作用，探针可直接验证）；这里只负责喂事实，不在这里做判断。
+$gpuSampleTotal = @($sensors).Count
+$gpuSampleOk = 0
+foreach ($srow in @($sensors)) {
+    $gv = [string]$srow.gpu_util_pct
+    if ($gv -and $gv -ne 'NA') { $gpuSampleOk++ }
+}
+if (Get-Command Get-CaptureQuality -ErrorAction SilentlyContinue) {
+    $quality = Get-CaptureQuality -Frames $frameTimes.Count -EffectiveSeconds $durSec -WallSeconds $wallSec `
+        -Stalled $stalled -ForegroundPct $fgPct -GpuRequested $collectGpuUsage `
+        -SensorSamples $gpuSampleTotal -GpuSamplesOk $gpuSampleOk
+} else {
+    # 模块缺失时如实标 unknown：前端不显示横幅，也不许当成「检查通过」
+    $quality = [ordered]@{ level = 'unknown'; checks = @() }
+}
+
+# 条件指纹：跨次对比的前提（F0-2）。取不到就留 null，不写「未知」冒充数值。
+$driverVer = $null
+try {
+    if (Test-Path -LiteralPath $smi) {
+        $dv = & $smi '--query-gpu=driver_version' '--format=csv,noheader' 2>$null | Select-Object -First 1
+        if ($dv) { $driverVer = ([string]$dv).Trim() }
+    }
+} catch { $driverVer = $null }
+
 $summary = [ordered]@{
-    schema_version   = 2
+    schema_version   = 3
     na_metrics       = @($naMetrics)
+    # 本次数据是否足以支撑结论：level = ok / caution / blocked / unknown（模块缺失）
+    # checks 里只列「确实触发的项」，没触发不等于逐项检查过（见 quality-rules.ps1 的说明）
+    quality          = $quality
     stutter_threshold_ms = $StutterMs
     fps_01pct_low    = [math]::Round($fps01Low, 1)
     fps_min          = [math]::Round($minFPS, 1)
@@ -1624,6 +1653,11 @@ $summary = [ordered]@{
         system_vendor       = $(if ($platform) { [string]$platform.systemVendor } else { $null })
         system_model        = $(if ($platform) { [string]$platform.systemModel } else { $null })
         os_build            = $(if ($platform) { [int]$platform.osBuild } else { $null })
+        # 条件指纹（2.1.13）：跨次/跨机器对比前先对齐这几项，任何一项不同都不能直接比「提升」。
+        # 驱动版本取不到就是 null —— 报告按「无法确认」渲染，不写猜测值。
+        driver_version      = $driverVer
+        os_version          = $(if ($platform) { [string]$platform.osName } else { $null })
+        bios_version        = $(if ($platform) { [string]$platform.bios } else { $null })
     }
     run              = $runName
     process          = $exeBase
@@ -1714,7 +1748,8 @@ $summary = [ordered]@{
         diagnosis = $true        # 由已采数据推算，恒有
     }
 }
-$summary | ConvertTo-Json -Depth 3 | Out-File -FilePath $jsonOut -Encoding UTF8
+# 深度 6：quality.checks 里的对象在 5 层，深度 3 会被压成字符串（历史遗留的隐患，一并修掉）
+$summary | ConvertTo-Json -Depth 6 | Out-File -FilePath $jsonOut -Encoding UTF8
 
 # ---------------------------------------------------------------- console output
 Write-Host ''
@@ -2132,6 +2167,20 @@ if ($platParts.Count -gt 0) {
 # 帧数据源：同一次采集只有一个来源，报告必须如实标注（2.1.10）
 $srcLabel = if ($FpsSource -eq 'presentmon') { 'PresentMon ETW（零注入基线）' } else { $FpsSource + '（扩展数据源）' }
 $detRows += '<tr><td>帧数据源</td><td>' + $srcLabel + '</td></tr>'
+# 条件指纹（2.1.13）：这三行是「两次报告能不能直接比」的前提，缺一项就少一个可比性依据
+if ($summary.environment.os_version) {
+    $osTxt = [string]$summary.environment.os_version
+    if ($summary.environment.os_build) { $osTxt += '（Build ' + $summary.environment.os_build + '）' }
+    $detRows += '<tr><td>操作系统</td><td>' + $osTxt + '</td></tr>'
+}
+if ($summary.environment.bios_version) {
+    $detRows += '<tr><td>BIOS</td><td>' + [string]$summary.environment.bios_version + '</td></tr>'
+}
+if ($summary.environment.driver_version) {
+    $detRows += '<tr><td>显卡驱动</td><td>' + [string]$summary.environment.driver_version + '</td></tr>'
+} else {
+    $detRows += '<tr><td>显卡驱动</td><td>未知<span style="font-size:11.5px;color:#8a8a8a">（nvidia-smi 未返回驱动版本）</span></td></tr>'
+}
 if ($collectRes -and $summary.resolution) {
     $detRows += '<tr><td>分辨率 / 窗口模式</td><td>' + ($summary.resolution -replace 'x', '×') + ' / ' + $summary.window_mode + '</td></tr>'
     if ($summary.monitor) { $detRows += '<tr><td>显示器分辨率</td><td>' + ($summary.monitor -replace 'x', '×') + '</td></tr>' }
@@ -2212,6 +2261,30 @@ if (-not $collectChart)     { $skipNames += '帧时间曲线' }
 $skipNote = ''
 if ($skipNames.Count -gt 0) { $skipNote = '本次未采集：' + ($skipNames -join '、') + '。<br>' }
 
+# ── 数据可信度横幅（2.1.13）──
+# 只在确实有问题时出现：ok 不显示，避免每份报告都多一条无信息量的横幅。
+# 措辞只说明「影响了什么」，不下「数据完全不可用」这种一刀切结论。
+$qualHtml = ''
+$qChecks = @()
+if ($quality -and $quality.checks) { $qChecks = @($quality.checks) }
+if ($qChecks.Count -gt 0) {
+    $qBlocked = ([string]$quality.level -eq 'blocked')
+    $qCls = if ($qBlocked) { 'bad' } else { 'warn' }
+    $qTitle = if ($qBlocked) { '本次数据不足以支撑结论' } else { '本次数据可用，但有以下情况需要注意' }
+    $qLines = ''
+    foreach ($c in $qChecks) {
+        switch ([string]$c.code) {
+            'fewSamples' { $qLines += '<div>· 只采到 <b>' + $c.frames + '</b> 帧 / <b>' + $c.seconds + '</b> 秒：1% Low 与卡顿统计不可靠，不建议据此对比或下结论。</div>' }
+            'stalled'    { $qLines += '<div>· 采集被中断：游戏停止出帧，统计只覆盖前半段。</div>' }
+            'partial'    { $qLines += '<div>· 有效时长只占采集窗口的 <b>' + $c.pct + '%</b>：中间有停帧，数值偏乐观。</div>' }
+            'targetLost' { $qLines += '<div>· 有 <b>' + $c.pct + '%</b> 的采样时间游戏不在前台：画面可能被其它窗口干扰。</div>' }
+            'gpuSparse'  { $qLines += '<div>· GPU 指标只有 <b>' + $c.pct + '%</b> 的采样取到：GPU 相关结论请谨慎。</div>' }
+            default      { $qLines += '<div>· ' + [string]$c.code + '</div>' }
+        }
+    }
+    $qualHtml = '<div class="item ' + $qCls + '"><div><b>' + $qTitle + '</b>' + $qLines + '</div></div>' + "`n"
+}
+
 $html = @"
 <!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="utf-8">
@@ -2278,7 +2351,7 @@ code{background:$cCodeBg;padding:1px 5px;border-radius:4px;color:$cText}
     采集 <b>$($summary.captured_seconds)s</b> / $($summary.frames) 帧 · 前台 <b>$fgPctText</b>
   </div>
 </header>
-
+$qualHtml
 <div class="grid">
 $cards</div>
 

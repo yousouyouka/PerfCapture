@@ -1014,6 +1014,41 @@ foreach ($need in "cpuThermal", "cpuThrottleText", "'cpu.temp'", "'cpu.throttle'
     if ($repJs -notmatch [regex]::Escape($need)) { Bad "report.js 缺 CPU 温度/降频渲染：$need" }
 }
 
+# ---- 2.1.13 数据可信度与条件指纹 ----
+# 判定模块必须是纯函数（探针直接 dot-source 它）：一旦混进 CIM / 事件日志 / 注册表读写就不可测了
+$qualMod = Join-Path $root 'src\app\quality-rules.ps1'
+if (-not (Test-Path -LiteralPath $qualMod)) { Bad '缺少 src\app\quality-rules.ps1' }
+$qualPs = if (Test-Path -LiteralPath $qualMod) { Get-Content $qualMod -Raw -Encoding UTF8 } else { '' }
+if ($qualPs -notmatch 'function\s+Get-CaptureQuality') { Bad 'quality-rules.ps1 没有 Get-CaptureQuality' }
+foreach ($impure in 'Get-CimInstance', 'Get-WinEvent', 'Get-ItemProperty', 'Start-Process') {
+    if ($qualPs -match [regex]::Escape($impure)) { Bad "quality-rules.ps1 必须是纯函数，不许调用 $impure" }
+}
+# 引擎：点源该模块，并把可信度与指纹写进汇总
+if ($engPs -notmatch [regex]::Escape('quality-rules.ps1')) { Bad '采集引擎没有点源 quality-rules.ps1' }
+foreach ($need in 'Get-CaptureQuality', 'quality          = $quality', 'driver_version', 'bios_version', 'os_version', 'schema_version   = 3') {
+    if ($engPs -notmatch [regex]::Escape($need)) { Bad "采集引擎缺数据可信度/指纹：$need" }
+}
+if ($engPs -notmatch 'ConvertTo-Json\s+-Depth\s+6') { Bad '报告 JSON 深度不足（quality.checks 会被压成字符串）' }
+if ($engPs -notmatch '\$qualHtml') { Bad '导出 HTML 没有接入可信度横幅' }
+# 字典：三项指纹指标必须可采并写明来源
+foreach ($fid in 'env.driverVersion', 'env.osVersion', 'env.biosVersion') {
+    $m = @($dictObj.metrics | Where-Object { $_.id -eq $fid })
+    if ($m.Count -ne 1) { Bad "指标字典缺 $fid" }
+    elseif ($m[0].status -ne 'ok') { Bad "$fid 应为 status=ok（取不到时由报告写明原因）" }
+}
+if (@($dictObj.metrics | Where-Object { $_.id -eq 'env.driverVersion' })[0].src -ne 'nvsmi') { Bad 'env.driverVersion 来源应为 nvsmi' }
+# 前端：横幅只在有触发项时出现，未知 code 不许猜文案
+if ($repJs -notmatch 'function\s+qualityBanner') { Bad 'report.js 缺 qualityBanner' }
+if ($repJs -notmatch 'r\.quality') { Bad 'report.js 没有读取 summary.quality' }
+if ($repJs -notmatch 'report\.quality\.fewSamples') { Bad 'report.js 没有映射 fewSamples 文案' }
+# 三语：每个质量键都要有三种语言的条目（同一文件内出现 3 次）
+foreach ($qk in 'report.quality.blockedTitle', 'report.quality.cautionTitle', 'report.quality.fewSamples',
+                'report.quality.stalled', 'report.quality.partial', 'report.quality.targetLost',
+                'report.quality.gpuSparse', 'report.naWhy.noDriverVersion') {
+    $n = ([regex]::Matches($i18nText, [regex]::Escape("'" + $qk + "'"))).Count
+    if ($n -lt 3) { Bad "i18n 的 $qk 只有 $n 种语言（应 3）" }
+}
+
 $rtJs = Get-Content (Join-Path $root 'ui\js\realtime.js') -Raw -Encoding UTF8
 foreach ($need in 'window.PerfRealtime', '__refreshRealtime', 'metricsStart', 'metricsStop', 'is-na', 'FIELDS') {
     if ($rtJs -notmatch [regex]::Escape($need)) { Bad "realtime.js 缺 $need" }

@@ -11,6 +11,34 @@ function tile(k, v, unit, digits, extra) {
          `<div class="v">${f.v}${f.unit ? `<small>${f.unit}</small>` : ''}${tail}</div></div>`;
 }
 
+/** 数据可信度横幅（2.1.13）
+ *  level = ok / unknown（模块缺失）时**什么都不输出** —— 没有触发项就不该占版面。
+ *  文案只说明「影响了什么」，不下「数据完全不可用」的一刀切结论。
+ *  未知 code 直接跳过：宁可少说一句，也不许猜一个解释。 */
+function qualityBanner(r) {
+  const q = r && r.quality;
+  if (!q || !Array.isArray(q.checks) || !q.checks.length) return '';
+  const blocked = q.level === 'blocked';
+  const title = blocked
+    ? t('report.quality.blockedTitle', '本次数据不足以支撑结论')
+    : t('report.quality.cautionTitle', '本次数据可用，但有以下情况需要注意');
+  let lines = '';
+  q.checks.forEach((c) => {
+    const code = String((c && c.code) || '');
+    let txt = '';
+    if (code === 'fewSamples') txt = fillParams(t('report.quality.fewSamples', '只采到 {frames} 帧 / {seconds} 秒：1% Low 与卡顿统计不可靠，不建议据此对比或下结论。'), { frames: c.frames, seconds: c.seconds });
+    else if (code === 'stalled') txt = t('report.quality.stalled', '采集被中断：游戏停止出帧，统计只覆盖前半段。');
+    else if (code === 'partial') txt = fillParams(t('report.quality.partial', '有效时长只占采集窗口的 {pct}%：中间有停帧，数值偏乐观。'), { pct: c.pct });
+    else if (code === 'targetLost') txt = fillParams(t('report.quality.targetLost', '有 {pct}% 的采样时间游戏不在前台：画面可能被其它窗口干扰。'), { pct: c.pct });
+    else if (code === 'gpuSparse') txt = fillParams(t('report.quality.gpuSparse', 'GPU 指标只有 {pct}% 的采样取到：GPU 相关结论请谨慎。'), { pct: c.pct });
+    if (!txt) return;
+    lines += `<div class="rp-q-line">· ${escapeHtml(txt)}</div>`;
+  });
+  if (!lines) return '';
+  return `<div class="rp-quality ${blocked ? 'bad' : 'warn'}">` +
+         `<div class="rp-q-t">${escapeHtml(title)}</div>${lines}</div>`;
+}
+
 function renderReport(r) {
   state.report = r;
   const box = $('#preview');
@@ -26,6 +54,9 @@ function renderReport(r) {
 
   let html = `<div class="rp-title">${escapeHtml(t('report.heading', '性能报告'))}</div>`;
   html += `<div class="rp-meta">${escapeHtml(meta.join('  ·  '))}</div>`;
+
+  /* 可信度横幅放在最上面：有问题的数据，用户应该在读到任何结论之前就知道 */
+  html += qualityBanner(r);
 
   /* ── 01 概览：卡片 + 一句话总评 + 评估 ---- */
   html += rpSec('01', 'report.s1', '概览');
@@ -412,6 +443,14 @@ const METRIC_TEXT = {
   'bottleneck.frameGen': (r) => runtimeState(r, 'feature.dlss.framegen'),
   'env.cpuModel': (r) => (r.environment && r.environment.cpu_model) || null,
   'env.gpuModel': (r) => (r.environment && r.environment.gpu_model) || null,
+  /* 条件指纹（2.1.13）：驱动/系统/BIOS 是「两次报告能不能直接比」的前提，缺了要说明而不是静默消失 */
+  'env.driverVersion': (r) => (r.environment && r.environment.driver_version) || null,
+  'env.osVersion': (r) => {
+    const e = (r && r.environment) || {};
+    if (!e.os_version) return null;
+    return e.os_build ? `${e.os_version}（Build ${e.os_build}）` : String(e.os_version);
+  },
+  'env.biosVersion': (r) => (r.environment && r.environment.bios_version) || null,
   'env.ramType': (r) => (r.environment && r.environment.ram_type) || null,
   'env.resolution': (r) => {
     const res = r.resolution ? String(r.resolution).replace('x', '×') : null;
@@ -540,6 +579,11 @@ function runtimeNaWhy(r, x) {
   }
   /* 平台覆盖（规则文档 §1）：表外组合必须明确说「不支持」，不能因为值为空就把整行藏掉。 */
   const env = r.environment || {};
+  /* 驱动版本：取不到就明说「这次没记到」，不留空行让人误以为正常 */
+  if (x.id === 'env.driverVersion' && !env.driver_version) {
+    return t('report.naWhy.noDriverVersion',
+      'nvidia-smi 没有返回驱动版本，本次无法记录这一项（不影响其它数据）。');
+  }
   if ((x.module === 'gpu' || String(x.id || '').indexOf('thermal.gpu') === 0) &&
       env.gpu_vendor && env.gpu_vendor !== 'nvidia') {
     return t('report.naWhy.gpuVendor',
@@ -1044,6 +1088,11 @@ function buildExportHtml() {
     .rp-tile .v small,
     .rp-tile .v .p { font-size: .62em; color: ${c.muted}; margin-left: 2px; }
     .rp-section { margin: 18px 0 8px; color: ${c.muted}; font-size: .76rem; letter-spacing: .06em; }
+    .rp-quality { border: 1px solid ${c.line}; border-left: 3px solid ${c.warn}; border-radius: 10px;
+                  padding: 9px 12px; margin-bottom: 14px; font-size: .8rem; line-height: 1.65; }
+    .rp-quality.bad { border-left-color: ${c.bad}; }
+    .rp-quality .rp-q-t { color: ${c.strong}; margin-bottom: 2px; }
+    .rp-quality .rp-q-line { color: ${c.muted}; }
     .rp-verdict { display: flex; align-items: flex-start; gap: 8px; padding: 7px 0; border-bottom: 1px dashed ${c.line}; }
     .rp-verdict:last-child { border-bottom: none; }
     .rp-verdict i { width: 7px; height: 7px; border-radius: 50%; margin-top: .5em; flex: 0 0 auto; background: ${c.good}; }

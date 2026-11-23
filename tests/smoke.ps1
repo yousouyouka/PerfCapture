@@ -1256,6 +1256,19 @@ if ($idx -notmatch 'id="chkAutoStart"') { Bad '设置页缺「开机自启」开
 $iTodayCell = $idx.IndexOf('net-total-cell is-today')
 $iMonthCell = $idx.IndexOf('net-total-cell is-month')
 if ($iTodayCell -lt 0 -or $iMonthCell -lt 0 -or $iTodayCell -gt $iMonthCell) { Bad '网络汇总的「今日」必须在「本月」之前（同排左侧）' }
+# 2.2.3：托盘还原不得再碰 ShowInTaskbar（重建句柄会闪回），改用 PcTrayWindow 扩展样式
+if ($mainPs -match '\.ShowInTaskbar\s*=') { Bad '90-Main.ps1 不应再给 ShowInTaskbar 赋值（会重建句柄导致托盘还原闪回）' }
+if ($mainPs -notmatch 'class PcTrayWindow') { Bad '90-Main.ps1 缺 PcTrayWindow（无句柄重建的托盘隐藏）' }
+if ($mainPs -notmatch 'function Ensure-PcTrayWindow') { Bad '90-Main.ps1 缺 Ensure-PcTrayWindow' }
+if ($netPs -notmatch 'Add_MouseDoubleClick') { Bad '托盘缺双击还原处理' }
+if ($netPs -notmatch 'Write-AppLog ''窗口已从托盘还原''') { Bad '托盘还原没有日志（无法定位闪回）' }
+$overlayPs = Get-Content (Join-Path $root 'src\app\55-Overlay.ps1') -Raw -Encoding UTF8
+if ($overlayPs -notmatch '\$script:OverlaySelectableKeys = \$null') { Bad '浮窗可选清单必须懒算（顶层同步会触发 CIM 查询拖慢启动）' }
+if ($overlayPs -notmatch 'function Get-OverlaySelectableKeys') { Bad '缺 Get-OverlaySelectableKeys 懒加载函数' }
+if ($netPs -notmatch 'Start-Sleep -Milliseconds 100\s*\r?\n\s*\}') { Bad '网络采样停止检测应使用 100ms 粒度（关闭不再白等 1 秒）' }
+$metricsPs = Get-Content (Join-Path $root 'src\app\35-Metrics.ps1') -Raw -Encoding UTF8
+if ($metricsPs -notmatch 'fpsErr -replace ''\\d\+''') { Bad '实时 FPS 错误日志必须去掉数字再比较（否则每秒刷屏）' }
+if ($mainPs -notmatch 'function Start-BootDeferred') { Bad '延迟初始化应由界面 ready 触发（Start-BootDeferred）' }
 $mainJs = Get-Content (Join-Path $root 'ui\js\main.js') -Raw -Encoding UTF8
 foreach ($need in 'GAME_PREFS_KEY', 'applyGamePref', 'PerfHotkeyAction', 'btnRerun') {
     if ($mainJs -notmatch [regex]::Escape($need)) { Bad "main.js 缺 $need" }

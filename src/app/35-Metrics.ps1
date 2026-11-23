@@ -1237,8 +1237,11 @@ function Invoke-MetricsTick {
         Update-MetricsCapsFromSample $sample
         if ($sample.fpsErr) {
             # 同一个错误只记一次；仍没恢复就每 2 分钟提醒一次（burst 每 2 秒一轮，不这样会刷屏）
-            if ($sample.fpsErr -ne $script:MetricsFpsErrLast) {
-                $script:MetricsFpsErrLast = $sample.fpsErr
+            # 2.2.3：错误文本里带计数/字节数（「第 3 次」「0 字节」），直接比较永远不相等，
+            # 于是每秒一条 WARN，日志一天能涨到 10MB。用去掉数字的稳定键去重。
+            $errKey = ($sample.fpsErr -replace '\d+', '#')
+            if ($errKey -ne $script:MetricsFpsErrLast) {
+                $script:MetricsFpsErrLast = $errKey
                 $script:MetricsFpsErrAt = Get-Date
                 Write-AppLog ('实时 FPS 不可用：' + $sample.fpsErr) 'WARN'
             } elseif ($script:MetricsFpsErrAt -and ((Get-Date) - $script:MetricsFpsErrAt).TotalSeconds -ge 120) {

@@ -63,8 +63,18 @@ function Get-OverlayLockedKeys {
     }
     return $keys
 }
-$script:OverlayLockedKeys = @(Get-OverlayLockedKeys)
-$script:OverlaySelectableKeys = @($script:OverlayItemDefs | Where-Object { -not $_.locked -and $script:OverlayLockedKeys -notcontains $_.key } | ForEach-Object { $_.key })
+# 2.2.3：可选清单必须**懒算**。这段会触发 Get-PlatformProfile（CIM 查询 CPU/GPU/整机），
+# 冷启动时能吃掉 1 秒以上；以前在 dot-source 顶层同步执行，直接拖慢首屏。
+# 现在第一次真正用到（浮窗状态下发 / 配置收口）时才算，并缓存结果。
+$script:OverlayLockedKeys = $null
+$script:OverlaySelectableKeys = $null
+function Get-OverlaySelectableKeys {
+    if ($null -eq $script:OverlaySelectableKeys) {
+        $script:OverlayLockedKeys = @(Get-OverlayLockedKeys)
+        $script:OverlaySelectableKeys = @($script:OverlayItemDefs | Where-Object { -not $_.locked -and $script:OverlayLockedKeys -notcontains $_.key } | ForEach-Object { $_.key })
+    }
+    return $script:OverlaySelectableKeys
+}
 $script:OverlayGroupOrder = @('FPS', 'GPU', 'CPU', '延迟', 'RAM', '网络')
 
 # 首次开启时的默认显示项（想只看 FPS 就在设置里全关掉、只留一项）
@@ -100,7 +110,7 @@ function Get-OverlayCfg {
     # 显示项：新键 items（16 项逐项勾）。老配置只有 metrics（四个族）→ 一次性迁移，之后不再读 metrics
     $ik = @()
     if ($null -ne $o.items) {
-        $ik = @(@($o.items) | ForEach-Object { ([string]$_).ToLower() } | Where-Object { $script:OverlaySelectableKeys -contains $_ } | Select-Object -Unique)
+        $ik = @(@($o.items) | ForEach-Object { ([string]$_).ToLower() } | Where-Object { (Get-OverlaySelectableKeys) -contains $_ } | Select-Object -Unique)
     }
     if (-not $ik.Count -and $null -ne $o.metrics) {
         $map = @{ fps = @('fps', 'fpslow'); cpu = @('cpuutil', 'cpuclock', 'cpupower'); gpu = @('gpuutil', 'gputemp', 'gpupower'); mem = @('ram') }
@@ -112,7 +122,7 @@ function Get-OverlayCfg {
         if ($ik.Count) { Write-AppLog '浮窗配置迁移：旧的四族 metrics → 新的逐项 items' }
     }
     # 老配置里可能有已下线的项（比如黑字时代的组合），统一按可选清单收口
-    $ik = @($ik | Where-Object { $script:OverlaySelectableKeys -contains $_ })
+    $ik = @($ik | Where-Object { (Get-OverlaySelectableKeys) -contains $_ })
     if (-not $ik.Count) { $ik = $script:OverlayDefaultItems }
     $o.items = $ik
 
@@ -616,7 +626,7 @@ function Apply-OverlayConfig {
         elseif (([string]$raw) -match '^(?i)(true|1|yes|on|false|0|no|off)$') { $cfg.locked = ([string]$raw) -match '^(?i)(true|1|yes|on)$' }
     }
     if ($null -ne $In.items) {
-        $ik = @(@($In.items) | ForEach-Object { ([string]$_).ToLower() } | Where-Object { $script:OverlaySelectableKeys -contains $_ } | Select-Object -Unique)
+        $ik = @(@($In.items) | ForEach-Object { ([string]$_).ToLower() } | Where-Object { (Get-OverlaySelectableKeys) -contains $_ } | Select-Object -Unique)
         # 允许只留一项，但**不允许全空**：全空时浮窗会变成一块空白，比不显示更糟
         if ($ik.Count) { $cfg.items = $ik }
     }

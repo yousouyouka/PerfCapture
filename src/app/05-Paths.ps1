@@ -31,14 +31,20 @@ try {
 
 $legacyCfg = Join-Path $Root 'PerfCapture.settings.json'
 $legacyRep = Join-Path $Root 'reports'
+# 2.2.3：老数据迁移只做一次。以前每次启动都遍历 $Root\reports 并逐个 Test-Path，
+# 报告多的时候光这一步就要几百毫秒；迁移完成写一个标记，后续启动直接跳过。
+$legacyMark = Join-Path $script:DataDir '.legacy-imported'
 try {
-    if ((Test-Path $legacyCfg) -and -not (Test-Path $script:CfgPath)) {
-        Copy-Item $legacyCfg $script:CfgPath -Force
-    }
-    if (Test-Path $legacyRep) {
-        Get-ChildItem $legacyRep -File -ErrorAction SilentlyContinue | ForEach-Object {
-            $dst = Join-Path $script:OutDir $_.Name
-            if (-not (Test-Path $dst)) { Copy-Item $_.FullName $dst -Force }
+    if (-not (Test-Path $legacyMark)) {
+        if ((Test-Path $legacyCfg) -and -not (Test-Path $script:CfgPath)) {
+            Copy-Item $legacyCfg $script:CfgPath -Force
         }
+        if (Test-Path $legacyRep) {
+            Get-ChildItem $legacyRep -File -ErrorAction SilentlyContinue | ForEach-Object {
+                $dst = Join-Path $script:OutDir $_.Name
+                if (-not (Test-Path $dst)) { Copy-Item $_.FullName $dst -Force }
+            }
+        }
+        Set-Content -Path $legacyMark -Value (Get-Date -Format 's') -Encoding ASCII -ErrorAction SilentlyContinue
     }
 } catch { }

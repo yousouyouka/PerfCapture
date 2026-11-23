@@ -69,6 +69,8 @@ function Handle-UiMessage($msg) {
         switch ($msg.cmd) {
             'ready' {
                 try { Write-BootMark '界面就绪（ready）' } catch { }
+                # 首屏已经画完，再把平台画像 / 扩展自愈与自启 / 网络持久化放到后台计时器
+                try { if (Get-Command Start-BootDeferred -ErrorAction SilentlyContinue) { Start-BootDeferred } } catch { }
                 $procs = Get-ProcessChoices
                 # 采集项清单随 init 下发；清单缺失时不下发该字段，界面自动回退内置清单
                 $init = @{ type = 'init'; settings = $script:Cfg; procs = $procs }

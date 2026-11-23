@@ -19,6 +19,17 @@ window.PerfUpdateAreas = ['capture', 'realtime', 'other'];
 
 window.PerfUpdates = [
   {
+    date: '2026-11-23', version: '2.2.3',
+    title: '托盘还原修复、启动与关闭提速',
+    items: [
+      ['fix', '修复关闭到托盘后双击图标窗口闪一下又消失：不再改动 ShowInTaskbar（会重建窗口句柄），改用扩展样式隐藏，还原时句柄不变。', 'other'],
+      ['compat', '启动更快：浮窗能力探测（CIM 查询）改为用到时才算；平台画像、扩展自愈/自启、网络采样统一等界面 ready 后再启动，不再抢首屏。', 'other'],
+      ['compat', '老数据导入只做一次（写标记后跳过），不再每次启动遍历 reports 目录。', 'other'],
+      ['fix', '关闭更快：网络采样线程停止检测改为 100ms 粒度，不再白等最多 1 秒。', 'other'],
+      ['fix', '实时 FPS 不可用日志按稳定键去重，不再每秒写一条 WARN（日志曾一天涨到 10MB，拖慢磁盘与界面）。', 'other']
+    ]
+  },
+  {
     date: '2026-11-23', version: '2.2.2',
     title: '托盘与自启、热键一键捕获、启动更快',
     items: [

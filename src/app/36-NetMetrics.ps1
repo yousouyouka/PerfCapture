@@ -234,7 +234,11 @@ while ($true) {
     } catch {
         # 任何一次异常都不许弄死采样线程：丢这一秒，下秒重来
     }
-    Start-Sleep -Milliseconds 1000
+    # 2.2.3：停止检测按 100ms 粒度——直接 Sleep 1000 会让关闭最多白等 1 秒
+    for ($si = 0; $si -lt 10; $si++) {
+        if ($Ctl -and $Ctl.stop) { break }
+        Start-Sleep -Milliseconds 100
+    }
 }
 '@
 
@@ -493,15 +497,33 @@ function Format-NetRateText([double]$Bps) {
     return ('{0:0} B/s' -f $Bps)
 }
 
-# 从托盘还原主窗口（左键 / 右键菜单共用）。
-# ShowInTaskbar 会被重建窗口句柄，还原后必须重新注册热键，否则托盘期间热键失效。
+# ---------- 收起 / 还原（2.2.3）----------
+# 隐藏用 PcTrayWindow（定义在 90-Main：网络采样器禁止出现 Add-Type）。
+# 不能用 Form.ShowInTaskbar：改它就会重建窗口句柄，还原时「窗口闪一下又消失」。
+$script:TrayHidden = $false
+$script:TrayHomeLocation = $null
+$script:TrayHomeState = 'Normal'
+$script:TrayRestoreAt = [datetime]::MinValue
+
+# 从托盘还原主窗口（左键单击 / 双击 / 右键菜单共用）。
+# 400ms 去抖：双击会触发两次单击 + 一次双击，不能让同一次还原跑三遍。
 function Restore-PerfWindowFromTray {
     try {
         $f = $script:MainForm
         if (-not $f) { return }
-        $f.ShowInTaskbar = $true
+        $now = Get-Date
+        if (($now - $script:TrayRestoreAt).TotalMilliseconds -lt 400) { return }
+        $script:TrayRestoreAt = $now
+        if ($script:TrayHidden -and (Ensure-PcTrayWindow)) {
+            $loc = $script:TrayHomeLocation
+            if (-not $loc) { $loc = New-Object System.Drawing.Point(120, 80) }
+            [PcTrayWindow]::Show($f.Handle, $loc.X, $loc.Y)
+            $f.Opacity = 1
+            $script:TrayHidden = $false
+            Write-AppLog '窗口已从托盘还原'
+        }
         $f.Show()
-        $f.WindowState = 'Normal'
+        $f.WindowState = if ($script:TrayHomeState -eq 'Maximized') { 'Maximized' } else { 'Normal' }
         $f.Activate()
         try { $f.TopMost = $true; $f.TopMost = $false } catch { }
         if (Get-Command Register-PerfHotkeys -ErrorAction SilentlyContinue) {
@@ -534,6 +556,13 @@ function Initialize-NetTray {
         [void]$menu.Items.Add($miExit)
         $tray.ContextMenuStrip = $menu
         $tray.Add_MouseClick({
+            param($s, $e)
+            if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
+                Restore-PerfWindowFromTray
+            }
+        })
+        # 双击是用户最常用的还原手势，单独挂一次；400ms 去抖会吞掉重复触发
+        $tray.Add_MouseDoubleClick({
             param($s, $e)
             if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
                 Restore-PerfWindowFromTray
@@ -647,7 +676,8 @@ function Stop-NetWorker {
     try {
         if ($script:NetCtl) { $script:NetCtl.stop = $true }
         $w = $script:NetWorker
-        $deadline = (Get-Date).AddSeconds(2.5)
+        # 常规情况下循环在 100ms 内看到 stop 标志；1.2 秒是保护上限（采样偶尔卡在 WMI 调用里）
+        $deadline = (Get-Date).AddSeconds(1.2)
         while (-not $w.Handle.IsCompleted -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 50 }
         if (-not $w.Handle.IsCompleted) { try { $w.PS.Stop() } catch { } }
         try { [void]$w.PS.EndInvoke($w.Handle) } catch { }

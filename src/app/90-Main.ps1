@@ -4,9 +4,53 @@
 # 普通关闭在 closeToTray 开启时会被改成「收起到托盘」。
 $script:ForceExit = $false
 
-# 收起主窗口到托盘。不能 Hide()/Visible=false —— ShowDialog 的条件是窗口仍可见，
-# 藏起来会让模态循环直接返回；最小化 + 从任务栏移除才既留在循环里、又不在任务栏占位。
-# ShowInTaskbar 切换会重建窗口句柄 → 收起/还原后都要重新注册热键（52-Hotkeys 会按句柄重建 filter）。
+# 任务栏/Alt-Tab 隐藏：只改扩展样式，不动 ShowInTaskbar（后者会重建句柄，还原时闪回）。
+# 第一次收起时才编译，正常启动不为它付钱。
+$trayWinCs = @'
+using System;
+using System.Runtime.InteropServices;
+public class PcTrayWindow {
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
+
+    const int GWL_EXSTYLE = -20;
+    const int WS_EX_TOOLWINDOW = 0x00000080;
+    const int WS_EX_APPWINDOW = 0x00040000;
+    const uint SWP_NOSIZE = 0x0001;
+    const uint SWP_NOZORDER = 0x0004;
+    const uint SWP_NOACTIVATE = 0x0010;
+    const uint SWP_FRAMECHANGED = 0x0020;
+    const uint SWP_SHOWWINDOW = 0x0040;
+
+    public static void Hide(IntPtr h, int x, int y) {
+        int ex = GetWindowLong(h, GWL_EXSTYLE);
+        SetWindowLong(h, GWL_EXSTYLE, (ex | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW);
+        SetWindowPos(h, IntPtr.Zero, x, y, 0, 0,
+            SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+    }
+
+    public static void Show(IntPtr h, int x, int y) {
+        int ex = GetWindowLong(h, GWL_EXSTYLE);
+        SetWindowLong(h, GWL_EXSTYLE, (ex & ~WS_EX_TOOLWINDOW) | WS_EX_APPWINDOW);
+        SetWindowPos(h, IntPtr.Zero, x, y, 0, 0,
+            SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+    }
+}
+'@
+
+function Ensure-PcTrayWindow {
+    if ('PcTrayWindow' -as [type]) { return $true }
+    try { Add-Type -TypeDefinition $trayWinCs -Language CSharp; return $true }
+    catch { Write-AppLog ('托盘窗口样式编译失败: ' + $_.Exception.Message) 'WARN'; return $false }
+}
+
+# 收起主窗口到托盘。不能 Hide()/Visible=false —— ShowDialog 的条件是窗口仍可见；
+# 也不能改 ShowInTaskbar（会重建句柄，还原时闪回）。
+# 做法：记下位置与最大化状态 → 移出屏幕 + Opacity=0 + WS_EX_TOOLWINDOW（任务栏/Alt-Tab 都不占位）。
 function Hide-PerfWindowToTray {
     if (Get-Command Initialize-NetTray -ErrorAction SilentlyContinue) {
         try { Initialize-NetTray } catch { }
@@ -15,12 +59,19 @@ function Hide-PerfWindowToTray {
         Write-AppLog '托盘图标不可用，窗口保持显示（避免没有入口可恢复）' 'WARN'
         return
     }
+    if (-not (Get-Command Ensure-PcTrayWindow -ErrorAction SilentlyContinue) -or -not (Ensure-PcTrayWindow)) {
+        Write-AppLog '窗口样式辅助不可用，保持显示' 'WARN'
+        return
+    }
     try {
-        $form.WindowState = 'Minimized'
-        $form.ShowInTaskbar = $false
-        if (Get-Command Register-PerfHotkeys -ErrorAction SilentlyContinue) {
-            try { [void](Register-PerfHotkeys) } catch { }
+        if (-not $script:TrayHidden) {
+            $script:TrayHomeState = if ($form.WindowState -eq 'Maximized') { 'Maximized' } else { 'Normal' }
+            if ($form.WindowState -eq 'Normal') { $script:TrayHomeLocation = $form.Location }
+            else { $script:TrayHomeLocation = $form.RestoreBounds.Location }
         }
+        $script:TrayHidden = $true
+        [PcTrayWindow]::Hide($form.Handle, -32000, -32000)
+        $form.Opacity = 0
         Write-AppLog '窗口已缩小到托盘'
     } catch {
         Write-AppLog ('缩小到托盘失败: ' + $_.Exception.Message) 'WARN'
@@ -71,6 +122,17 @@ function Invoke-DeferredStartup {
     if ($script:BootDeferredDone) { return }
     $script:BootDeferredDone = $true
 
+    # 网络统计持久化（2.2.0）：常驻 1 Hz 计数器差分只在内存累加，每 60 秒原子落盘一次。
+    # 2.2.3：起 runspace + 第一次枚举网卡并不便宜，挪到这里，保证首屏先出来。
+    try {
+        if (Get-Command Initialize-NetPersistence -ErrorAction SilentlyContinue) { Initialize-NetPersistence }
+        if (Get-Command Set-NetConsumer -ErrorAction SilentlyContinue) { Set-NetConsumer 'persist' $true }
+        if (Get-Command Set-NetReverseDns -ErrorAction SilentlyContinue) { Set-NetReverseDns ([bool]$script:Cfg.netReverseDns) }
+    } catch { }
+
+    # 开机自启：按配置校正注册表（配置是唯一事实来源；开关切换时也会即时写入）
+    try { if (Get-Command Sync-PerfAutoStart -ErrorAction SilentlyContinue) { Sync-PerfAutoStart } } catch { }
+
     # 平台覆盖（v2.1.10）：记录一次画像，支持时能一眼区分「不在覆盖范围」与「读取失败」。
     # 不阻止启动：表外组合仍可用帧采集等基线功能，只是相关指标如实 N/A（规则文档 §1）。
     try {
@@ -112,33 +174,28 @@ function Invoke-DeferredStartup {
     try { Write-BootMark '后台初始化完成' } catch { }
 }
 
-# 网络统计持久化（2.2.0）：常驻 1 Hz 计数器差分只在内存累加，每 60 秒原子落盘一次；
-# persist 消费者常驻 = 程序在跑就累计（今日/本月才有意义），page 消费者只管要不要推给界面。
-# 读一个小 JSON + 起常驻采样，毫秒级，留在启动路径上。
-try {
-    if (Get-Command Initialize-NetPersistence -ErrorAction SilentlyContinue) { Initialize-NetPersistence }
-    if (Get-Command Set-NetConsumer -ErrorAction SilentlyContinue) { Set-NetConsumer 'persist' $true }
-    if (Get-Command Set-NetReverseDns -ErrorAction SilentlyContinue) { Set-NetReverseDns ([bool]$script:Cfg.netReverseDns) }
-} catch { }
-
-# 开机自启：按配置校正注册表（配置是唯一事实来源；开关切换时也会即时写入）
-try { if (Get-Command Sync-PerfAutoStart -ErrorAction SilentlyContinue) { Sync-PerfAutoStart } } catch { }
+# 2.2.3：延迟初始化等界面真正 ready 后再启动。以前在 ShowDialog 前 Start，
+# 计时器会在 WebView2 初始化的 DoEvents 泵里提前触发，仍然抢首屏。
+function Start-BootDeferred {
+    if ($script:BootDeferredDone -or $script:BootTimer) { return }
+    try {
+        $script:BootTimer = New-Object System.Windows.Forms.Timer
+        $script:BootTimer.Interval = 120
+        $script:BootTimer.Add_Tick({
+            $script:BootTimer.Stop()
+            $script:BootTimer.Dispose()
+            $script:BootTimer = $null
+            try { Invoke-DeferredStartup } catch { Write-AppLog ('后台初始化失败: ' + $_.Exception.Message) 'WARN' }
+        })
+        $script:BootTimer.Start()
+    } catch { Write-AppLog ('后台初始化计时器启动失败: ' + $_.Exception.Message) 'WARN' }
+}
 
 # 主循环：$form.ShowDialog() 只在窗口被**用户关掉**时才应该返回。
 # 万一有代码路径让它提前返回（例如误把窗口设成不可见 —— 模态循环的条件就是"仍可见"），
 # 这里立刻重新进入循环，绝不让程序"自己关掉"（1.8.1 导出长图踩过这个坑）。
 $script:UserClosed = $false
 $form.Add_FormClosed({ $script:UserClosed = $true })
-
-$script:BootTimer = New-Object System.Windows.Forms.Timer
-$script:BootTimer.Interval = 120
-$script:BootTimer.Add_Tick({
-    $script:BootTimer.Stop()
-    $script:BootTimer.Dispose()
-    $script:BootTimer = $null
-    try { Invoke-DeferredStartup } catch { Write-AppLog ('后台初始化失败: ' + $_.Exception.Message) 'WARN' }
-})
-$script:BootTimer.Start()
 
 while (-not $form.IsDisposed -and -not $script:UserClosed) {
     [void]$form.ShowDialog()

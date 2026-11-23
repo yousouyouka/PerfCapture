@@ -93,6 +93,46 @@ Assert (@($r8.items)[0].samples -ge 1) '窗口至少 1 个样本' ('实际 ' + @
 $r9 = Get-StutterContext -Segments @([pscustomobject]@{ start = 9999; frames = 1; ms = 200 }) -FrameTimes $ft -Sensors $sens
 Assert (@($r9.items).Count -eq 1) '越界起点被夹到最后帧，不报错' ('实际 ' + @($r9.items).Count)
 
+Write-Host '== 7. 时间对齐：按时间戳而不是序号 ==' -ForegroundColor Cyan
+$start = [datetime]'2026-11-23 12:00:00'
+$sensT = @()
+for ($i = 0; $i -le 10; $i++) {
+    $sensT += [pscustomobject]@{
+        timestamp_utc = $start.AddSeconds($i).ToString('HH:mm:ss')
+        gpu_util_pct  = '95'; gpu_temp_c = [string](60 + $i); gpu_mem_used_mb = '6000'
+        gpu_power_w   = '120'; cpu_util_pct = '40'; cpu_temp_c = '75'; cpu_pkg_w = '45'
+    }
+}
+$r10 = Get-StutterContext -Segments $seg -FrameTimes $ft -Sensors $sensT -CaptureStart $start -WarmupSec 3
+$i10 = @($r10.items)[0]
+Assert ($r10.alignment -eq 'time') '有时间戳 → alignment=time' ('实际 ' + $r10.alignment)
+Assert ([double]$r10.tolerance_seconds -eq 1.0) '时间对齐容差 1 秒' ('实际 ' + $r10.tolerance_seconds)
+# 卡顿在分析窗口 5.01 s 处 + 预热 3 s = 采集第 8.01 s → 时间上最近的样本是 8 号（68 °C）
+Assert ($i10.at.gpu_temp -eq 68) '中心样本按时间取到 68（按序号会是 65）' ('实际 ' + $i10.at.gpu_temp)
+Assert ([double]$i10.at_elapsed_s -ge 7.9 -and [double]$i10.at_elapsed_s -le 8.1) 'at_elapsed_s ≈ 8.0' ('实际 ' + $i10.at_elapsed_s)
+
+Write-Host '== 8. 比例模式必须计入预热（否则整体前移 WarmupSec 秒）==' -ForegroundColor Cyan
+$noTs = New-Sensors
+$r11 = Get-StutterContext -Segments $seg -FrameTimes $ft -Sensors $noTs -WarmupSec 0
+$r12 = Get-StutterContext -Segments $seg -FrameTimes $ft -Sensors $noTs -WarmupSec 3
+$c11 = [double]@($r11.items)[0].at.gpu_temp
+$c12 = [double]@($r12.items)[0].at.gpu_temp
+Assert ($r11.alignment -eq 'proportional') '无时间戳 → proportional' ('实际 ' + $r11.alignment)
+Assert ($c12 -gt $c11) '计入预热后定位更靠后（65 → 66）' ("$c11 vs $c12")
+
+Write-Host '== 9. 时间戳不可用时退回比例模式，不硬算 ==' -ForegroundColor Cyan
+$r13 = Get-StutterContext -Segments $seg -FrameTimes $ft -Sensors $noTs -CaptureStart $start -WarmupSec 3
+Assert ($r13.alignment -eq 'proportional') '行里没有 timestamp_utc → 退回比例' ('实际 ' + $r13.alignment)
+$badTs = @()
+for ($i = 0; $i -le 10; $i++) {
+    $badTs += [pscustomobject]@{
+        timestamp_utc = 'xx:yy'; gpu_temp_c = [string](60 + $i); gpu_util_pct = '95'
+        gpu_mem_used_mb = '6000'; gpu_power_w = '120'; cpu_util_pct = '40'; cpu_temp_c = '75'; cpu_pkg_w = '45'
+    }
+}
+$r14 = Get-StutterContext -Segments $seg -FrameTimes $ft -Sensors $badTs -CaptureStart $start -WarmupSec 3
+Assert ($r14.alignment -eq 'proportional') '时间戳解析失败 → 退回比例' ('实际 ' + $r14.alignment)
+
 Write-Host ''
 if ($script:fail -gt 0) {
     Write-Host ('== 失败 ' + $script:fail + ' 项 / 通过 ' + $script:pass + ' 项 ==') -ForegroundColor Red

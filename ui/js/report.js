@@ -47,12 +47,21 @@ function stutterContextBlock(r) {
   const n = c.items.length;
   const w = c.window_seconds != null ? c.window_seconds : 2;
   const tol = c.tolerance_seconds;
-  const cap = tol != null
-    ? fillParams(t('report.sc.cap',
-      '最严重的 {n} 段；列出每段前后 ±{w} 秒的平均值。逐帧与传感器两路数据不同源，按采集进度比例对齐，误差约 {tol} 秒——不要当成精确到毫秒的因果证据。'),
-      { n, w, tol })
-    : fillParams(t('report.sc.capNoTol',
+  /* 对齐方式不同，说法必须不同：时间对齐可以说「误差 ≤1 秒」，
+     比例对齐只能说「约一个采样间隔」——后者误差更大，不能混用一句话。 */
+  let cap;
+  if (String(c.alignment || '') === 'time' && tol != null) {
+    cap = fillParams(t('report.sc.capTime',
+      '最严重的 {n} 段；列出每段前后 ±{w} 秒的平均值。按传感器时间戳对齐，误差 ≤ {tol} 秒（时间戳只到整秒）。'),
+      { n, w, tol });
+  } else if (tol != null) {
+    cap = fillParams(t('report.sc.cap',
+      '最严重的 {n} 段；列出每段前后 ±{w} 秒的平均值。两路数据不同源，按采集进度比例对齐，误差约 {tol} 秒——不要当成精确到毫秒的因果证据。'),
+      { n, w, tol });
+  } else {
+    cap = fillParams(t('report.sc.capNoTol',
       '最严重的 {n} 段；列出每段前后 ±{w} 秒的平均值。（本次没有可用的传感器样本，无法给出对齐误差。）'), { n, w });
+  }
 
   let body = '';
   c.items.forEach((it, i) => {
@@ -70,7 +79,12 @@ function stutterContextBlock(r) {
     if (a.gpu_power != null) parts.push(fillParams(t('report.sc.gpuPower', 'GPU {v} W'), { v: Number(a.gpu_power).toFixed(0) }));
     if (a.cpu_util != null) parts.push(fillParams(t('report.sc.cpuUtil', 'CPU 占用 {v} %'), { v: Math.round(a.cpu_util) }));
     if (a.cpu_temp != null) parts.push(fillParams(t('report.sc.cpuTemp', 'CPU {v} °C'), { v: Math.round(a.cpu_temp) }));
-    const text = parts.length ? parts.join(' · ') : t('report.sc.noSamples', '窗口内没有可用的传感器样本');
+    // 有样本但字段全空 = 这几项没开，不是「没采到样本」；两种说法不能混
+    const text = parts.length
+      ? parts.join(' · ')
+      : (Number(it.samples) > 0
+        ? t('report.sc.notCollected', '本次没有采集这些指标（GPU / CPU 传感器未开启或不可用）')
+        : t('report.sc.noSamples', '窗口内没有可用的传感器样本'));
     const head = `#${i + 1} · ${Number(it.at_pct).toFixed(1)}% · ${Number(it.ms).toFixed(0)} ms / ${it.frames || 1} 帧`;
     body += `<div class="row"><span class="k">${escapeHtml(head)}</span><span class="v">${escapeHtml(text)}</span></div>`;
   });

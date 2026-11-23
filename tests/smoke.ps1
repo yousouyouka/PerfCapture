@@ -375,6 +375,22 @@ $navBlock = [regex]::Match($idx, '(?s)<nav class="sidebar-nav">.*?</nav>').Value
 $navPages = [regex]::Matches($navBlock, 'data-page="([a-z]+)"') | ForEach-Object { $_.Groups[1].Value }
 if ($navPages.Count -lt 4) { Bad "侧边栏只有 $($navPages.Count) 项（应有采集 / 实时监控 / 更新公告 / 设置）" }
 elseif ($navPages[1] -ne 'reports' -or $navPages[2] -ne 'realtime') { Bad "侧边栏顺序不对：$($navPages -join ' → ')" }
+
+# 版本清单一致性：2.1.x 每个 CHANGELOG 版本都必须有更新公告条目，反之亦然。
+# 2.1.0 之前是「版本号重编号」前的历史段落（1.6–1.9 / 1.0），公告里本来就不收，不参与比对。
+# 这条守卫的由来：2.1.14 曾只写进 CHANGELOG、公告里被合并掉，用户看着就是「少了一版」。
+$chgAll = Get-Content (Join-Path $root 'CHANGELOG.md') -Raw -Encoding UTF8
+$chgVers = @([regex]::Matches($chgAll, '(?m)^## ([0-9]+\.[0-9]+\.[0-9]+)') |
+    ForEach-Object { $_.Groups[1].Value } | Where-Object { [version]$_ -ge [version]'2.1.0' })
+$annVers = @([regex]::Matches($dataJs, "version:\s*'([0-9]+\.[0-9]+\.[0-9]+)'") |
+    ForEach-Object { $_.Groups[1].Value } | Where-Object { [version]$_ -ge [version]'2.1.0' })
+$missAnn = @($chgVers | Where-Object { $annVers -notcontains $_ })
+$missChg = @($annVers | Where-Object { $chgVers -notcontains $_ })
+if ($missAnn.Count) { Bad ("更新公告缺版本：" + ($missAnn -join ', ')) }
+if ($missChg.Count) { Bad ("CHANGELOG 缺版本：" + ($missChg -join ', ')) }
+if (-not $missAnn.Count -and -not $missChg.Count) {
+    Ok ("版本清单一致：2.1.x 共 $($chgVers.Count) 个版本，公告与 CHANGELOG 对得上")
+}
 if ($navPages -notcontains 'extensions') { Bad '侧边栏缺扩展中心入口（应在 survey 与 settings 之间）' }
 if ($navBlock -match 'nav-badge') { Bad '侧边栏里还挂着「待开发」徽标（应只在实时监控页里）' }
 if ($navBlock -match '待开发') { Bad '侧边栏文字里出现了「待开发」' }

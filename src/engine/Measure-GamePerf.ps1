@@ -994,7 +994,8 @@ $procRam    = if ($collectRam)  { Get-SensorStat 'proc_ram_mb' } else { $null }
 $stutterCtx = $null
 if (Get-Command Get-StutterContext -ErrorAction SilentlyContinue) {
     try {
-        $stutterCtx = Get-StutterContext -Segments $stutterTop -FrameTimes $frameTimes -Sensors $sensors -WindowSec 2 -Top 5
+        $stutterCtx = Get-StutterContext -Segments $stutterTop -FrameTimes $frameTimes -Sensors $sensors `
+            -WindowSec 2 -Top 5 -CaptureStart $capStartTime -WarmupSec $WarmupSec
     } catch {
         $stutterCtx = [ordered]@{ window_seconds = 2; tolerance_seconds = $null; items = @(); reason = 'failed' }
     }
@@ -2007,6 +2008,12 @@ if ($trend) {
 $secStutter = ''
 if ($stutterCtx -and @($stutterCtx.items).Count -gt 0) {
     $tolTxt = if ($null -ne $stutterCtx.tolerance_seconds) { [string]$stutterCtx.tolerance_seconds } else { '—' }
+    # 对齐方式必须如实写：time = 按传感器时间戳；proportional = 按采集进度比例（误差更大）
+    $alignTxt = if ([string]$stutterCtx.alignment -eq 'time') {
+        '按传感器时间戳对齐，误差 ≤ ' + $tolTxt + ' 秒（时间戳只到整秒）'
+    } else {
+        '两路数据不同源，按采集进度比例对齐，误差约 ' + $tolTxt + ' 秒'
+    }
     $sRows = ''
     $si = 0
     foreach ($it in @($stutterCtx.items)) {
@@ -2024,13 +2031,17 @@ if ($stutterCtx -and @($stutterCtx.items).Count -gt 0) {
         if ($null -ne $it.avg.gpu_power) { $parts += ('GPU ' + (Fmt $it.avg.gpu_power '0') + ' W') }
         if ($null -ne $it.avg.cpu_util) { $parts += ('CPU 占用 ' + (Fmt $it.avg.cpu_util '0') + ' %') }
         if ($null -ne $it.avg.cpu_temp) { $parts += ('CPU ' + (Fmt $it.avg.cpu_temp '0') + ' °C') }
-        $sBody = if ($parts.Count -gt 0) { $parts -join ' · ' } else { '窗口内没有可用的传感器样本' }
+        # 有样本但字段全空 = 这几项没开，不是「没采到样本」，两种说法不能混
+        $sBody = if ($parts.Count -gt 0) { $parts -join ' · ' }
+                 elseif ($it.samples -gt 0) { '本次没有采集这些指标（GPU / CPU 传感器未开启或不可用）' }
+                 else { '窗口内没有可用的传感器样本' }
         $sRows += '<tr class="sec"><td colspan="2">#' + $si + ' · 位置 ' + (Fmt $it.at_pct '0.0') + '% · ' +
                   (Fmt $it.ms '0.0') + ' ms / ' + $it.frames + ' 帧</td></tr>' +
                   '<tr><td>前后 ±' + (Fmt $stutterCtx.window_seconds '0') + ' 秒平均（' + $it.samples + ' 个样本）</td><td>' + $sBody + '</td></tr>'
     }
-    $secStutter = '<h2>02 卡顿时刻</h2>' +
-                  '<div class="cap">只列最严重的 ' + $si + ' 段。逐帧与传感器两路数据不同源，按采集进度比例对齐，误差约 ' + $tolTxt + ' 秒；不要把它当成精确到毫秒的因果证据。</div>' +
+    # 不再编号「02」：上面已经有 02 性能曲线，同一份报告里出现两个 02 会让人以为是重复章节
+    $secStutter = '<h2>卡顿时刻</h2>' +
+                  '<div class="cap">只列最严重的 ' + $si + ' 段。' + $alignTxt + '；不要把它当成精确到毫秒的因果证据。</div>' +
                   '<table class="det">' + $sRows + '</table>'
 }
 

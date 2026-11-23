@@ -111,7 +111,7 @@ function Expand-UpdateWrapper {
         Move-Item -LiteralPath $tmp -Destination $inner -Force
     } catch {
         try { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue } catch { }
-        if ($_.Exception.Message -eq 'INNER_HASH') { throw }
+        # 统一向内层的调用方报 INNER_HASH；根因已由内层校验点给出，这里不再做无意义的分支
         throw 'INNER_HASH'
     }
     return $inner

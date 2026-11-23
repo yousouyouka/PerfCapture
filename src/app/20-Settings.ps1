@@ -92,7 +92,10 @@ $script:Cfg = New-DefaultConfig
 if (Test-Path $script:CfgPath) {
     try {
         $j = Get-Content $script:CfgPath -Raw -Encoding UTF8 | ConvertFrom-Json
-        foreach ($k in 'theme', 'language', 'seconds', 'minimize', 'sound', 'skip', 'lastPid', 'windowW', 'windowH') {
+        # 与 60-Capture.ps1 的 saveSettings 白名单保持一致：preset / customBase / warmup
+        # 以前只写不读，重启后又被默认值覆盖（用户选的档位与预热时长静默丢失）。
+        foreach ($k in 'theme', 'language', 'seconds', 'minimize', 'sound', 'skip',
+                       'preset', 'customBase', 'warmup', 'lastPid', 'windowW', 'windowH') {
             if ($null -ne $j.$k) { Set-ConfigValue $k $j.$k }
         }
         # 实时监控目标进程（新增键，老配置没有就用默认 0 = 跟随前台）

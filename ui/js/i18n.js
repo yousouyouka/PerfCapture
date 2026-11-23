@@ -1,4 +1,4 @@
-/* 国际化：中文（默认）/ English / 日本語
+﻿/* 国际化：中文（默认）/ English / 日本語
    约定：
    - 键名 用点分小写：nav.capture / capture.start
    - 报告里的指标名与判定文案也走这里（report.* / verdict.*）
@@ -653,6 +653,7 @@ const I18N = {
     'diag.limitWhy.mixedThermal': '热与功耗同时触发；温度高且功耗未贴上限，可分辨为热墙。',
     'diag.limitWhy.mixedPower': '热与功耗同时触发；功耗贴上限且温度不高，可分辨为功耗墙。',
     'diag.limitWhy.mixed': '多种限制同时触发，辅助信号不足以分辨主因，不做猜测。',
+    'diag.limitWhy.mixedIncomplete': '热与功耗同时触发，但温度或功耗上限数据缺失；不能把缺数据当成没触发，因此无法分辨。',
     'diag.limitWhy.cpuEventUnknown': '有 CPU 固件限速记录，但温度不高且事件原因不可解析，不猜原因。',
     'diag.limitWhy.hwSlowdown': '驱动只报硬件降频，未给出具体原因位，不猜原因。',
     'diag.limitWhy.none': '本次采到了限流状态，没有发现触发的限制。',
@@ -666,7 +667,7 @@ const I18N = {
     'diag.limit.ev.cpu.throttle': 'CPU 固件限速',
     /* 后台干扰 Top 3（2.1.17 / F4-2） */
     'report.bgProc.title': '后台干扰 Top 3',
-    'report.bgProc.cap': '每 {n} 秒采样一次其它进程的 CPU 时间；占用按「占单核满负荷 = 100%」计，同名进程合并。只读进程 CPU，不读其它进程的 GPU。',
+    'report.bgProc.cap': '每 {n} 秒采样一次其它进程的 CPU 时间；占用按「整机全部核心满载 = 100%」计（与游戏进程同口径，8 核占满 1 核显示 12.5%），同名进程合并。只读进程 CPU，不读其它进程的 GPU。',
     'report.bgProc.value': '平均 {a} % · 峰值 {b} %',
     'report.bgProc.samples': '出现 {a}/{b} 次采样',
     'report.naWhy.gpuVendor': 'GPU 指标目前只支持 NVIDIA 显卡；这台机器的显卡不在覆盖范围内，因此没有数值，也不用估算值代替。',
@@ -1419,6 +1420,7 @@ const I18N = {
     'diag.limitWhy.mixedThermal': 'Thermal and power limits both triggered; temperature was high while power stayed below the cap, so this is a thermal wall.',
     'diag.limitWhy.mixedPower': 'Thermal and power limits both triggered; power reached the cap while temperature stayed moderate, so this is a power wall.',
     'diag.limitWhy.mixed': 'Several limits triggered together and the supporting signals cannot separate them. No guess is made.',
+    'diag.limitWhy.mixedIncomplete': 'Thermal and power limits both triggered, but temperature or the power cap is missing. Missing data is not the same as "not triggered", so no verdict is given.',
     'diag.limitWhy.cpuEventUnknown': 'CPU firmware throttling was recorded, but temperature was moderate and the event cause cannot be resolved. No guess is made.',
     'diag.limitWhy.hwSlowdown': 'The driver reported hardware throttling without a specific reason bit. No guess is made.',
     'diag.limitWhy.none': 'Throttle state was captured and no limit was triggered.',
@@ -1432,7 +1434,7 @@ const I18N = {
     'diag.limit.ev.cpu.throttle': 'CPU firmware throttling',
     /* Background interference Top 3 (2.1.17 / F4-2) */
     'report.bgProc.title': 'Background interference Top 3',
-    'report.bgProc.cap': 'CPU time of other processes is sampled every {n} seconds. Usage is relative to one fully loaded core (100%); instances sharing a name are merged. Only process CPU is read, never another process GPU.',
+    'report.bgProc.cap': 'CPU time of other processes is sampled every {n} seconds. Usage uses the same scale as the game process: 100% means all cores fully loaded (one saturated core on an 8-core machine reads 12.5%). Instances sharing a name are merged. Only process CPU is read, never another process GPU.',
     'report.bgProc.value': 'avg {a} % · peak {b} %',
     'report.bgProc.samples': 'present in {a}/{b} samples',
     'report.naWhy.gpuVendor': 'GPU metrics currently support NVIDIA cards only; this GPU is outside the coverage matrix, so no value is shown and no estimate is substituted.',
@@ -2185,6 +2187,7 @@ const I18N = {
     'diag.limitWhy.mixedThermal': '温度と電力の制限が同時に発動しましたが、温度が高く電力は上限に達していないため温度制限と判別できます。',
     'diag.limitWhy.mixedPower': '温度と電力の制限が同時に発動しましたが、電力が上限に達し温度は高くないため電力制限と判別できます。',
     'diag.limitWhy.mixed': '複数の制限が同時に発動し、補助信号では主因を判別できません。推測はしません。',
+    'diag.limitWhy.mixedIncomplete': '温度と電力の制限が同時に発動しましたが、温度または電力上限のデータがありません。欠損を「未発動」とは言えないため判別しません。',
     'diag.limitWhy.cpuEventUnknown': 'CPU ファームウェアの制限は記録されていますが、温度は高くなくイベント原因も特定できません。推測はしません。',
     'diag.limitWhy.hwSlowdown': 'ドライバーはハードウェア制限のみを報告し、具体的な理由ビットがありません。推測はしません。',
     'diag.limitWhy.none': 'スロットリング状態は取得できており、発動した制限はありませんでした。',
@@ -2198,7 +2201,7 @@ const I18N = {
     'diag.limit.ev.cpu.throttle': 'CPU ファームウェア制限',
     /* バックグラウンド干渉 Top 3（2.1.17 / F4-2） */
     'report.bgProc.title': 'バックグラウンド干渉 Top 3',
-    'report.bgProc.cap': '他のプロセスの CPU 時間を {n} 秒ごとにサンプリングします。使用率は「1 コアフルロード = 100%」基準で、同名プロセスは合算します。他プロセスの GPU は読みません。',
+    'report.bgProc.cap': '他のプロセスの CPU 時間を {n} 秒ごとにサンプリングします。使用率はゲームプロセスと同じ基準で、全コア满载 = 100% です（8 コアで 1 コア满载なら 12.5%）。同名プロセスは合算します。他プロセスの GPU は読みません。',
     'report.bgProc.value': '平均 {a} % · ピーク {b} %',
     'report.bgProc.samples': '{b} 回中 {a} 回に出現',
     'report.naWhy.gpuVendor': 'GPU 指標は現在 NVIDIA のグラフィックスカードのみ対応しています。この GPU は対象外のため数値は表示せず、推定値でも代用しません。',

@@ -39,6 +39,11 @@
   --term-warn: #96601b;
   --shadow: 0 2px 12px rgba(37, 32, 49, 0.08);
   --shadow-hover: 0 4px 18px rgba(37, 32, 49, 0.12);
+  --on-accent: #ffffff;                               /* 主色按钮前景（深/浅主题都为白） */
+  --shadow-accent: 0 3px 10px rgba(113, 100, 147, 0.28);
+  --shadow-warn-btn: 0 3px 10px rgba(168, 111, 20, 0.26);
+  --modal-overlay: rgba(18, 16, 26, 0.42);
+  --shadow-modal: 0 18px 48px rgba(18, 16, 26, 0.28);
   color-scheme: light;
 }
 
@@ -69,6 +74,11 @@ html[data-theme='dark'] {
   --term-warn: #e6c27a;
   --shadow: 0 2px 14px rgba(0, 0, 0, 0.35);
   --shadow-hover: 0 6px 22px rgba(0, 0, 0, 0.45);
+  --on-accent: #ffffff;
+  --shadow-accent: 0 3px 10px rgba(134, 114, 186, 0.32);
+  --shadow-warn-btn: 0 3px 10px rgba(214, 172, 92, 0.30);
+  --modal-overlay: rgba(6, 7, 12, 0.58);
+  --shadow-modal: 0 18px 48px rgba(0, 0, 0, 0.52);
   color-scheme: dark;
 }
 

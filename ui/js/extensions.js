@@ -116,17 +116,6 @@
   const progressInfo = Object.create(null); // id -> 宿主最近一条进度消息（含 recv/total/bps/eta/part）
   const cancelling = Object.create(null);   // id -> 已点过取消，等 worker 回滚完成
 
-  /* 下载速度 / 大小的人类可读格式；0 或非法值回空串，调用方据此决定要不要显示 */
-  function fmtBytes(b) {
-    const n0 = Number(b);
-    if (!(n0 > 0)) return '';
-    const units = ['B', 'KB', 'MB', 'GB'];
-    let n = n0;
-    let i = 0;
-    while (n >= 1024 && i < units.length - 1) { n /= 1024; i += 1; }
-    return (i === 0 ? String(Math.round(n)) : n.toFixed(1)) + ' ' + units[i];
-  }
-
   /* 取消按钮：点一次就置灰，等宿主把 worker 回滚完（成功/失败都会回 message） */
   function cancelButton(id) {
     const b = el('button', 'btn ext-cancel', cancelling[id]

@@ -82,7 +82,7 @@
   top: 12%;
   width: 26%;
   height: 56%;
-  border: solid #fff;
+  border: solid var(--on-accent);
   border-width: 0 2px 2px 0;
   transform: rotate(42deg);
 }
@@ -246,16 +246,16 @@ body.is-col-resizing * { cursor: col-resize !important; user-select: none !impor
 .btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
 .btn-primary {
   background: var(--accent);
-  color: #fff;
-  box-shadow: 0 3px 10px rgba(113, 100, 147, 0.28);
+  color: var(--on-accent);
+  box-shadow: var(--shadow-accent);
 }
 .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
 .btn-primary:active:not(:disabled) { background: var(--accent-press); }
 /* 停止采集：警示色，与主按钮并列时不抢视觉焦点 */
 .btn-stop {
   background: var(--warn);
-  color: #fff;
-  box-shadow: 0 3px 10px rgba(168, 111, 20, 0.26);
+  color: var(--on-accent);
+  box-shadow: var(--shadow-warn-btn);
 }
 .btn-stop:hover:not(:disabled) { filter: brightness(1.07); }
 .btn-stop:active:not(:disabled) { filter: brightness(0.94); }

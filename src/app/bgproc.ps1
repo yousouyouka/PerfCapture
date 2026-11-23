@@ -15,7 +15,7 @@ function ConvertTo-BgNum($v) {
     $s = ([string]$v).Trim()
     if (-not $s -or $s -eq 'NA') { return $null }
     $d = 0.0
-    if ([double]::TryParse($s, [ref]$d)) { return $d }
+    if ([double]::TryParse($s, [Globalization.NumberStyles]::Float, [cultureinfo]::InvariantCulture, [ref]$d)) { return $d }
     return $null
 }
 

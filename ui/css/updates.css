@@ -360,7 +360,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(18, 16, 26, 0.42);
+  background: var(--modal-overlay);
   backdrop-filter: blur(2px);
 }
 .upd-modal[hidden] { display: none; }
@@ -371,7 +371,7 @@
   border: 1px solid var(--line);
   border-radius: 14px;
   padding: 1.1rem 1.2rem 1rem;
-  box-shadow: 0 18px 48px rgba(18, 16, 26, 0.28);
+  box-shadow: var(--shadow-modal);
 }
 .upd-modal-title {
   margin: 0 0 0.5rem;

@@ -91,8 +91,12 @@ Get-ChildItem (Join-Path $root 'ui\css') -Filter '*.css' | ForEach-Object {
     $o = ([regex]::Matches($c, '\{')).Count
     $cl = ([regex]::Matches($c, '\}')).Count
     if ($o -ne $cl) { Bad "$($_.Name) 括号不配平（{=$o }=$cl）" }
+    # tokens 硬约束：组件里不许写死主题色（应在 tokens.css 定义后 var(--*) 引用）
+    if ($_.Name -ne 'tokens.css' -and $c -match '#716493|#8672ba|rgba\(113,\s*100,\s*147|rgba\(168,\s*111,\s*20') {
+        Bad "$($_.Name) 仍写死主题色/阴影副本（应改用 tokens 变量）"
+    }
 }
-if ($fail -eq 0) { Ok 'ui\css 全部配平' }
+if ($fail -eq 0) { Ok 'ui\css 全部配平且无硬编码主题色' }
 
 # ---------- 5. 依赖与契约 ----------
 Write-Host "`n[5/6] 依赖与契约"
@@ -1166,7 +1170,6 @@ if (-not (Test-Path -LiteralPath $limMod)) { Bad '缺少 src\app\limit-rules.ps1
 if (-not (Test-Path -LiteralPath $bgMod))  { Bad '缺少 src\app\bgproc.ps1' }
 $limPs = if (Test-Path -LiteralPath $limMod) { Get-Content $limMod -Raw -Encoding UTF8 } else { '' }
 $bgPs  = if (Test-Path -LiteralPath $bgMod)  { Get-Content $bgMod -Raw -Encoding UTF8 } else { '' }
-$repCss17 = Get-Content (Join-Path $root 'ui\css\report.css') -Raw -Encoding UTF8
 foreach ($fn in 'Get-LimitType', 'ConvertTo-LimitNum') { if ($limPs -notmatch ('function ' + $fn)) { Bad "limit-rules.ps1 缺函数 $fn" } }
 foreach ($fn in 'Get-BackgroundTop', 'ConvertTo-BgNum') { if ($bgPs -notmatch ('function ' + $fn)) { Bad "bgproc.ps1 缺函数 $fn" } }
 # 纯函数红线：判定/聚合模块不得做 IO，探针才能独立验证
@@ -1191,6 +1194,18 @@ $bgBlock = ''
 if ($engPs17 -match '(?s)if \(\$wantBgProc -and \(\(\$tick % 5\).*?\$tick\+\+') { $bgBlock = $Matches[0] }
 if (-not $bgBlock -or $bgBlock -notmatch 'TotalProcessorTime') { Bad '后台采样未用 TotalProcessorTime 差分' }
 if ($bgBlock -match 'Get-Counter|nvidia-smi|NvGpu|gpu_') { Bad '后台采样不得读取其它进程的 GPU' }
+if ($bgBlock -match '-Encoding ASCII') { Bad '后台进程 CSV 用 ASCII 会把中文进程名写成 ??' }
+if ($bgBlock -notmatch '-Encoding UTF8') { Bad '后台进程 CSV 未用 UTF8 编码' }
+# 自检回归：图表纵轴变量曾覆盖判读结果 $limit，导致导出 HTML 永远显示「无法区分」
+if ($engPs17 -match '\$limit\s*=\s*\[double\]\$chartLimit') { Bad '图表变量覆盖了判读结果 $limit' }
+if ($engPs17 -notmatch '\$chartYLimit\s*=\s*\[double\]\$chartLimit') { Bad '图表纵轴变量未改名，判读结果可能被覆盖' }
+# 自检回归：CPU 占用除以核心数，100% = 整机满载；文案不能写成单核满负荷
+if ($engPs17 -match '单核满负荷' -or $i18nText -match '单核满负荷|one fully loaded core|1 コアフルロード') {
+    Bad '后台 CPU 口径文案与公式相反（应写整机全部核心满载 = 100%）'
+}
+if ($limPs -notmatch 'mixedIncomplete' -or $engPs17 -notmatch 'mixedIncomplete') {
+    Bad '缺少 mixedIncomplete 原因码（辅助数据缺失时不得给确定结论）'
+}
 foreach ($need in 'limitBlock', 'bgProcBlock', 'limitEvidenceLabel', 'rp-bg-sub') {
     if ($repJs -notmatch [regex]::Escape($need)) { Bad "report.js 缺 $need" }
 }
@@ -1203,6 +1218,24 @@ foreach ($k in 'diag.limit.thermal', 'diag.limit.indistinct', 'diag.limitWhy.noD
 foreach ($tf in 'probe-limit-rules.ps1', 'probe-bgproc.ps1', 'probe-report-verdicts.js') {
     if (-not (Test-Path (Join-Path $root ('tests\' + $tf)))) { Bad ('缺少 tests\' + $tf) }
 }
+# 全项目审查修复的回归守卫
+$setPs = Get-Content (Join-Path $root 'src\app\20-Settings.ps1') -Raw -Encoding UTF8
+foreach ($k in 'preset', 'customBase', 'warmup') {
+    if ($setPs -notmatch ("'" + $k + "'")) { Bad "20-Settings.ps1 载入白名单缺 $k（保存后重启会丢）" }
+}
+if ($setPs -notmatch "'preset', 'customBase', 'warmup'") { Bad '载入白名单未包含档位三项（须与 saveSettings 一致）' }
+$utilJs = Get-Content (Join-Path $root 'ui\js\util.js') -Raw -Encoding UTF8
+if ($utilJs -notmatch 'function fmtBytes') { Bad 'util.js 缺公共 fmtBytes' }
+$extJs = Get-Content (Join-Path $root 'ui\js\extensions.js') -Raw -Encoding UTF8
+if ($extJs -match 'function fmtBytes') { Bad 'extensions.js 仍有 fmtBytes 副本（应复用 util.js）' }
+if ((Get-Content (Join-Path $root 'ui\js\popup.js') -Raw -Encoding UTF8) -match 'function togglePopup') {
+    Bad 'popup.js 的 togglePopup 是死代码，应删除'
+}
+# 导出 HTML 的样式不能丢章节骨架 / 徽标（预览有、导出没有＝降级）
+foreach ($cls in 'rp-s', 'rp-summary', 'rp-na-badge', 'rp-off-badge', 'rp-module', 'rp-chart-title') {
+    if ($repJs -notmatch ('\.' + $cls + '\b')) { Bad "report.js 导出 CSS 缺 .$cls 规则" }
+}
+if ($idx -notmatch 'css/report\.css\?v=') { Bad 'index.html 的 report.css 未带缓存版本（本版改过样式）' }
 
 $rtJs = Get-Content (Join-Path $root 'ui\js\realtime.js') -Raw -Encoding UTF8
 foreach ($need in 'window.PerfRealtime', '__refreshRealtime', 'metricsStart', 'metricsStop', 'is-na', 'FIELDS') {

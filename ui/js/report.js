@@ -179,32 +179,35 @@ function renderReport(r) {
      两路数据不同源，只能按采集进度比例对齐；容差必须写出来，不许说成精确对齐。 */
   html += stutterContextBlock(r);
 
+  /* 老报告降级路径：主字段有值时，兄弟字段仍可能缺失（旧 schema 没写全）。
+     一律用 na() 兜底，不能让页面上冒出字面量 undefined。 */
+  const na = (v) => (v != null ? v : '—');
   const rows = [];
-  if (r.avg_frametime_ms != null) rows.push([t('metric.ftRow', '帧时间 平均 / p95'), `${r.avg_frametime_ms} / ${r.frametime_p95_ms} ms`]);
-  if (r.frametime_p999_ms != null) rows.push([t('metric.ftP999Row', '帧时间 中位 / p99.9'), `${r.frametime_median_ms} / ${r.frametime_p999_ms} ms`]);
-  if (r.frametime_stddev_ms != null) rows.push([t('metric.jitterRow', '帧时间抖动 标准差 / 变异'), `${r.frametime_stddev_ms} ms / ${r.frametime_jitter_pct} %`]);
+  if (r.avg_frametime_ms != null) rows.push([t('metric.ftRow', '帧时间 平均 / p95'), `${r.avg_frametime_ms} / ${na(r.frametime_p95_ms)} ms`]);
+  if (r.frametime_p999_ms != null) rows.push([t('metric.ftP999Row', '帧时间 中位 / p99.9'), `${na(r.frametime_median_ms)} / ${r.frametime_p999_ms} ms`]);
+  if (r.frametime_stddev_ms != null) rows.push([t('metric.jitterRow', '帧时间抖动 标准差 / 变异'), `${r.frametime_stddev_ms} ms / ${na(r.frametime_jitter_pct)} %`]);
   if (r.long_frames) {
     const lf = r.long_frames;
     rows.push([t('metric.longRow', '长帧 >2× / >4× 中位 · >50 / >100 ms'),
-      `${lf.over2x} / ${lf.over4x} · ${lf.over50} / ${lf.over100} 帧（${lf.pct_over2x} %）`]);
+      `${na(lf.over2x)} / ${na(lf.over4x)} · ${na(lf.over50)} / ${na(lf.over100)} 帧（${na(lf.pct_over2x)} %）`]);
   }
   // 逐秒口径不再叫「1% Low」：它只是参考序列，不参与判定，也不与上面的 1% Low 并列
   if (r.fps_01pct_low != null) rows.push([t('metric.p01low', '0.1% 低帧率'), `${r.fps_01pct_low} FPS`]);
   if (r.stutter && r.stutter.count != null) {
     rows.push([t('metric.stutterRow', '卡顿（>50ms 合并计段）'),
-      `${r.stutter.count} 段 / 累计 ${r.stutter.total_ms} ms / 最长 ${r.stutter.worst_ms} ms / 严重 ${r.stutter.severe} 帧`]);
+      `${r.stutter.count} 段 / 累计 ${na(r.stutter.total_ms)} ms / 最长 ${na(r.stutter.worst_ms)} ms / 严重 ${na(r.stutter.severe)} 帧`]);
   }
-  if (r.fps_1pct_low_time != null) rows.push([t('metric.lowPerSec', '逐秒最低帧率（最差 1% 的秒）'), `${r.fps_1pct_low_time} FPS（占平均 ${r.fps_1pct_low_time_pct} %）`]);
-  if (r.displayed_fps != null) rows.push([t('metric.displayedRow', '上屏节奏 / 重复帧'), `${r.displayed_fps} FPS / ${r.repeat_frames} 帧（${r.repeat_pct} %）`]);
+  if (r.fps_1pct_low_time != null) rows.push([t('metric.lowPerSec', '逐秒最低帧率（最差 1% 的秒）'), `${r.fps_1pct_low_time} FPS（占平均 ${na(r.fps_1pct_low_time_pct)} %）`]);
+  if (r.displayed_fps != null) rows.push([t('metric.displayedRow', '上屏节奏 / 重复帧'), `${r.displayed_fps} FPS / ${na(r.repeat_frames)} 帧（${na(r.repeat_pct)} %）`]);
   if (r.sync_interval != null || r.present_flags != null) {
     rows.push([t('metric.syncRow', '同步间隔 / 呈现标志'),
-      `SyncInterval ${r.sync_interval ?? '—'} · PresentFlags ${r.present_flags ?? '—'}`]);
+      `SyncInterval ${na(r.sync_interval)} · PresentFlags ${na(r.present_flags)}`]);
   }
   if (r.gpu_clock_avg_mhz != null) {
     rows.push([t('metric.gpuClockRow', 'GPU 频率 平均 / 最高'),
-      `${r.gpu_clock_avg_mhz} / ${r.gpu_clock_max_mhz} MHz${r.gpu_clock_hw_max_mhz ? `（上限 ${r.gpu_clock_hw_max_mhz}）` : ''}`]);
+      `${r.gpu_clock_avg_mhz} / ${na(r.gpu_clock_max_mhz)} MHz${r.gpu_clock_hw_max_mhz ? `（上限 ${r.gpu_clock_hw_max_mhz}）` : ''}`]);
   }
-  if (r.gpu_power_avg_w != null) rows.push([t('metric.gpuPowerRow', 'GPU 功耗 平均 / 最高'), `${r.gpu_power_avg_w} / ${r.gpu_power_max_w} W`]);
+  if (r.gpu_power_avg_w != null) rows.push([t('metric.gpuPowerRow', 'GPU 功耗 平均 / 最高'), `${r.gpu_power_avg_w} / ${na(r.gpu_power_max_w)} W`]);
   if (r.gpu_fan_avg_pct != null) rows.push([t('metric.gpuFanRow', 'GPU 风扇 平均'), `${r.gpu_fan_avg_pct} %`]);
   if (r.pcie) rows.push([t('metric.pcieRow', 'PCIe 链路'), String(r.pcie)]);
   if (r.throttle && Object.keys(r.throttle).length) {
@@ -213,13 +216,13 @@ function renderReport(r) {
   }
   if (r.cpu_util_avg_pct != null) {
     rows.push([t('metric.cpuRow', 'CPU 占用 平均 / 最高'),
-      `${r.cpu_util_avg_pct} / ${r.cpu_util_max_pct} %${r.cpu_max_core_avg_pct != null ? `（最高单核 ${r.cpu_max_core_avg_pct} %）` : ''}`]);
+      `${r.cpu_util_avg_pct} / ${na(r.cpu_util_max_pct)} %${r.cpu_max_core_avg_pct != null ? `（最高单核 ${r.cpu_max_core_avg_pct} %）` : ''}`]);
   }
-  if (r.display_latency_avg_ms != null) rows.push([t('metric.latRow', '上屏延迟 平均 / p95'), `${r.display_latency_avg_ms} / ${r.display_latency_p95_ms} ms`]);
-  if (r.pc_latency_avg_ms != null) rows.push([t('metric.pcRow', 'PC 延迟 平均 / p95'), `${r.pc_latency_avg_ms} / ${r.pc_latency_p95_ms} ms`]);
-  if (r.gpu_temp_avg_c != null) rows.push([t('metric.gpuTempRow', 'GPU 温度 平均 / 最高'), `${r.gpu_temp_avg_c} / ${r.gpu_temp_max_c} °C`]);
-  if (r.vram_avg_mb != null) rows.push([t('metric.vramRow', '显存 平均 / 最高'), `${r.vram_avg_mb} / ${r.vram_max_mb} MB`]);
-  if (r.ram_avg_mb != null) rows.push([t('metric.ramRow', '内存 平均 / 最高'), `${r.ram_avg_mb} / ${r.ram_max_mb} MB`]);
+  if (r.display_latency_avg_ms != null) rows.push([t('metric.latRow', '上屏延迟 平均 / p95'), `${r.display_latency_avg_ms} / ${na(r.display_latency_p95_ms)} ms`]);
+  if (r.pc_latency_avg_ms != null) rows.push([t('metric.pcRow', 'PC 延迟 平均 / p95'), `${r.pc_latency_avg_ms} / ${na(r.pc_latency_p95_ms)} ms`]);
+  if (r.gpu_temp_avg_c != null) rows.push([t('metric.gpuTempRow', 'GPU 温度 平均 / 最高'), `${r.gpu_temp_avg_c} / ${na(r.gpu_temp_max_c)} °C`]);
+  if (r.vram_avg_mb != null) rows.push([t('metric.vramRow', '显存 平均 / 最高'), `${r.vram_avg_mb} / ${na(r.vram_max_mb)} MB`]);
+  if (r.ram_avg_mb != null) rows.push([t('metric.ramRow', '内存 平均 / 最高'), `${r.ram_avg_mb} / ${na(r.ram_max_mb)} MB`]);
   if (r.resolution) rows.push([t('metric.resRow', '分辨率 / 窗口模式'), `${String(r.resolution).replace('x', '×')} / ${r.window_mode || '—'}`]);
   if (r.foreground_pct != null) rows.push([t('metric.fgRow', '游戏前台占比'), `${r.foreground_pct} %`]);
   if (r.features) {
@@ -384,7 +387,7 @@ function bgProcBlock(r) {
   const b = r && r.background_proc;
   if (!b || b.state !== 'ok' || !Array.isArray(b.procs) || !b.procs.length) return '';
   const cap = fillParams(t('report.bgProc.cap',
-    '每 {n} 秒采样一次其它进程的 CPU 时间；占用按「占单核满负荷 = 100%」计，同名进程合并。只读进程 CPU，不读其它进程的 GPU。'),
+    '每 {n} 秒采样一次其它进程的 CPU 时间；占用按「整机全部核心满载 = 100%」计（与游戏进程同口径，8 核占满 1 核显示 12.5%），同名进程合并。只读进程 CPU，不读其它进程的 GPU。'),
     { n: b.interval_sec != null ? b.interval_sec : 5 });
   let h = `<div class="rp-section">${escapeHtml(t('report.bgProc.title', '后台干扰 Top 3'))}</div>` +
           `<div class="rp-note">${escapeHtml(cap)}</div>` +
@@ -1255,6 +1258,23 @@ function buildExportHtml() {
     .rp-chart { border: 1px solid ${c.line}; border-radius: 9px; padding: 10px; }
     .rp-chart canvas, .rp-chart img { width: 100%; height: 180px; display: block; }
     .rp-chart .cap { color: ${c.muted}; font-size: .72rem; margin-top: 6px; }
+    /* 章节骨架 / 徽标 / 模块：预览里由 report.css 提供，导出必须自带同名规则，
+       否则导出的 01–07 标题会退化成普通文字、徽标丢失。改动 report.css 时同步这里。 */
+    .rp-s { display: flex; align-items: baseline; gap: .5rem; margin: 1.15rem 0 .55rem;
+            font-size: .82rem; color: ${c.muted}; border-bottom: 1px solid ${c.line}; padding-bottom: .25rem; }
+    .rp-s .n { font-size: .74rem; color: ${c.accent}; }
+    .rp-summary { border: 1px solid ${c.line}; border-radius: 9px; padding: 10px 12px; margin: 8px 0; }
+    .rp-module { margin-bottom: 12px; }
+    .rp-chart-block { margin-bottom: 12px; }
+    .rp-chart-title { color: ${c.strong}; font-size: .82rem; margin-bottom: 4px; }
+    .rp-chart-note { color: ${c.muted}; font-size: .72rem; margin-top: 4px; }
+    .rp-na-badge, .rp-off-badge { font-size: .68rem; color: ${c.muted}; border: 1px solid ${c.line};
+                                  border-radius: 99px; padding: 0 .35rem; margin-left: .35rem; }
+    .rp-na-why { color: ${c.muted}; font-size: .7rem; line-height: 1.5; }
+    .row.is-na, .row.is-off { background: transparent; }
+    .row.is-na .k, .row.is-off .k { color: ${c.muted}; opacity: .85; }
+    .row.is-finding .k { color: ${c.warn}; }
+    .rp-diag .w.note { border-left: 2px solid ${c.accent}; padding-left: 8px; }
     .empty { color: ${c.muted}; }
     @media print { body { padding: 0; background: #fff; } .wrap { border: none; box-shadow: none; } }
   `;

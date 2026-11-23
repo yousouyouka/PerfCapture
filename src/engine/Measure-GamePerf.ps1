@@ -234,10 +234,10 @@ if (-not ('NvGpu' -as [type])) {
     try { Add-Type -TypeDefinition $nvcs -Language CSharp -ErrorAction Stop } catch { }
 }
 if ('NvGpu' -as [type]) { try { $gpuUseNvml = [NvGpu]::Start() } catch { $gpuUseNvml = $false } }
-    # 后台进程 CPU 差分基线：每 5 个 tick 采一次，第一次只记基线不写行
+    # 后台进程 CPU 差分基线：每 5 个 tick 采一次，第一次只建基线不写行
     $bgPrev = @{}
     $bgPrevWall = $null
-    if ($wantBgProc) { 'elapsed_s,name,pid,cpu_pct' | Out-File -FilePath $bgCsv -Encoding ASCII }
+    if ($wantBgProc) { 'elapsed_s,name,pid,cpu_pct' | Out-File -FilePath $bgCsv -Encoding UTF8 }
     $script:t0 = Get-Date
     $cols = @('timestamp_utc', 'gpu_temp_c', 'gpu_util_pct', 'gpu_mem_used_mb', 'proc_vram_mb', 'proc_ram_mb',
               'gpu_clock_mhz', 'gpu_mem_clock_mhz', 'gpu_clock_max_mhz', 'gpu_power_w', 'gpu_fan_pct',
@@ -550,24 +550,31 @@ public static class PerfMem {
                     })
                 $bgWall = [DateTime]::Now
                 $bgDt = if ($null -ne $bgPrevWall) { ($bgWall - $bgPrevWall).TotalMilliseconds } else { 0.0 }
-                if ($bgDt -gt 100) {
-                    $bgCores = [math]::Max(1, [Environment]::ProcessorCount)
-                    $bgSeen = @{}
-                    foreach ($bp in $bgNow) {
-                        $bgMs = $null
-                        try { $bgMs = $bp.TotalProcessorTime.TotalMilliseconds } catch { continue }
-                        $bkey = [string]$bp.Id
-                        $bgSeen[$bkey] = $true
-                        if ($bgPrev.ContainsKey($bkey)) {
-                            $bpct = 100.0 * ($bgMs - [double]$bgPrev[$bkey]) / ($bgDt * $bgCores)
-                            if ($bpct -ge 0 -and $bpct -le (100.0 * $bgCores)) {
-                                $bname = ([string]$bp.ProcessName) -replace '[,"\r\n]', '_'
-                                $bel = [math]::Round(($bgWall - $script:t0).TotalSeconds, 1)
-                                "$bel,$bname,$bkey,$([math]::Round($bpct, 1))" | Out-File -FilePath $bgCsv -Append -Encoding ASCII
-                            }
+                $bgCores = [math]::Max(1, [Environment]::ProcessorCount)
+                $bgSeen = @{}
+                $bgLines = New-Object System.Collections.Generic.List[string]
+                foreach ($bp in $bgNow) {
+                    $bgMs = $null
+                    try { $bgMs = $bp.TotalProcessorTime.TotalMilliseconds } catch { continue }
+                    $bkey = [string]$bp.Id
+                    $bgSeen[$bkey] = $true
+                    # 首次（tick=0）先建基线，下一次（tick=5）就有差分可写。
+                    # 早期版本在 tick=0 只更新 Wall 不建基线，导致首批数据拖到 tick=10。
+                    if ($bgDt -gt 100 -and $bgPrev.ContainsKey($bkey)) {
+                        $bpct = 100.0 * ($bgMs - [double]$bgPrev[$bkey]) / ($bgDt * $bgCores)
+                        if ($bpct -ge 0 -and $bpct -le (100.0 * $bgCores)) {
+                            # 只替换 CSV 分隔符与换行；进程名可能是中文，所以用 UTF8 写，
+                            # 用 ASCII 会把「微信」写成 ?? 并把不同中文进程错误合并成一行。
+                            $bname = ([string]$bp.ProcessName) -replace '[,"\r\n]', '_'
+                            $bel = [math]::Round(($bgWall - $script:t0).TotalSeconds, 1)
+                            $bgLines.Add($bel.ToString([cultureinfo]::InvariantCulture) + ',' + $bname + ',' + $bkey + ',' + ([math]::Round($bpct, 1)).ToString([cultureinfo]::InvariantCulture))
                         }
-                        $bgPrev[$bkey] = $bgMs
                     }
+                    $bgPrev[$bkey] = $bgMs
+                }
+                # 一次写整批，而不是每个进程开一次文件（300 进程 × 24 次会明显拖慢采样）
+                if ($bgLines.Count -gt 0) { $bgLines | Out-File -FilePath $bgCsv -Append -Encoding UTF8 }
+                if ($bgDt -gt 100) {
                     foreach ($dead in @($bgPrev.Keys | Where-Object { -not $bgSeen.ContainsKey($_) })) { $bgPrev.Remove($dead) }
                 }
                 $bgPrevWall = $bgWall
@@ -1209,7 +1216,7 @@ foreach ($k in $thrNames.Keys) {
 # ── 2.1.17 / F4-2：后台进程 CPU 干扰（独立 CSV，一对多行）──
 $bgRows = @()
 if ($collectBgProc -and (Test-Path -LiteralPath $bgCsv)) {
-    try { $bgRows = @(Import-Csv -LiteralPath $bgCsv -Encoding ASCII) } catch { $bgRows = @() }
+    try { $bgRows = @(Import-Csv -LiteralPath $bgCsv -Encoding UTF8) } catch { $bgRows = @() }
 }
 if (-not $collectBgProc) {
     $bgProc = [ordered]@{ state = 'skipped'; sample_count = 0; interval_sec = 5; procs = @() }
@@ -1282,7 +1289,7 @@ if ($collectChart -and $frameTimes.Count -gt 2) {
 # 数值格式化（趋势/诊断两块要用，定义提前到它们之前；下面不再重复定义）
 function Fmt($v, [string]$fmt = '0.0') { if ($null -eq $v) { return 'NA' } return ([string]::Format([cultureinfo]::InvariantCulture, '{0:' + $fmt + '}', $v)) }
 # ── B3：遥测趋势（CPU / GPU 负载、GPU 温度、GPU 功耗）──
-# 遥测采样（约 500 ms）比帧粗得多，所以按「与帧时间图同一套时间桶」取桶内平均；
+# 传感器采样约 1 秒一次（见采样循环末尾的 Start-Sleep 1000），比帧粗得多，所以按「与帧时间图同一套时间桶」取桶内平均；
 # 某个桶里一个样本都没有就留 $null —— 图上直接断开，不补值、不插值、不沿用上一个样本。
 function Get-NumOrNull($v) {
     $d = 0.0
@@ -1683,7 +1690,8 @@ $summary = [ordered]@{
     # evidence 里是判读依据的原始数值；indistinct 时 reason_code 说明为什么不能下结论。
     limit            = $limit
     # 2.1.17 / F4-2：后台进程 CPU 干扰 Top 3。state=skipped/noSamples/ok，
-    # 口径为「占单核满负荷的百分比」，与游戏进程 proc_cpu_pct 一致。
+    # 口径为「整机全部核心满载 = 100%」（与游戏进程 proc_cpu_pct 同一公式：除以核心数），
+    # 所以 8 核机器上占满 1 核显示 12.5%，不是 100%。文案必须照实说，别让人低估。
     background_proc  = $bgProc
     memory           = [ordered]@{
         proc_ram_max_mb = $(if ($procRam) { [math]::Round($procRam.Max, 0) } else { $null })
@@ -1942,14 +1950,17 @@ if ($stutterCtx -and $stutterCtx.items) {
     }
 }
 if ($collectChart -and $chartMs -and $chartMs.Count -gt 2) {
-    $limit = [double]$chartLimit
+    # 2.1.17 自检修正：这里原先用 $limit 作纵轴上限，恰好把同名的限制判读结果覆盖了。
+    # 判读对象只在 summary / 导出 HTML 里用，覆盖后导出 HTML 会永远显示「无法区分」。
+    # 改名后两个变量各司其职，不再依赖赋值顺序。
+    $chartYLimit = [double]$chartLimit
     $nBin = $chartMs.Count
     $pts = New-Object System.Collections.Generic.List[string]
     for ($b = 0; $b -lt $nBin; $b++) {
         $v = [double]$chartMs[$b]
-        if ($v -gt $limit) { $v = $limit }
+        if ($v -gt $chartYLimit) { $v = $chartYLimit }
         $x = [math]::Round(1000.0 * $b / [math]::Max(1, $nBin - 1), 1)
-        $y = [math]::Round(150.0 - ($v / $limit) * 150.0, 1)
+        $y = [math]::Round(150.0 - ($v / $chartYLimit) * 150.0, 1)
         $pts.Add([string]$x + ',' + [string]$y)
     }
     $poly = $pts -join ' '
@@ -1960,8 +1971,8 @@ if ($collectChart -and $chartMs -and $chartMs.Count -gt 2) {
         $grid += '<line x1="0" y1="' + $gy + '" x2="1000" y2="' + $gy + '" stroke="' + $cLine + '" stroke-width="1" vector-effect="non-scaling-stroke"/>'
     }
     $refLine = ''
-    if ($limit -ge 16.7) {
-        $ry = [math]::Round(150.0 - (16.7 / $limit) * 150.0, 1)
+    if ($chartYLimit -ge 16.7) {
+        $ry = [math]::Round(150.0 - (16.7 / $chartYLimit) * 150.0, 1)
         $refLine = '<line x1="0" y1="' + $ry + '" x2="1000" y2="' + $ry + '" stroke="' + $cGood + '" stroke-width="1" stroke-dasharray="6 6" opacity="0.6" vector-effect="non-scaling-stroke"/>'
     }
     $chartSvg = '<svg viewBox="0 0 1000 150" preserveAspectRatio="none" role="img">' +
@@ -1976,15 +1987,15 @@ if ($collectChart -and $chartMs -and $chartMs.Count -gt 2) {
 
     $lbl = New-Object System.Collections.Generic.List[string]
     for ($t = 4; $t -ge 0; $t--) {
-        $val = $limit * $t / 4.0
+        $val = $chartYLimit * $t / 4.0
         $txt = if ($t -eq 0) { '0' } else { [string]::Format([cultureinfo]::InvariantCulture, '{0:0.0}', $val) }
         $lbl.Add('<span style="top:' + [string](($t - 4) * -25) + '%">' + $txt + '</span>')
     }
     $chartYlab = $lbl -join ''
 
-    $chartCap = '帧时间曲线 · 时间轴 0–' + (Fmt $durSec '0.0') + 's · 每 ' + $chartPerBin + ' 帧取最慢 · 纵轴 0–' + (Fmt $limit '0.0') + ' ms'
+    $chartCap = '帧时间曲线 · 时间轴 0–' + (Fmt $durSec '0.0') + 's · 每 ' + $chartPerBin + ' 帧取最慢 · 纵轴 0–' + (Fmt $chartYLimit '0.0') + ' ms'
     if ($chartOver -gt 0) { $chartCap += ' · ' + $chartOver + ' 帧超出上限已截顶' }
-    if ($limit -ge 16.7) { $chartCap += ' · 绿虚线 = 60 FPS 基准 16.7 ms' }
+    if ($chartYLimit -ge 16.7) { $chartCap += ' · 绿虚线 = 60 FPS 基准 16.7 ms' }
 }
 
 function Card([string]$k, [string]$v, [string]$u, [string]$sub = '') {
@@ -2174,6 +2185,7 @@ if ($limit) {
         mixedThermal     = '热与功耗同时触发；温度高且功耗未贴上限，可分辨为热墙'
         mixedPower       = '热与功耗同时触发；功耗贴上限且温度不高，可分辨为功耗墙'
         mixed            = '多种限制同时触发，辅助信号不足以分辨主因'
+        mixedIncomplete  = '热与功耗同时触发，但温度或功耗上限数据缺失，不能把缺数据当成没触发'
         cpuEventUnknown  = '有 CPU 固件限速记录，但温度不高且事件原因不可解析'
         hwSlowdown       = '驱动只报硬件降频，未给出具体原因位'
         none             = '采到了限流状态，没有触发项'
@@ -2203,7 +2215,7 @@ if ($bgProc -and $bgProc.state -eq 'ok' -and @($bgProc.procs).Count -gt 0) {
                        (Fmt $p.peak_cpu_pct '0.0') + ' %</td><td>' + $p.samples + ' / ' + $bgProc.sample_count + '</td></tr>'
     }
     $secBg = '<h2>后台干扰 Top 3</h2>' + "`n" +
-             '<div class="cap">每 ' + $bgProc.interval_sec + ' 秒采样一次其它进程的 CPU 时间；占用按「占单核满负荷 = 100%」计，同名进程合并。只读进程 CPU，不读其它进程的 GPU。</div>' + "`n" +
+             '<div class="cap">每 ' + $bgProc.interval_sec + ' 秒采样一次其它进程的 CPU 时间；占用按「整机全部核心满载 = 100%」计（与游戏进程同口径，8 核占满 1 核显示 12.5%），同名进程合并。只读进程 CPU，不读其它进程的 GPU。</div>' + "`n" +
              '<table class="det"><tr class="sec"><td>进程</td><td>平均占用</td><td>峰值</td><td>出现采样</td></tr>' + $bgRowsHtml + '</table>' + "`n"
 }
 

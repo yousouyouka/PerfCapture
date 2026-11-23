@@ -163,9 +163,9 @@ if (window.matchMedia) {
 }
 
 // 语言优先用宿主传来的设置，其次跟随上次保存在本地界面的选择
+// setLanguage 内部已调用 applyTranslations（并触发各 __refresh 回调），不要再来第二遍
 setLanguage((state.language || 'zh-CN'));
 if (window.__syncSettingsUI) window.__syncSettingsUI(state.themeMode, LANG);
-applyTranslations();
 
 /* 再采一次：参数与目标都还在界面上，等同于点一次开始（校验与忙碌判断走同一段代码） */
 const btnRerun = document.getElementById('btnRerun');

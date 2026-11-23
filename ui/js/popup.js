@@ -49,12 +49,6 @@ function openPopup(anchor, items, onPick, activeIndex = -1) {
   });
 }
 
-/** 同一锚点再点一次就收起，否则执行打开动作 */
-function togglePopup(anchor, open) {
-  if (popup.classList.contains('open') && popupAnchor === anchor) { closePopup(); return; }
-  open();
-}
-
 function closePopup() {
   if (popup.hidden || !popup.classList.contains('open')) {
     popup.hidden = true; popupAnchor = null; return;

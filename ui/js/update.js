@@ -35,14 +35,7 @@
   };
   const setStatus = (s) => { if (statusEl) statusEl.textContent = s; };
   const bannerHead = () => fill(tx('update.banner', '有新版本 v{v}'), { v: info.version || '' });
-  const fmtBytes = (b) => {
-    const n0 = Number(b);
-    if (!(n0 > 0)) return '';
-    const units = ['B', 'KB', 'MB', 'GB'];
-    let n = n0; let i = 0;
-    while (n >= 1024 && i < units.length - 1) { n /= 1024; i += 1; }
-    return (i === 0 ? String(Math.round(n)) : n.toFixed(1)) + ' ' + units[i];
-  };
+  const fmtBytes = (typeof window.fmtBytes === 'function') ? window.fmtBytes : (b) => '';
 
   function showBanner(text, mainLabel, skipVisible) {
     banner.hidden = false;

@@ -681,7 +681,7 @@ function ToNum($v) {
     if (-not $s) { return $null }
     if ($s -match 'N/A|Not Supported|Unknown|^\[.*\]$') { return $null }
     $d = 0.0
-    if ([double]::TryParse($s, [ref]$d)) { return $d }
+    if ([double]::TryParse($s, [Globalization.NumberStyles]::Float, [cultureinfo]::InvariantCulture, [ref]$d)) { return $d }
     return $null
 }
 

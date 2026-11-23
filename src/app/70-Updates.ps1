@@ -114,7 +114,9 @@ $proxyInfo = Get-NetProxyDescriptor ([string]$ManifestUrls[0])
 #      不会再让检查更新误判成「已是最新」；
 #   4) 源顺序只影响同版本并列时的取舍与日志，不再决定结果。
 function Test-Host($uri) {
-    try { return ($AllowedHosts -contains $uri.Host.ToLowerInvariant()) } catch { return $false }
+    # 与宿主版 Test-UpdateHost 保持一致：白名单主机 + 仅 HTTPS。
+    # 少了 scheme 校验时，重定向到 http://白名单主机 会通过（虽然后面还有验签兜底）。
+    try { return ($uri.Scheme -eq 'https' -and $AllowedHosts -contains $uri.Host.ToLowerInvariant()) } catch { return $false }
 }
 function Test-Sig([byte[]]$Data, [byte[]]$Sig) {
     try {
@@ -232,7 +234,9 @@ $directInfo = Get-DirectProxyInfo
 # 与扩展供应层同一套策略：先并发试首字节，慢源/死源不再各消耗一次完整超时；
 # 换源不丢进度（.part 保留，新源用 Range 续），最终仍以清单里的整包哈希为准。
 function Test-Host($uri) {
-    try { return ($AllowedHosts -contains $uri.Host.ToLowerInvariant()) } catch { return $false }
+    # 与宿主版 Test-UpdateHost 保持一致：白名单主机 + 仅 HTTPS。
+    # 少了 scheme 校验时，重定向到 http://白名单主机 会通过（虽然后面还有验签兜底）。
+    try { return ($uri.Scheme -eq 'https' -and $AllowedHosts -contains $uri.Host.ToLowerInvariant()) } catch { return $false }
 }
 $log = New-Object System.Collections.Generic.List[string]
 $log.Add('proxy ' + $proxyInfo.label)

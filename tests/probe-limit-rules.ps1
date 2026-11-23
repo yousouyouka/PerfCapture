@@ -67,6 +67,19 @@ $r = Invoke (New-Throttle @{ sw_thermal = 40; sw_power_cap = 35 }) -gpuT 62 -gpu
 Assert ($r.kind -eq 'power') '功耗贴上限但温度不高 → power' ('实际 ' + $r.kind)
 Assert ($r.reason_code -eq 'mixedPower') '原因码 mixedPower' ('实际 ' + $r.reason_code)
 
+Write-Host '== 3b. 辅助数据缺失：不得把「没数据」当成「没触发」==' -ForegroundColor Cyan
+$both = New-Throttle @{ sw_thermal = 40; sw_power_cap = 35 }
+$r = Invoke $both -gpuT 88 -gpuP $null -limW $null
+Assert ($r.kind -eq 'indistinct') '温度高但功耗数据全缺 → 仍无法区分' ('实际 ' + $r.kind)
+Assert ($r.reason_code -eq 'mixedIncomplete') '原因码 mixedIncomplete' ('实际 ' + $r.reason_code)
+$r = Invoke $both -gpuT $null -gpuP 248 -limW 250
+Assert ($r.kind -eq 'indistinct') '功耗贴上限但温度数据缺 → 仍无法区分' ('实际 ' + $r.kind)
+Assert ($r.reason_code -eq 'mixedIncomplete') '原因码 mixedIncomplete' ('实际 ' + $r.reason_code)
+$r = Invoke $both -gpuT 88 -gpuP 248 -limW $null
+Assert ($r.kind -eq 'indistinct') '有功耗但没有上限值 → 仍无法区分' ('实际 ' + $r.kind)
+$r = Invoke $both -gpuT 88 -gpuP 248 -limW 0
+Assert ($r.kind -eq 'indistinct') '上限为 0（无效）→ 仍无法区分' ('实际 ' + $r.kind)
+
 Write-Host '== 4. CPU Event 37 只作辅助，不解析 Group 语义 ==' -ForegroundColor Cyan
 $r = Invoke (New-Throttle @{}) -cpuT 94 -cpuState ok -cpuCount 3 -cpuTOk $true
 Assert ($r.kind -eq 'thermal') '固件限速 + CPU 高温 → thermal' ('实际 ' + $r.kind)

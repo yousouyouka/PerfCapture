@@ -26,7 +26,9 @@ function ConvertTo-LimitNum($v) {
     $s = ([string]$v).Trim()
     if (-not $s -or $s -eq 'NA' -or $s -eq '-') { return $null }
     $d = 0.0
-    if ([double]::TryParse($s, [ref]$d)) { return $d }
+    # 写出侧用 InvariantCulture（见下方 evidence），解析侧必须一致：
+    # 在小数点为逗号等区域，单参数 TryParse 会把 "12.5" 读错或直接失败。
+    if ([double]::TryParse($s, [Globalization.NumberStyles]::Float, [cultureinfo]::InvariantCulture, [ref]$d)) { return $d }
     return $null
 }
 
@@ -37,8 +39,8 @@ function Get-LimitPct($Throttle, [string]$Key) {
 
 # 返回 ordered hashtable：
 #   kind         thermal / power / driver / unobserved / indistinct
-#   reason_code  gpuThermal / cpuThermal / gpuPower / appClocks / mixed / mixedThermal /
-#                mixedPower / cpuEventUnknown / hwSlowdown / none / noData
+#   reason_code  gpuThermal / cpuThermal / gpuPower / appClocks / mixed / mixedIncomplete /
+#                mixedThermal / mixedPower / cpuEventUnknown / hwSlowdown / none / noData
 #   evidence[]   { metric, name, value } —— 全部来自本次采集的原始数值，缺的不写
 function Get-LimitType {
     param(
@@ -90,11 +92,20 @@ function Get-LimitType {
 
     if ($direct.Count -gt 1) {
         # 热与功耗同时触发时，只有「温度高且功耗没贴上限」或「功耗贴上限且温度不高」
-        # 这两种互斥情形才能分辨；其余保留「无法区分」。
+        # 这两种互斥情形才能分辨。**分辨的前提是两路辅助数据都拿到**：
+        # 缺温度就无从说「温度不高」，缺功耗上限就无从说「没贴上限」——
+        # 把缺数据当成「没触发」会得出确定结论，这正是不猜原则要禁止的。
         if ($direct.Count -eq 2 -and $direct -contains 'thermal' -and $direct -contains 'power') {
-            if ($gpuHot -and -not $gpuAtLimit) { $kind = 'thermal'; $reason = 'mixedThermal' }
-            elseif ($gpuAtLimit -and -not $gpuHot) { $kind = 'power'; $reason = 'mixedPower' }
-            else { $kind = 'indistinct'; $reason = 'mixed' }
+            $canSeparate = ($null -ne $gpuTemp) -and ($null -ne $gpuPwr) -and ($null -ne $limitW) -and ($limitW -gt 0)
+            if (-not $canSeparate) {
+                $kind = 'indistinct'; $reason = 'mixedIncomplete'
+            } elseif ($gpuHot -and -not $gpuAtLimit) {
+                $kind = 'thermal'; $reason = 'mixedThermal'
+            } elseif ($gpuAtLimit -and -not $gpuHot) {
+                $kind = 'power'; $reason = 'mixedPower'
+            } else {
+                $kind = 'indistinct'; $reason = 'mixed'
+            }
         } else {
             $kind = 'indistinct'; $reason = 'mixed'
         }

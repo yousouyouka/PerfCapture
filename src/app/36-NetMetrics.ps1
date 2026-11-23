@@ -50,6 +50,7 @@ function Get-NetKind($m) {
 }
 
 $meta = @{}
+$metaByName = @{}   # 网卡名 -> ifIndex（裸 runspace 里统计对象没有 ifIndex 别名属性，按 Name 配对）
 $prev = @{}
 $wall = $null
 $tick = 0
@@ -100,17 +101,23 @@ while ($true) {
         # 元数据（Virtual / MediaType / Status / 链路速度）变化极慢，每 5 秒刷一次就够
         if (($tick % 5) -eq 1 -or $meta.Count -eq 0) {
             $meta = @{}
+            $metaByName = @{}
             foreach ($a in @(Get-NetAdapter -ErrorAction SilentlyContinue)) {
-                try { $meta[[int]$a.InterfaceIndex] = $a } catch { }
+                try {
+                    $meta[[int]$a.InterfaceIndex] = $a
+                    $metaByName[[string]$a.Name] = [int]$a.InterfaceIndex
+                } catch { }
             }
         }
         $now = Get-Date
         $seen = @{}
-        $ifs = New-Object System.Collections.Generic.List[object]
+        # 注意：这里必须用「普通数组 + 普通哈希表」——PS 5.1 对装有 [ordered] 字典的
+        # List[object] 做 @() 枚举会抛「Argument types do not match」（2.2.1 自检抓出的根因）
+        $ifs = @()
         $dnsBudget = 2
         $wantDns = ($Ctl -and $Ctl.reverseDns)
         # 连接/会话快照（L3 口径：只列「现在谁连着谁」，不计字节）
-        $conns = New-Object System.Collections.Generic.List[object]
+        $conns = @()
         try {
             if (($tick % 5) -eq 1 -or $pnames.Count -eq 0) {
                 $pnames = @{}
@@ -128,7 +135,7 @@ while ($true) {
                 if ($wantDns -and $ra -ne '0.0.0.0' -and $ra -ne '::') { $hn = Resolve-NetHost $ra }
                 $rp = 0
                 try { $rp = [int]$tc.RemotePort } catch { }
-                $conns.Add([ordered]@{
+                $conns += @{
                     p  = $op
                     n  = if ($pnames.ContainsKey($op)) { $pnames[$op] } else { '' }
                     pr = 'TCP'
@@ -137,7 +144,7 @@ while ($true) {
                     st = 'ESTABLISHED'
                     sv = Get-NetSvc $rp 'TCP'
                     hn = $hn
-                })
+                }
             }
             foreach ($ud in @(Get-NetUDPEndpoint -ErrorAction SilentlyContinue)) {
                 if ($conns.Count -ge 100) { break }
@@ -146,7 +153,7 @@ while ($true) {
                 if ($op -le 0) { continue }
                 $lp2 = 0
                 try { $lp2 = [int]$ud.LocalPort } catch { }
-                $conns.Add([ordered]@{
+                $conns += @{
                     p  = $op
                     n  = if ($pnames.ContainsKey($op)) { $pnames[$op] } else { '' }
                     pr = 'UDP'
@@ -155,14 +162,17 @@ while ($true) {
                     st = ''
                     sv = Get-NetSvc $lp2 'UDP'
                     hn = ''
-                })
+                }
             }
         } catch { }
-        foreach ($s in @(Get-NetAdapterStatistics -ErrorAction SilentlyContinue)) {
-            $idx = 0
-            try { $idx = [int]$s.ifIndex } catch { }
-            if ($idx -eq 0) { try { $idx = [int]$s.InterfaceIndex } catch { } }
-            if ($idx -le 1) { continue }          # 0 = 非法；1 = Loopback，不计
+        $adStats = @(); $adErr = ''
+        try { $adStats = @(Get-NetAdapterStatistics -ErrorAction SilentlyContinue) } catch { $adErr = $_.Exception.Message }
+        foreach ($s in $adStats) {
+            # 裸 runspace 里 Get-NetAdapterStatistics 的 ifIndex/InterfaceIndex 是类型数据
+            # 提供的别名属性，不存在（2.2.1 自检抓出：ifs 永远为空的根因）——按 Name 配对元数据取索引
+            $nm3 = [string]$s.Name
+            $idx = if ($metaByName.ContainsKey($nm3)) { [int]$metaByName[$nm3] } else { 0 }
+            if ($idx -le 1) { continue }          # 0 = 配不上/非法；1 = Loopback，不计
             $seen[$idx] = $true
             $m = if ($meta.ContainsKey($idx)) { $meta[$idx] } else { $null }
             $recvTotal = $null; $sentTotal = $null
@@ -196,7 +206,7 @@ while ($true) {
                     $prev[$idx] = @{ recv = $recvTotal; sent = $sentTotal }
                 }
             }
-            $ifs.Add([ordered]@{
+            $ifs += @{
                 ifIndex  = $idx
                 name     = if ($m) { [string]$m.Name } else { [string]$s.Name }
                 desc     = if ($m) { [string]$m.InterfaceDescription } else { [string]$s.InterfaceDescription }
@@ -207,16 +217,20 @@ while ($true) {
                 sentBps  = $sentBps
                 recvTotal= $recvTotal
                 sentTotal= $sentTotal
-            })
+            }
         }
         foreach ($gone in @($prev.Keys | Where-Object { -not $seen.ContainsKey($_) })) { [void]$prev.Remove($gone) }
         $wall = $now
-        [void]$Queue.Enqueue(@{
+        # 跨 runspace 纪律（2.2.1）：样本一律序列化成 JSON 字符串入队，宿主 ConvertFrom-Json 还原。
+        # 嵌套集合/字典对象跨 runspace 枚举会抛「Argument types do not match」，且装有 [ordered]
+        # 字典的 List[object] 连宿主侧 @() 枚举都会炸（metrics 采样器只传标量所以没踩到）。
+        $payload = @{
             at   = $now.ToString('yyyy-MM-dd HH:mm:ss')
             ifs  = $ifs
             conns= $conns
             connTruncated = ($conns.Count -ge 100)
-        })
+        }
+        [void]$Queue.Enqueue(($payload | ConvertTo-Json -Depth 6 -Compress))
     } catch {
         # 任何一次异常都不许弄死采样线程：丢这一秒，下秒重来
     }
@@ -375,18 +389,20 @@ function Flush-NetStats {
 }
 
 # ---------- 汇总快照（下发界面） ----------
-function Get-NetDaySum([string]$Day) {
+function Get-NetDaySum([string]$DayKey) {
+    # 注意：PowerShell 变量名大小写不敏感——参数与局部变量不能用 $Day/$day 这种只差大小写的组合，
+    # 否则赋值会覆盖参数本身（2.2.1 自检抓出的真实 bug：今日/本月永远算出 0）。
     $r = 0.0; $s = 0.0
-    $day = $script:NetDays[$Day]
-    if ($day) {
-        foreach ($idx in $day.Keys) {
+    $dayNode = $script:NetDays[$DayKey]
+    if ($dayNode) {
+        foreach ($idx in $dayNode.Keys) {
             $kind = if ($script:NetMeta.ContainsKey($idx)) { $script:NetMeta[$idx].kind } else { 'other' }
             if ($kind -ne 'wifi' -and $kind -ne 'ethernet') { continue }
-            $r += [double]$day[$idx].r
-            $s += [double]$day[$idx].s
+            $r += [double]$dayNode[$idx].r
+            $s += [double]$dayNode[$idx].s
         }
     }
-    if ($Day -eq $script:NetDayKey -and $script:NetDayAcc.Count -gt 0) {
+    if ($DayKey -eq $script:NetDayKey -and $script:NetDayAcc.Count -gt 0) {
         foreach ($idx in $script:NetDayAcc.Keys) {
             $kind = if ($script:NetMeta.ContainsKey($idx)) { $script:NetMeta[$idx].kind } else { 'other' }
             if ($kind -ne 'wifi' -and $kind -ne 'ethernet') { continue }
@@ -407,6 +423,7 @@ function Get-NetTotalsSnapshot {
         $mr += [double]$d.recv
         $ms += [double]$d.sent
     }
+    $month = @{ recv = [math]::Round($mr, 0); sent = [math]::Round($ms, 0) }
     # 近 30 天（含今天未完的这一天）与近 12 个月；今天/本月已含未落盘增量
     $daysArr = New-Object System.Collections.Generic.List[object]
     for ($i = 29; $i -ge 0; $i--) {
@@ -627,9 +644,11 @@ function Invoke-NetTick {
     $wantUi = $script:NetConsumers.ContainsKey('page')
     $got = $false
     try {
-        $sample = $null
-        while ($script:NetQueue.TryDequeue([ref]$sample)) {
+        $raw = $null
+        while ($script:NetQueue.TryDequeue([ref]$raw)) {
             $got = $true
+            $sample = $null
+            try { $sample = $raw | ConvertFrom-Json } catch { continue }
             Add-NetSampleToAccum $sample
             Update-NetUiRatesFromSample $sample
             if (-not $script:NetTray) { Initialize-NetTray }

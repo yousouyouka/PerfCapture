@@ -141,15 +141,21 @@
 .nt-conn-head { display: flex; align-items: baseline; gap: 0.6rem; }
 .nt-conn-head h2 { font-size: 0.86rem; margin: 0; color: var(--text-strong); }
 .nt-conn-scroll { max-height: 18rem; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--tile); }
-.net-conn table { width: 100%; border-collapse: collapse; font-size: 0.7rem; }
+.net-conn table {
+  width: 100%;
+  /* sticky 表头必须配 separate：collapse 的边框层会在行文字之上重绘，遮住表头 */
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.7rem;
+}
 .net-conn th {
-  position: sticky; top: 0;
-  background: var(--tile);
+  position: sticky; top: 0; z-index: 1;
+  background: var(--card-solid, var(--tile));
   color: var(--muted);
   font-weight: 400;
   text-align: left;
   padding: 0.35rem 0.55rem;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--line-strong);
 }
 .net-conn td {
   padding: 0.28rem 0.55rem;

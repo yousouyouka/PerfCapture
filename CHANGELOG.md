@@ -23,6 +23,18 @@
 
 ## 2.2.1 — 2026-11-23
 
+> **发布前自检修正（同日）**：用户验收发现网络页全部数据为空，自检抓出 3 个真实缺陷并修复：
+> 1. **跨 runspace 嵌套集合陷阱**：采样样本带 `List[object]`/OrderedDictionary 直接入队，
+>    宿主侧枚举抛「Argument types do not match」，每个样本都被吞掉——UI 一个字节都收不到。
+>    现样本一律序列化成 JSON 字符串入队（新增 `tests/probe-net-host.ps1` 18 项全链自检）。
+> 2. **裸 runspace 缺类型数据**：`Get-NetAdapterStatistics` 的 `ifIndex` 是模块 types.ps1xml
+>    提供的别名属性，裸 runspace 里不存在 → 网卡全部被过滤、ifs 永远为空。改按网卡 Name
+>    与元数据表配对取索引。
+> 3. **变量大小写冲突**：`Get-NetDaySum` 的参数 `$Day` 与局部变量 `$day` 在 PowerShell 里是
+>    同一个变量，赋值覆盖参数 → 今日/本月永远为 0；`Get-NetTotalsSnapshot` 的 `$month`
+>    引用了未赋值变量 → 本月恒为空。均已修复。
+> 另修：连接视图 sticky 表头被行文字遮挡（`border-collapse: separate` + z-index）。
+
 - **报告新增「进程网络用量」（P4 / 进阶功能：进程级归因·报告级）**：采集项清单新增
   「进程网络用量（ETW）」开关（**默认关**，需要提权）。开启后采集期间启动内核网络 ETW
   会话，按 socket 拥有者归因收发字节：报告给出游戏进程用量与其它进程 Top 5，原始数据在

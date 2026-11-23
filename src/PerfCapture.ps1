@@ -18,6 +18,7 @@ foreach ($f in @(
     'vendor-sensor.ps1',
     'cpu-throttle.ps1',
     '35-Metrics.ps1',
+    '36-NetMetrics.ps1',
     '40-Bridge.ps1',
     '50-Host.ps1',
     '52-Hotkeys.ps1',

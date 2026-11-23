@@ -80,6 +80,9 @@ function handleMessage(msg) {
     case 'metricSample': if (window.PerfRealtime) window.PerfRealtime.handle(msg); break;
     case 'metricsCaps': if (window.PerfRealtime) window.PerfRealtime.handle(msg); break;
     case 'overlayState': if (window.PerfRealtime) window.PerfRealtime.handle(msg); break;
+    // 2.1.18 网络页：L1 接口总量口径的实时速率
+    case 'netSample': if (window.PerfNetwork) window.PerfNetwork.handle(msg); break;
+    case 'netCaps': if (window.PerfNetwork) window.PerfNetwork.handle(msg); break;
     case 'extensions': if (window.PerfExtensionsUI) window.PerfExtensionsUI.apply(msg.extensions, msg.fpsSource); break;
     case 'extensionState': if (window.PerfExtensionsUI) window.PerfExtensionsUI.state(msg); break;
     case 'extensionError': if (window.PerfExtensionsUI) window.PerfExtensionsUI.error(msg); break;

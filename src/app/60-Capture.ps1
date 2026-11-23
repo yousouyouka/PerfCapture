@@ -4,7 +4,7 @@
 # 白名单：只接受约定的命令；未知命令记日志并回传错误，绝不抛异常打断消息泵
 $script:KnownCommands = @('ready', 'refreshProcs', 'saveSettings', 'openReports', 'export', 'exportHtml', 'exportPng', 'exportDiag', 'start', 'stop',
     'checkUpdate', 'downloadUpdate', 'cancelUpdate', 'openUpdatePage', 'runUpdateInstaller', 'applyUpdate', 'openUpdateFolder', 'skipUpdateVersion', 'setUpdateAuto',
-    'metricsStart', 'metricsStop', 'metricsTarget', 'overlayToggle', 'overlayShow', 'overlayHide', 'overlayConfig',
+    'metricsStart', 'metricsStop', 'metricsTarget', 'netStart', 'netStop', 'overlayToggle', 'overlayShow', 'overlayHide', 'overlayConfig',
     'listExtensions', 'installExtension', 'enableExtension', 'disableExtension', 'uninstallExtension', 'refreshExtensionStatus', 'oneClickEnableExtension',
     # E2（2.1.7）：供应中「取消」——只置取消信号，回滚由 worker 完成
     'cancelExtensionProvision',
@@ -33,6 +33,12 @@ function Handle-UiMessage($msg) {
     if ($msg.cmd -in @('metricsStart', 'metricsStop', 'metricsTarget')) {
         try { Invoke-MetricsCommand $msg }
         catch { Write-AppLog ('监控命令执行失败: ' + $_.Exception.Message) 'WARN' }
+        return
+    }
+    # 网络监控命令单独分发（宿主侧在 36-NetMetrics.ps1）
+    if ($msg.cmd -in @('netStart', 'netStop')) {
+        try { Invoke-NetCommand $msg }
+        catch { Write-AppLog ('网络监控命令执行失败: ' + $_.Exception.Message) 'WARN' }
         return
     }
     # 浮窗命令（宿主侧在 55-Overlay.ps1）

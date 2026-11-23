@@ -8,14 +8,15 @@
 <link rel="stylesheet" href="css/layout.css">
 <link rel="stylesheet" href="css/components.css">
 <link rel="stylesheet" href="css/terminal.css">
-<link rel="stylesheet" href="css/report.css?v=2.1.17">
+<link rel="stylesheet" href="css/report.css?v=2.1.18">
 <link rel="stylesheet" href="css/popup.css">
 <link rel="stylesheet" href="css/updates.css">
 <link rel="stylesheet" href="css/survey.css">
 <!-- 2.1.8：扩展中心相关资源带版本查询，绕开 WebView2 持久 UDF 的旧缓存；后续改这些文件需同步递增查询串。 -->
-<link rel="stylesheet" href="css/extensions.css?v=2.1.17">
-<link rel="stylesheet" href="css/reports.css?v=2.1.17">
+<link rel="stylesheet" href="css/extensions.css?v=2.1.18">
+<link rel="stylesheet" href="css/reports.css?v=2.1.18">
 <link rel="stylesheet" href="css/realtime.css">
+<link rel="stylesheet" href="css/network.css?v=2.1.18">
 </head>
 <body>
 <div class="app" id="app">
@@ -50,6 +51,15 @@
           </svg>
           <span class="nav-label" data-i18n="nav.realtime">实时监控</span>
         </button>
+        <button class="nav-item" type="button" data-page="network">
+          <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M3 9c6-5 12-5 18 0"/>
+            <path d="M6 12.5c4-3.4 8-3.4 12 0"/>
+            <path d="M9.5 16c1.6-1.4 3.4-1.4 5 0"/>
+            <circle cx="12" cy="19" r="1.1"/>
+          </svg>
+          <span class="nav-label" data-i18n="nav.network">网络</span>
+        </button>
       </div>
 
       <!-- 底部：更新公告 / 设置 + 版本号 -->
@@ -82,7 +92,7 @@
           </svg>
           <span class="nav-label" data-i18n="nav.settings">设置</span>
         </button>
-        <div class="sidebar-version" id="sidebarVersion">v2.1.17</div>
+        <div class="sidebar-version" id="sidebarVersion">v2.1.18</div>
       </div>
     </nav>
   </aside>
@@ -511,7 +521,47 @@
       </div>
     </section>
 
-    <!-- ── 页面四：更新公告（排版与板块照搬 TextAxis 的 updates 页） ── -->
+    <!-- ── 页面四：网络（L1 接口总量口径，常驻监控与游戏采集解耦） ── -->
+    <section class="page" data-page="network" hidden>
+      <div class="net-wrap">
+        <header class="net-header">
+          <span class="net-eyebrow" data-i18n="net.eyebrow">Live</span>
+          <div class="net-title-line">
+            <h1 data-i18n="net.title">网络</h1>
+            <span class="net-state" id="netState" data-state="off">
+              <span class="dot"></span><span id="netStateText" data-i18n="net.stateOff">未采样</span>
+            </span>
+          </div>
+          <p class="net-desc" data-i18n="net.desc">只读网卡计数器的实时速率，按接口分列；不装驱动、不需要管理员权限。进页面开始采样，离开自动停止。</p>
+        </header>
+
+        <div class="net-total">
+          <div class="net-total-cell is-recv">
+            <span class="nt-label" data-i18n="net.totalRecv">下行合计</span>
+            <span class="nt-big" id="netTotalRecv">—</span>
+          </div>
+          <div class="net-total-cell is-sent">
+            <span class="nt-label" data-i18n="net.totalSent">上行合计</span>
+            <span class="nt-big" id="netTotalSent">—</span>
+          </div>
+          <div class="net-total-cell">
+            <span class="nt-label" data-i18n="net.totalAccLabel">累计（自计数器重置）</span>
+            <span class="nt-big" id="netTotalAcc">—</span>
+            <span class="nt-label" id="netTotalScope"></span>
+          </div>
+        </div>
+
+        <div class="net-ifs" id="netIfs"></div>
+        <div class="net-empty" id="netEmpty" hidden>
+          <div class="nt-empty-main" data-i18n="net.emptyMain">未发现活跃网卡</div>
+          <div class="nt-empty-sub" data-i18n="net.emptySub">接入网络后这里会显示每块网卡的实时速率</div>
+        </div>
+
+        <footer class="net-caliber" data-i18n="net.caliber">口径：接口总量（网卡计数器差分），不是按进程的统计；VPN 激活时物理与虚拟网卡各计一层流量，属正常现象。进程级归因在后续版本提供。</footer>
+      </div>
+    </section>
+
+    <!-- ── 页面五：更新公告（排版与板块照搬 TextAxis 的 updates 页） ── -->
     <section class="page" data-page="updates" hidden>
       <div class="updates-wrap">
 
@@ -637,23 +687,24 @@
 
 <script src="js/util.js"></script>
 <!-- 与 css/extensions.css 同一缓存版本；宿主 Navigate 也带同一查询串。 -->
-<script src="js/i18n.js?v=2.1.17"></script>
+<script src="js/i18n.js?v=2.1.18"></script>
 <script src="js/capture-options.js"></script>
-<script src="js/bridge.js?v=2.1.17"></script>
+<script src="js/bridge.js?v=2.1.18"></script>
 <script src="js/theme.js"></script>
 <script src="js/popup.js"></script>
 <script src="js/capture-help.js"></script>
 <script src="js/terminal.js"></script>
 <script src="js/ui-state.js"></script>
-<script src="js/report.js?v=2.1.17"></script>
+<script src="js/report.js?v=2.1.18"></script>
 <script src="js/updates-data.js"></script>
 <script src="js/updates.js"></script>
 <script src="js/survey-data.js"></script>
 <script src="js/survey.js"></script>
-<script src="js/extensions-data.js?v=2.1.17"></script>
-<script src="js/extensions.js?v=2.1.17"></script>
-<script src="js/realtime.js?v=2.1.17"></script>
-<script src="js/reports.js?v=2.1.17"></script>
+<script src="js/extensions-data.js?v=2.1.18"></script>
+<script src="js/extensions.js?v=2.1.18"></script>
+<script src="js/realtime.js?v=2.1.18"></script>
+<script src="js/network.js?v=2.1.18"></script>
+<script src="js/reports.js?v=2.1.18"></script>
 <script src="js/update.js"></script>
 <script src="js/collapse.js"></script>
 <script src="js/split.js"></script>

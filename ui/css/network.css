@@ -1,0 +1,133 @@
+/* 网络页（2.1.18 · 阶段 1）：L1 接口总量口径的实时速率
+   只认 tokens 变量；字号/圆角/滚动条按版式硬要求。 */
+
+.page[data-page="network"] {
+  overflow-y: auto;
+  padding-right: 0.25rem;
+}
+
+.net-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  max-width: 62rem;
+}
+
+/* 页头 */
+.net-header { line-height: 1.45; }
+.net-eyebrow {
+  font-size: 0.62rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.net-title-line { display: flex; align-items: center; gap: 0.6rem; margin: 0.15rem 0 0.3rem; }
+.net-title-line h1 { font-size: 1.05rem; margin: 0; color: var(--text-strong); }
+.net-state {
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  font-size: 0.66rem; color: var(--muted);
+  border: 1px solid var(--line); border-radius: 99px;
+  padding: 0.15rem 0.6rem;
+}
+.net-state .dot { width: 7px; height: 7px; border-radius: 99px; background: var(--faint); }
+.net-state[data-state="on"] .dot { background: var(--good); }
+.net-desc { font-size: 0.74rem; color: var(--muted); margin: 0; }
+
+/* 顶部合计卡 */
+.net-total {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+.net-total-cell {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  padding: 0.7rem 0.9rem;
+}
+.net-total-cell .nt-label {
+  font-size: 0.62rem; color: var(--muted);
+  display: block; margin-bottom: 0.2rem;
+}
+.net-total-cell .nt-big {
+  font-size: 0.98rem; color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+}
+.net-total-cell.is-recv .nt-big { color: var(--accent); }
+.net-total-cell.is-sent .nt-big { color: var(--good); }
+
+/* 接口卡列表 */
+.net-ifs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+  gap: 0.7rem;
+}
+.nt-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  padding: 0.65rem 0.8rem;
+  display: flex; flex-direction: column; gap: 0.45rem;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.nt-card:hover { border-color: var(--line-strong); box-shadow: var(--shadow-hover); }
+
+.nt-head { display: flex; align-items: center; gap: 0.45rem; min-width: 0; }
+.nt-name {
+  font-size: 0.86rem; color: var(--text-strong);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.nt-chip {
+  font-size: 0.62rem; color: var(--muted);
+  border: 1px solid var(--line); border-radius: 4px;
+  padding: 0.05rem 0.4rem;
+  flex: none;
+}
+.nt-chip[data-kind="wifi"] { color: var(--accent); border-color: var(--accent-soft); }
+.nt-chip[data-kind="virtual"] { color: var(--warn); border-color: var(--warn); }
+.nt-status { font-size: 0.62rem; color: var(--faint); flex: none; }
+.nt-status[data-on="1"] { color: var(--good); }
+.nt-link {
+  font-size: 0.62rem; color: var(--faint);
+  margin-left: auto; flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.nt-rates { display: flex; gap: 1.1rem; }
+.nt-rate { display: flex; align-items: baseline; gap: 0.35rem; min-width: 0; }
+.nt-dir { font-size: 0.72rem; color: var(--faint); }
+.nt-rate-recv .nt-dir { color: var(--accent); }
+.nt-rate-sent .nt-dir { color: var(--good); }
+.nt-rate .nt-v {
+  font-size: 0.88rem; color: var(--text-strong);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.nt-spark {
+  width: 100%; height: 44px;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: var(--tile);
+  padding: 1px;
+}
+.nt-line { fill: none; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.nt-line-recv { stroke: var(--accent); }
+.nt-line-sent { stroke: var(--good); }
+
+.nt-totals { font-size: 0.66rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* 空状态：var(--tile) 底 + 虚线边 + 居中（问卷页样板） */
+.net-empty {
+  background: var(--tile);
+  border: 1px dashed var(--line-strong);
+  border-radius: 12px;
+  padding: 1.6rem 1rem;
+  text-align: center;
+}
+.net-empty .nt-empty-main { font-size: 0.76rem; color: var(--muted); }
+.net-empty .nt-empty-sub { font-size: 0.66rem; color: var(--faint); margin-top: 0.25rem; }
+
+/* 口径说明 */
+.net-caliber { font-size: 0.66rem; color: var(--faint); margin: 0; line-height: 1.6; }

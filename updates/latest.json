@@ -2,51 +2,51 @@
     "schema":  1,
     "app":  "PerfCapture",
     "channel":  "stable",
-    "version":  "2.1.17",
+    "version":  "2.1.18",
     "date":  "2026-11-23",
-    "serial":  99,
+    "serial":  100,
     "notes":  {
-                  "zh":  "发布 2.1.17",
+                  "zh":  "发布 2.1.18",
                   "en":  "See the release notes in the app (What\u0027s new).",
                   "ja":  "アプリ内の更新情報をご覧ください。"
               },
     "assets":  [
                    {
                        "kind":  "setup",
-                       "name":  "PerfCapture-Setup-2.1.17.exe",
-                       "size":  12293632,
-                       "sha256":  "780ccf9255a0d233b6e23a37a4cd3479c805db550fb161aa2f207888d13a8e77",
+                       "name":  "PerfCapture-Setup-2.1.18.exe",
+                       "size":  12314112,
+                       "sha256":  "813b19067403afb2447e85f4b07f3f4c00cf3b57a787d8d47d4a6addf2eadf0d",
                        "urls":  [
-                                    "https://raw.githubusercontent.com/yousouyouka/PerfCapture/updates/bin/PerfCapture-Setup-2.1.17.exe",
-                                    "https://ghproxy.net/https://github.com/yousouyouka/PerfCapture/releases/download/v2.1.17/PerfCapture-Setup-2.1.17.exe",
-                                    "https://github.com/yousouyouka/PerfCapture/releases/download/v2.1.17/PerfCapture-Setup-2.1.17.exe"
+                                    "https://raw.githubusercontent.com/yousouyouka/PerfCapture/updates/bin/PerfCapture-Setup-2.1.18.exe",
+                                    "https://ghproxy.net/https://github.com/yousouyouka/PerfCapture/releases/download/v2.1.18/PerfCapture-Setup-2.1.18.exe",
+                                    "https://github.com/yousouyouka/PerfCapture/releases/download/v2.1.18/PerfCapture-Setup-2.1.18.exe"
                                 ]
                    },
                    {
                        "kind":  "wrapper",
-                       "name":  "PerfCapture-Update-2.1.17.zip",
-                       "size":  12271853,
-                       "sha256":  "3496e6aeca956206b6693d17812584112aad1c454ef8097d5acd03b99dfb0311",
+                       "name":  "PerfCapture-Update-2.1.18.zip",
+                       "size":  12292706,
+                       "sha256":  "87501ba692ac4526e194b2986de7338c1c3139fd96472501bfa478269838b056",
                        "urls":  [
-                                    "https://cdn.jsdelivr.net/gh/yousouyouka/PerfCapture@updates/bin/PerfCapture-Update-2.1.17.zip",
-                                    "https://raw.githubusercontent.com/yousouyouka/PerfCapture/updates/bin/PerfCapture-Update-2.1.17.zip",
-                                    "https://ghproxy.net/https://github.com/yousouyouka/PerfCapture/releases/download/v2.1.17/PerfCapture-Update-2.1.17.zip",
-                                    "https://github.com/yousouyouka/PerfCapture/releases/download/v2.1.17/PerfCapture-Update-2.1.17.zip"
+                                    "https://cdn.jsdelivr.net/gh/yousouyouka/PerfCapture@updates/bin/PerfCapture-Update-2.1.18.zip",
+                                    "https://raw.githubusercontent.com/yousouyouka/PerfCapture/updates/bin/PerfCapture-Update-2.1.18.zip",
+                                    "https://ghproxy.net/https://github.com/yousouyouka/PerfCapture/releases/download/v2.1.18/PerfCapture-Update-2.1.18.zip",
+                                    "https://github.com/yousouyouka/PerfCapture/releases/download/v2.1.18/PerfCapture-Update-2.1.18.zip"
                                 ],
-                       "innerName":  "PerfCapture-Setup-2.1.17.exe",
-                       "innerSize":  12293632,
-                       "innerSha256":  "780ccf9255a0d233b6e23a37a4cd3479c805db550fb161aa2f207888d13a8e77"
+                       "innerName":  "PerfCapture-Setup-2.1.18.exe",
+                       "innerSize":  12314112,
+                       "innerSha256":  "813b19067403afb2447e85f4b07f3f4c00cf3b57a787d8d47d4a6addf2eadf0d"
                    },
                    {
                        "kind":  "zip",
-                       "name":  "PerfCapture-2.1.17.zip",
-                       "size":  12138682,
-                       "sha256":  "6eb9a0dc91f10a3375db523732d208c44ada81b9234cdfadfb1251460d4c778d",
+                       "name":  "PerfCapture-2.1.18.zip",
+                       "size":  12159363,
+                       "sha256":  "507eac58f84412202c02622829c23108f198ab1a80614a60fad2b2f55f6be6bc",
                        "urls":  [
-                                    "https://cdn.jsdelivr.net/gh/yousouyouka/PerfCapture@updates/bin/PerfCapture-2.1.17.zip",
-                                    "https://raw.githubusercontent.com/yousouyouka/PerfCapture/updates/bin/PerfCapture-2.1.17.zip",
-                                    "https://ghproxy.net/https://github.com/yousouyouka/PerfCapture/releases/download/v2.1.17/PerfCapture-2.1.17.zip",
-                                    "https://github.com/yousouyouka/PerfCapture/releases/download/v2.1.17/PerfCapture-2.1.17.zip"
+                                    "https://cdn.jsdelivr.net/gh/yousouyouka/PerfCapture@updates/bin/PerfCapture-2.1.18.zip",
+                                    "https://raw.githubusercontent.com/yousouyouka/PerfCapture/updates/bin/PerfCapture-2.1.18.zip",
+                                    "https://ghproxy.net/https://github.com/yousouyouka/PerfCapture/releases/download/v2.1.18/PerfCapture-2.1.18.zip",
+                                    "https://github.com/yousouyouka/PerfCapture/releases/download/v2.1.18/PerfCapture-2.1.18.zip"
                                 ]
                    }
                ]

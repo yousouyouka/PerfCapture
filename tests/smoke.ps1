@@ -19,17 +19,17 @@ $structure = @(
     'src\app\00-Prelude.ps1', 'src\app\05-Paths.ps1', 'src\app\10-Bootstrap.ps1',
     'src\app\15-Logging.ps1', 'src\app\20-Settings.ps1', 'src\app\30-Tools.ps1',
     'src\app\platform-rules.ps1', 'src\app\vendor-sensor.ps1', 'src\app\cpu-throttle.ps1',
-    'src\app\35-Metrics.ps1', 'src\app\55-Overlay.ps1',
+    'src\app\35-Metrics.ps1', 'src\app\36-NetMetrics.ps1', 'src\app\55-Overlay.ps1',
     'src\app\40-Bridge.ps1', 'src\app\50-Host.ps1', 'src\app\60-Capture.ps1', 'src\app\68-UpdateWrapper.ps1', 'src\app\rtss-shm.ps1', 'src\app\80-Extensions.ps1', 'src\app\85-ExtensionProvision.ps1', 'src\app\90-Main.ps1',
     'src\engine\Measure-GamePerf.ps1',
     'ui\index.html',
     'ui\css\tokens.css', 'ui\css\layout.css', 'ui\css\components.css',
-    'ui\css\terminal.css', 'ui\css\report.css', 'ui\css\popup.css', 'ui\css\updates.css', 'ui\css\survey.css', 'ui\css\extensions.css', 'ui\css\realtime.css',
+    'ui\css\terminal.css', 'ui\css\report.css', 'ui\css\popup.css', 'ui\css\updates.css', 'ui\css\survey.css', 'ui\css\extensions.css', 'ui\css\realtime.css', 'ui\css\network.css',
     'ui\js\util.js', 'ui\js\i18n.js', 'ui\js\capture-options.js', 'ui\js\bridge.js',
     'ui\js\theme.js', 'ui\js\popup.js', 'ui\js\terminal.js', 'ui\js\ui-state.js',
     'ui\js\report.js', 'ui\js\collapse.js', 'ui\js\split.js',
     'ui\js\sidebar.js', 'ui\js\settings.js', 'ui\js\main.js',
-    'ui\js\updates-data.js', 'ui\js\updates.js', 'ui\js\survey-data.js', 'ui\js\survey.js', 'ui\js\extensions-data.js', 'ui\js\extensions.js', 'ui\js\realtime.js',
+    'ui\js\updates-data.js', 'ui\js\updates.js', 'ui\js\survey-data.js', 'ui\js\survey.js', 'ui\js\extensions-data.js', 'ui\js\extensions.js', 'ui\js\realtime.js', 'ui\js\network.js',
     'assets\app-icon.ico', 'assets\app-icon.png',
     'lib\Microsoft.Web.WebView2.Core.dll', 'lib\Microsoft.Web.WebView2.WinForms.dll', 'lib\WebView2Loader.dll',
     'tools\presentmon.exe',
@@ -412,10 +412,11 @@ if ($layCss -notmatch '\.app\.is-collapsed \.sidebar-version \{ display: none') 
 # 设置图标必须是齿轮（含齿形路径，而不是旧的那个发光线圈）
 $gearBlock = [regex]::Match($idx, '(?s)data-page="settings".*?</button>').Value
 if ($gearBlock -notmatch 'a1\.9 1\.9 0 1 1') { Bad '设置图标的齿轮路径没换（仍是旧图标）' }
-foreach ($pg in 'realtime', 'updates') {
+foreach ($pg in 'realtime', 'network', 'updates') {
     if ($idx -notmatch ('<section class="page" data-page="' + $pg + '"')) { Bad "index.html 缺少 $pg 页面" }
 }
 if ($idx -notmatch 'data-i18n="nav\.realtime"') { Bad 'index.html 侧边栏缺实时监控项' }
+if ($idx -notmatch 'data-i18n="nav\.network"') { Bad 'index.html 侧边栏缺网络项' }
 if ($idx -notmatch 'data-i18n="nav\.updates"') { Bad 'index.html 侧边栏缺更新公告项' }
 # 页面资源必须真的加载（数据先于渲染脚本）
 if ($idx -notmatch 'css/updates\.css') { Bad 'index.html 未加载 updates.css' }
@@ -618,9 +619,9 @@ $iSurveyData = $idx.IndexOf('js/survey-data.js')
 $iSurveyJs = $idx.IndexOf('js/survey.js')
 if ($iSurveyData -lt 0 -or $iSurveyJs -lt 0) { Bad 'index.html 未加载 survey-data.js / survey.js' }
 elseif ($iSurveyData -gt $iSurveyJs) { Bad 'survey-data.js 必须在 survey.js 之前加载' }
-# 侧边栏顺序：性能采集 → 历史报告 → 实时监控 → 更新公告 → 问卷调查 → 扩展中心 → 设置
+# 侧边栏顺序：性能采集 → 历史报告 → 实时监控 → 网络 → 更新公告 → 问卷调查 → 扩展中心 → 设置
 $navOrder = [regex]::Matches($navBlock, 'data-page="([a-z]+)"') | ForEach-Object { $_.Groups[1].Value }
-if (($navOrder -join ',') -ne 'capture,reports,realtime,updates,survey,extensions,settings') { Bad "侧边栏顺序不对：$($navOrder -join ' → ')" }
+if (($navOrder -join ',') -ne 'capture,reports,realtime,network,updates,survey,extensions,settings') { Bad "侧边栏顺序不对：$($navOrder -join ' → ')" }
 else { Ok "侧边栏顺序：历史报告紧跟采集，扩展中心在问卷调查与设置之间" }
 # 无问卷必须显示「暂无问卷」：数据初始为空数组，渲染层给空状态
 if ($surveyData -notmatch 'window\.PerfSurveys = \[\]') { Bad 'survey-data.js 初始应为空数组（无问卷时显示暂无问卷）' }
@@ -967,6 +968,52 @@ else {
 }
 if ($metPs -notmatch 'type = ''metricSample''') { Bad '没有向界面推送 metricSample' }
 if ($metPs -notmatch 'type = ''metricsCaps''') { Bad '没有向界面推送 metricsCaps' }
+
+# ---------- 5m. 网络实时采样（2.1.18）：与采集完全解耦的守卫 ----------
+$netPsFile = Join-Path $root 'src\app\36-NetMetrics.ps1'
+if (-not (Test-Path $netPsFile)) { Bad '缺少 src\app\36-NetMetrics.ps1（网络采样器）' }
+else {
+    $netPs = Get-Content $netPsFile -Raw -Encoding UTF8
+    # 禁用词只查代码行、且区分大小写（NetWorker 含 etW，大小写不敏感会误报 ETW）
+    $netCode = (($netPs -split "`r?`n") | Where-Object { $_ -notmatch '^\s*#' }) -join "`n"
+    foreach ($forbidden in 'presentmon', 'logman', 'Add-Type', 'ETW', 'Start-Process') {
+        if ($netCode -cmatch [regex]::Escape($forbidden)) { Bad "网络采样器不得出现「$forbidden」——常驻监控必须与游戏采集（ETW）完全解耦" }
+    }
+    if ($netPs -notmatch 'Get-NetAdapterStatistics') { Bad '网络采样器没用网卡计数器（L1 口径）' }
+    if ($netPs -notmatch 'ReceivedBytes' -or $netPs -notmatch 'SentBytes') { Bad '网络采样器缺收/发字节字段' }
+    if ($netPs -notmatch 'type = ''netSample''') { Bad '网络采样器没有向界面推送 netSample' }
+    foreach ($fn in 'Start-NetWorker', 'Stop-NetWorker', 'Set-NetConsumer', 'Invoke-NetCommand') {
+        if ($netPs -notmatch ('function ' + $fn)) { Bad "36-NetMetrics.ps1 缺函数 $fn" }
+    }
+    $ns = [regex]::Match($netPs, "(?s)\`$script:NetSampleScript = @'\r?\n(.*?)\r?\n'@")
+    if (-not $ns.Success) { Bad '取不到网络内嵌采样脚本' }
+    else {
+        $pe2 = $null
+        [void][System.Management.Automation.Language.Parser]::ParseInput($ns.Groups[1].Value, [ref]$null, [ref]$pe2)
+        if ($pe2.Count) { Bad ("网络内嵌采样脚本语法错误：" + $pe2[0].Message) }
+    }
+}
+$capPs2 = Get-Content (Join-Path $root 'src\app\60-Capture.ps1') -Raw -Encoding UTF8
+foreach ($cmd in 'netStart', 'netStop') {
+    if ($capPs2 -notmatch [regex]::Escape("'" + $cmd + "'")) { Bad "命令白名单缺 $cmd" }
+}
+$bridgeJs = Get-Content (Join-Path $root 'ui\js\bridge.js') -Raw -Encoding UTF8
+if ($bridgeJs -notmatch 'case ''netSample''') { Bad 'bridge.js 缺 netSample 分发' }
+$netJs = Get-Content (Join-Path $root 'ui\js\network.js') -Raw -Encoding UTF8
+foreach ($need in 'PerfNetwork', 'netStart', 'netStop', 'fmtRate', 'netSample') {
+    if ($netJs -notmatch [regex]::Escape($need)) { Bad "network.js 缺 $need" }
+}
+if ($netJs -match 'setInterval\s*\(') { Bad 'network.js 不得用 setInterval（刷新由宿主 1 Hz 推送驱动）' }
+if ($netJs -match 'XMLHttpRequest|fetch\(') { Bad 'network.js 不得发起任何网络请求（数据全本地）' }
+if ($idx -notmatch 'css/network\.css') { Bad 'index.html 未加载 network.css' }
+if ($idx -notmatch 'js/network\.js') { Bad 'index.html 未加载 network.js' }
+$iNet = $idx.IndexOf('js/network.js')
+$iMain = $idx.IndexOf('js/main.js')
+if ($iNet -lt 0 -or $iMain -lt 0 -or $iNet -gt $iMain) { Bad 'network.js 必须在 main.js 之前加载' }
+foreach ($nk in 'nav.network', 'net.title', 'net.desc', 'net.stateOn', 'net.stateOff', 'net.totalRecv', 'net.totalSent', 'net.totals', 'net.kind.wifi', 'net.kind.virtual', 'net.status.Up', 'net.caliber') {
+    $n2 = ([regex]::Matches($i18nText, [regex]::Escape("'" + $nk + "':"))).Count
+    if ($n2 -lt 3) { Bad "i18n 缺 $nk（三语都要有，现仅 $n2 处）" }
+}
 
 # ---------- 5n-2. 平台覆盖与数据源规则（v2.1.10） ----------
 # 规则先行：没有规则文档就不允许有对应实现（防止「先写功能、后补口径」）

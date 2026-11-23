@@ -1,0 +1,222 @@
+/* 历史报告库（2.1.14）：页头 + 工具栏 + 列表 + 详情/对比。
+   版式沿用扩展中心（页头卡片 → 工具栏 → 主区），配色与圆角一律走 tokens，
+   亮/暗两套主题同时成立。 */
+
+.rep-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* ── 页头 ── */
+.rep-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 0.85rem 1rem;
+  box-shadow: var(--shadow);
+}
+.rep-eyebrow {
+  display: block;
+  font-size: 0.62rem;
+  letter-spacing: 0.18em;
+  color: var(--faint);
+  text-transform: uppercase;
+}
+.rep-title-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0.55rem;
+  margin: 0.15rem 0 0.2rem;
+}
+.rep-title-line h1 {
+  margin: 0;
+  font-size: 1.05rem;
+  color: var(--text-strong);
+}
+.rep-count {
+  font-size: 0.66rem;
+  color: var(--muted);
+}
+.rep-lead {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--muted);
+  line-height: 1.6;
+}
+.rep-header-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex: 0 0 auto;
+}
+
+/* ── 工具栏 ── */
+.rep-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.5rem 0.65rem;
+  box-shadow: var(--shadow);
+}
+.rep-chips { display: flex; gap: 0.3rem; flex-wrap: wrap; }
+.rep-chip {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  border-radius: 99px;
+  padding: 0.18rem 0.55rem;
+  font-size: 0.66rem;
+  font-family: inherit;
+  cursor: pointer;
+}
+.rep-chip:hover { border-color: var(--line-strong); color: var(--text); }
+.rep-chip.is-on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.rep-search {
+  flex: 1 1 140px;
+  min-width: 120px;
+  background: var(--tile);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.22rem 0.5rem;
+  color: var(--text);
+  font-size: 0.7rem;
+  font-family: inherit;
+}
+.rep-search::placeholder { color: var(--faint); }
+.rep-pickinfo { font-size: 0.66rem; color: var(--muted); margin-left: auto; }
+
+/* ── 列表 ── */
+.rep-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.rep-list { display: flex; flex-direction: column; gap: 0.35rem; padding-bottom: 0.4rem; }
+.rep-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.5rem 0.7rem;
+  box-shadow: var(--shadow);
+}
+.rep-row:hover { border-color: var(--line-strong); box-shadow: var(--shadow-hover); }
+.rep-row.is-picked { border-color: var(--accent); background: var(--accent-soft); }
+.rep-pick { display: flex; align-items: center; flex: 0 0 auto; }
+.rep-pick input { accent-color: var(--accent); width: 14px; height: 14px; cursor: pointer; }
+.rep-main { flex: 1 1 auto; min-width: 0; }
+.rep-line1 { display: flex; align-items: baseline; gap: 0.45rem; flex-wrap: wrap; }
+.rep-game { font-size: 0.76rem; color: var(--text-strong); }
+.rep-when { font-size: 0.64rem; color: var(--faint); font-variant-numeric: tabular-nums; }
+.rep-line2 {
+  margin-top: 0.12rem;
+  font-size: 0.66rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rep-actions { display: flex; gap: 0.25rem; flex: 0 0 auto; }
+.rep-mini {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  border-radius: 8px;
+  padding: 0.16rem 0.45rem;
+  font-size: 0.64rem;
+  font-family: inherit;
+  cursor: pointer;
+}
+.rep-mini:hover { border-color: var(--line-strong); color: var(--text); }
+.rep-mini.is-danger:hover { border-color: var(--bad); color: var(--bad); }
+
+/* 可信度徽标：只在有结论时出现，ok 不占位 */
+.rep-badge {
+  display: inline-block;
+  padding: 0 0.4rem;
+  border-radius: 99px;
+  font-size: 0.6rem;
+  line-height: 1.6;
+  border: 1px solid var(--line);
+  color: var(--muted);
+}
+.rep-badge.warn { border-color: var(--warn); color: var(--warn); }
+.rep-badge.bad { border-color: var(--bad); color: var(--bad); }
+
+.rep-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  padding: 2.4rem 1rem;
+  background: var(--tile);
+  border: 1px dashed var(--line-strong);
+  border-radius: 12px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-align: center;
+}
+.rep-empty .k { color: var(--muted); }
+.rep-empty .h { color: var(--faint); font-size: 0.66rem; }
+
+/* ── 详情 / 对比面板 ── */
+.rep-panel {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0.7rem 0.85rem;
+  box-shadow: var(--shadow);
+}
+.rep-panel-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+}
+.rep-panel-title { font-size: 0.78rem; color: var(--text-strong); }
+.rep-panel-sub { font-size: 0.64rem; color: var(--faint); }
+.rep-panel-close {
+  margin-left: auto;
+  border: none;
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-family: inherit;
+}
+.rep-kv { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0.35rem 0.8rem; }
+.rep-kv .k { font-size: 0.64rem; color: var(--faint); }
+.rep-kv .v { font-size: 0.72rem; color: var(--text-strong); font-variant-numeric: tabular-nums; }
+
+.rep-table { width: 100%; border-collapse: collapse; font-size: 0.7rem; }
+.rep-table th, .rep-table td { padding: 0.28rem 0.4rem; border-bottom: 1px solid var(--line); text-align: right; }
+.rep-table th:first-child, .rep-table td:first-child { text-align: left; color: var(--muted); }
+.rep-table th { color: var(--faint); font-weight: 400; font-size: 0.64rem; }
+.rep-table tr:last-child td { border-bottom: none; }
+.rep-table .v-up { color: var(--good); }
+.rep-table .v-down { color: var(--bad); }
+.rep-table .v-na { color: var(--faint); }
+
+.rep-note {
+  margin: 0.4rem 0 0;
+  font-size: 0.64rem;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.rep-note.warn { color: var(--warn); }
+.rep-note.bad { color: var(--bad); }
+.rep-diff { margin: 0.35rem 0 0; padding-left: 1rem; font-size: 0.66rem; color: var(--muted); line-height: 1.7; }

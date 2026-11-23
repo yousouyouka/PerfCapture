@@ -9,7 +9,9 @@ $script:KnownCommands = @('ready', 'refreshProcs', 'saveSettings', 'openReports'
     # E2（2.1.7）：供应中「取消」——只置取消信号，回滚由 worker 完成
     'cancelExtensionProvision',
     # 2.1.8：网络不可达时的手动导入（选包 / 导入）与官方下载页
-    'pickExtensionPackage', 'importExtensionPackage', 'openExtensionPage')
+    'pickExtensionPackage', 'importExtensionPackage', 'openExtensionPage',
+    # 2.1.14：历史报告库（列表 / 详情 / 对比 / 打开伴随文件 / 删除）
+    'reportsList', 'reportDetail', 'reportCompare', 'reportOpenFile', 'reportDelete')
 
 function Handle-UiMessage($msg) {
     if ($null -eq $msg -or -not $msg.cmd) { return }
@@ -41,6 +43,12 @@ function Handle-UiMessage($msg) {
     if ($msg.cmd -in @('listExtensions', 'installExtension', 'enableExtension', 'disableExtension', 'uninstallExtension', 'refreshExtensionStatus', 'oneClickEnableExtension', 'cancelExtensionProvision', 'pickExtensionPackage', 'importExtensionPackage', 'openExtensionPage')) {
         try { Invoke-ExtensionCommand $msg }
         catch { Write-AppLog ('扩展命令执行失败: ' + $_.Exception.Message) 'WARN' }
+        return
+    }
+    # 历史报告库命令（宿主侧在 62-Reports.ps1）
+    if ($msg.cmd -in @('reportsList', 'reportDetail', 'reportCompare', 'reportOpenFile', 'reportDelete')) {
+        try { Invoke-ReportCommand $msg }
+        catch { Write-AppLog ('报告库命令执行失败: ' + $_.Exception.Message) 'WARN' }
         return
     }
     try {

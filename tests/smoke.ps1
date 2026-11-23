@@ -374,7 +374,7 @@ $verFile = (Get-Content (Join-Path $root 'VERSION') -Raw -Encoding UTF8).Trim()
 $navBlock = [regex]::Match($idx, '(?s)<nav class="sidebar-nav">.*?</nav>').Value
 $navPages = [regex]::Matches($navBlock, 'data-page="([a-z]+)"') | ForEach-Object { $_.Groups[1].Value }
 if ($navPages.Count -lt 4) { Bad "侧边栏只有 $($navPages.Count) 项（应有采集 / 实时监控 / 更新公告 / 设置）" }
-elseif ($navPages[1] -ne 'realtime' -or $navPages[2] -ne 'updates') { Bad "侧边栏顺序不对：$($navPages -join ' → ')" }
+elseif ($navPages[1] -ne 'reports' -or $navPages[2] -ne 'realtime') { Bad "侧边栏顺序不对：$($navPages -join ' → ')" }
 if ($navPages -notcontains 'extensions') { Bad '侧边栏缺扩展中心入口（应在 survey 与 settings 之间）' }
 if ($navBlock -match 'nav-badge') { Bad '侧边栏里还挂着「待开发」徽标（应只在实时监控页里）' }
 if ($navBlock -match '待开发') { Bad '侧边栏文字里出现了「待开发」' }
@@ -598,10 +598,10 @@ $iSurveyData = $idx.IndexOf('js/survey-data.js')
 $iSurveyJs = $idx.IndexOf('js/survey.js')
 if ($iSurveyData -lt 0 -or $iSurveyJs -lt 0) { Bad 'index.html 未加载 survey-data.js / survey.js' }
 elseif ($iSurveyData -gt $iSurveyJs) { Bad 'survey-data.js 必须在 survey.js 之前加载' }
-# 侧边栏顺序：性能采集 → 实时监控 → 更新公告 → 问卷调查 → 设置
+# 侧边栏顺序：性能采集 → 历史报告 → 实时监控 → 更新公告 → 问卷调查 → 扩展中心 → 设置
 $navOrder = [regex]::Matches($navBlock, 'data-page="([a-z]+)"') | ForEach-Object { $_.Groups[1].Value }
-if (($navOrder -join ',') -ne 'capture,realtime,updates,survey,extensions,settings') { Bad "侧边栏顺序不对：$($navOrder -join ' → ')" }
-else { Ok "侧边栏顺序：扩展中心在问卷调查与设置之间" }
+if (($navOrder -join ',') -ne 'capture,reports,realtime,updates,survey,extensions,settings') { Bad "侧边栏顺序不对：$($navOrder -join ' → ')" }
+else { Ok "侧边栏顺序：历史报告紧跟采集，扩展中心在问卷调查与设置之间" }
 # 无问卷必须显示「暂无问卷」：数据初始为空数组，渲染层给空状态
 if ($surveyData -notmatch 'window\.PerfSurveys = \[\]') { Bad 'survey-data.js 初始应为空数组（无问卷时显示暂无问卷）' }
 foreach ($need in 'surveyList', 'surveyCount', '__refreshSurvey', 'survey-card', 'survey-empty', 'survey-status', 'survey-actions') {
@@ -1047,6 +1047,40 @@ foreach ($qk in 'report.quality.blockedTitle', 'report.quality.cautionTitle', 'r
                 'report.quality.gpuSparse', 'report.naWhy.noDriverVersion') {
     $n = ([regex]::Matches($i18nText, [regex]::Escape("'" + $qk + "'"))).Count
     if ($n -lt 3) { Bad "i18n 的 $qk 只有 $n 种语言（应 3）" }
+}
+
+# ---- 2.1.14 历史报告库 ----
+$repMod = Join-Path $root 'src\app\62-Reports.ps1'
+if (-not (Test-Path -LiteralPath $repMod)) { Bad '缺少 src\app\62-Reports.ps1' }
+$repPs = if (Test-Path -LiteralPath $repMod) { Get-Content $repMod -Raw -Encoding UTF8 } else { '' }
+foreach ($fn in 'Get-ReportIndex', 'Resolve-ReportFile', 'Remove-ReportFiles', 'Get-ReportFiles', 'Invoke-ReportCommand') {
+    if ($repPs -notmatch [regex]::Escape('function ' + $fn)) { Bad "62-Reports.ps1 缺函数 $fn" }
+}
+# 删除必须走回收站，探针用的 -Permanent 是唯一例外
+if ($repPs -notmatch 'SendToRecycleBin') { Bad '报告删除必须走回收站' }
+if ($entryPsX -notmatch [regex]::Escape('62-Reports.ps1')) { Bad '入口未加载 62-Reports.ps1' }
+foreach ($cmd in 'reportsList', 'reportDetail', 'reportCompare', 'reportOpenFile', 'reportDelete') {
+    if ($capPs -notmatch [regex]::Escape("'" + $cmd + "'")) { Bad "命令白名单缺 $cmd" }
+}
+# 页面与前端
+if ($idx -notmatch 'data-page="reports"') { Bad 'index.html 缺历史报告页' }
+if ($idx -notmatch 'id="repList"') { Bad 'index.html 缺报告列表容器 repList' }
+if ($idx -notmatch 'css/reports\.css') { Bad 'index.html 没有引入 reports.css' }
+if ($idx -notmatch 'js/reports\.js') { Bad 'index.html 没有引入 reports.js' }
+$repJsPath = Join-Path $root 'ui\js\reports.js'
+if (-not (Test-Path -LiteralPath $repJsPath)) { Bad '缺少 ui\js\reports.js' } else {
+    $repJsText = Get-Content $repJsPath -Raw -Encoding UTF8
+    foreach ($need in 'PerfReports', 'reportCompare', 'qualityBadge', 'cmpBlocked') {
+        if ($repJsText -notmatch [regex]::Escape($need)) { Bad "reports.js 缺 $need" }
+    }
+    # 红线：条件不可比时不许出现百分比结论（必须有 blocked 分支）
+    if ($repJsText -notmatch 'blocked\s*\?\s*') { Bad 'reports.js 缺「不可比就不给百分比」的分支' }
+}
+if ((Get-Content (Join-Path $root 'ui\js\bridge.js') -Raw -Encoding UTF8) -notmatch 'PerfReports') { Bad 'bridge.js 没有分发报告库消息' }
+# i18n：本批新增键必须三语齐全（抽查关键文案）
+foreach ($rk in 'nav.reports', 'reports.title', 'reports.cmpBlocked', 'reports.cmpSame', 'reports.delete') {
+    $n = ([regex]::Matches($i18nText, [regex]::Escape("'" + $rk + "'"))).Count
+    if ($n -lt 3) { Bad "i18n 的 $rk 只有 $n 种语言（应 3）" }
 }
 
 $rtJs = Get-Content (Join-Path $root 'ui\js\realtime.js') -Raw -Encoding UTF8

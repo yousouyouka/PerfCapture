@@ -19,6 +19,16 @@ window.PerfUpdateAreas = ['capture', 'realtime', 'other'];
 
 window.PerfUpdates = [
   {
+    date: '2026-11-23', version: '2.1.14',
+    title: '新增历史报告：把历次采集翻出来对比',
+    items: [
+      ['feature', '侧边栏新增「历史报告」：历次采集按时间列出，可按游戏筛选、按关键字搜索，每条都能直接打开原始报告。', 'other'],
+      ['chart', '勾选两份报告即可对比平均帧、1% Low、卡顿、温度与占用；显卡/驱动/系统/BIOS 不同时只给差值，不给「提升多少」的百分比，避免得出错误结论。', 'other'],
+      ['ui', '报告详情里可以直接打开 JSON / HTML / 逐帧 CSV，想看细节不用再去翻文件夹。', 'other'],
+      ['ux', '删除报告会移到回收站，且需要点两次确认，不会误删。', 'other']
+    ]
+  },
+  {
     date: '2026-11-23', version: '2.1.13',
     title: '报告新增数据可信度提示与条件指纹',
     items: [

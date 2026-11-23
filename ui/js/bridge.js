@@ -66,6 +66,11 @@ function handleMessage(msg) {
     case 'progress': setProgress(msg.pct || 0); break;
     case 'log': addLog(msg.text || '', msg.cls || ''); break;
     case 'report': renderReport(msg.data); break;
+    // 2.1.14 历史报告库：列表 / 详情 / 对比 / 删除结果
+    case 'reports':
+    case 'reportDetail':
+    case 'reportCompare':
+    case 'reportDeleted': if (window.PerfReports) window.PerfReports.handle(msg); break;
     case 'busy': setBusy(!!msg.value); if (window.PerfUpdate) window.PerfUpdate.busy(!!msg.value); break;
     case 'theme': applyTheme(msg.mode); break;
     case 'update': if (window.PerfUpdate) window.PerfUpdate.handle(msg); break;

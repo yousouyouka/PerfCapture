@@ -22,6 +22,7 @@ foreach ($f in @(
     '50-Host.ps1',
     '55-Overlay.ps1',
     '60-Capture.ps1',
+    '62-Reports.ps1',
     '68-UpdateWrapper.ps1',
     '70-Updates.ps1',
     'rtss-shm.ps1',

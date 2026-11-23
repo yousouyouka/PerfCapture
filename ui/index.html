@@ -13,7 +13,8 @@
 <link rel="stylesheet" href="css/updates.css">
 <link rel="stylesheet" href="css/survey.css">
 <!-- 2.1.8：扩展中心相关资源带版本查询，绕开 WebView2 持久 UDF 的旧缓存；后续改这些文件需同步递增查询串。 -->
-<link rel="stylesheet" href="css/extensions.css?v=2.1.13">
+<link rel="stylesheet" href="css/extensions.css?v=2.1.14">
+<link rel="stylesheet" href="css/reports.css?v=2.1.14">
 <link rel="stylesheet" href="css/realtime.css">
 </head>
 <body>
@@ -35,6 +36,13 @@
             <path d="M3 17l5-6 4 4 4-5 5 6"/>
           </svg>
           <span class="nav-label" data-i18n="nav.capture">性能采集</span>
+        </button>
+        <button class="nav-item" type="button" data-page="reports">
+          <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M5 4h10l4 4v12H5z"/>
+            <path d="M8 12h8M8 16h5"/>
+          </svg>
+          <span class="nav-label" data-i18n="nav.reports">历史报告</span>
         </button>
         <button class="nav-item" type="button" data-page="realtime">
           <svg class="nav-icon" viewBox="0 0 24 24" aria-hidden="true">
@@ -74,7 +82,7 @@
           </svg>
           <span class="nav-label" data-i18n="nav.settings">设置</span>
         </button>
-        <div class="sidebar-version" id="sidebarVersion">v2.1.13</div>
+        <div class="sidebar-version" id="sidebarVersion">v2.1.14</div>
       </div>
     </nav>
   </aside>
@@ -198,6 +206,36 @@
       </main>
     </section>
 
+    <!-- ── 页面：历史报告（2.1.14）── -->
+    <section class="page" data-page="reports" hidden>
+      <div class="rep-wrap">
+        <header class="rep-header">
+          <div>
+            <span class="rep-eyebrow" data-i18n="reports.eyebrow">Reports</span>
+            <div class="rep-title-line">
+              <h1 data-i18n="reports.title">历史报告</h1>
+              <span class="rep-count" id="repCount"></span>
+            </div>
+            <p class="rep-lead" data-i18n="reports.lead">每次采集都会留下一份报告；勾选两份可以直接对比，条件不同的会明确标出来。</p>
+          </div>
+          <div class="rep-header-actions">
+            <button type="button" class="btn btn-ghost" id="repRefresh" data-i18n="reports.refresh">刷新</button>
+            <button type="button" class="btn btn-ghost" id="repOpenFolder" data-i18n="reports.openFolder">打开目录</button>
+          </div>
+        </header>
+
+        <div class="rep-toolbar">
+          <div class="rep-chips" id="repChips"></div>
+          <input class="rep-search" id="repSearch" type="search" data-i18n-ph="reports.searchPh" placeholder="搜索游戏 / 驱动" />
+          <span class="rep-pickinfo" id="repPickInfo"></span>
+          <button type="button" class="rep-chip" id="repClearPick" data-i18n="reports.clearPick">清空选择</button>
+        </div>
+
+        <div class="rep-scroll"><div class="rep-list" id="repList"></div></div>
+        <div class="rep-panel" id="repPanel" hidden></div>
+      </div>
+    </section>
+
     <!-- ── 页面二：设置 ── -->
     <section class="page" data-page="settings" hidden>
       <div class="settings-wrap">
@@ -237,7 +275,7 @@
           <div class="setting-block">
             <div class="setting-label">
               <strong>PerfCapture</strong>
-              <small>v2.1.13 · PresentMon ETW · 默认零注入</small>
+              <small>v2.1.14 · PresentMon ETW · 默认零注入</small>
             </div>
           </div>
 
@@ -574,22 +612,23 @@
 
 <script src="js/util.js"></script>
 <!-- 与 css/extensions.css 同一缓存版本；宿主 Navigate 也带同一查询串。 -->
-<script src="js/i18n.js?v=2.1.13"></script>
+<script src="js/i18n.js?v=2.1.14"></script>
 <script src="js/capture-options.js"></script>
-<script src="js/bridge.js?v=2.1.13"></script>
+<script src="js/bridge.js?v=2.1.14"></script>
 <script src="js/theme.js"></script>
 <script src="js/popup.js"></script>
 <script src="js/capture-help.js"></script>
 <script src="js/terminal.js"></script>
 <script src="js/ui-state.js"></script>
-<script src="js/report.js?v=2.1.13"></script>
+<script src="js/report.js?v=2.1.14"></script>
 <script src="js/updates-data.js"></script>
 <script src="js/updates.js"></script>
 <script src="js/survey-data.js"></script>
 <script src="js/survey.js"></script>
-<script src="js/extensions-data.js?v=2.1.13"></script>
-<script src="js/extensions.js?v=2.1.13"></script>
-<script src="js/realtime.js?v=2.1.13"></script>
+<script src="js/extensions-data.js?v=2.1.14"></script>
+<script src="js/extensions.js?v=2.1.14"></script>
+<script src="js/realtime.js?v=2.1.14"></script>
+<script src="js/reports.js?v=2.1.14"></script>
 <script src="js/update.js"></script>
 <script src="js/collapse.js"></script>
 <script src="js/split.js"></script>

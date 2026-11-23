@@ -46,6 +46,8 @@ $collectCpuPower = -not ($skipList -contains 'cpupower')   # 2.0.17：CPU 封装
 # 2.1.11：CPU 温度与降频进可选清单。默认开（与 2.1.10 行为一致），关掉可省掉 WMI 与事件日志查询。
 $collectCpuTemp  = -not ($skipList -contains 'cputemp')
 $collectCpuThrottle = -not ($skipList -contains 'cputhrottle')
+# 2.1.17：后台进程 CPU 干扰（每 5 秒一次差分采样，只读 CPU 时间，不碰其它进程 GPU）
+$collectBgProc   = -not ($skipList -contains 'bgproc')
 $collectFeatures = -not ($skipList -contains 'features')
 $collectRes      = -not ($skipList -contains 'res')
 $collectChart    = $true      # 图表始终生成：UI 不再提供开关，报告里必定含曲线
@@ -57,7 +59,7 @@ $ErrorActionPreference = 'Stop'
 # 平台规则 / 厂商温度 / 降频这三个模块无 UI 依赖，直接点源即可；
 # 缺文件时对应能力降级为 N/A，不影响帧采集（见《数据源与平台覆盖规则.md》§5）。
 $script:AppModuleDir = Join-Path (Split-Path $PSScriptRoot -Parent) 'app'
-foreach ($m in @('platform-rules.ps1', 'vendor-sensor.ps1', 'cpu-throttle.ps1', 'quality-rules.ps1', 'stutter-context.ps1')) {
+foreach ($m in @('platform-rules.ps1', 'vendor-sensor.ps1', 'cpu-throttle.ps1', 'quality-rules.ps1', 'stutter-context.ps1', 'limit-rules.ps1', 'bgproc.ps1')) {
     $mp = Join-Path $script:AppModuleDir $m
     if (Test-Path -LiteralPath $mp) { . $mp }
 }
@@ -124,6 +126,8 @@ $stamp   = Get-Date -Format 'yyyyMMdd_HHmmss'
 $runName = $stamp + '_' + ($Label -replace '[^\w\-]', '_')
 $pmCsv   = Join-Path $OutDir ($runName + '.presentmon.csv')
 $sensCsv = Join-Path $OutDir ($runName + '.sensors.csv')
+# 2.1.17：后台进程 CPU 一对多行，不能塞进传感器 CSV（一行一个时刻），单独存
+$bgCsv   = Join-Path $OutDir ($runName + '.bgproc.csv')
 $htmlOut = if ($HtmlPath) { $HtmlPath } else { Join-Path $OutDir ($runName + '.html') }
 $htmlDir = Split-Path -Parent $htmlOut
 if ($htmlDir -and -not (Test-Path $htmlDir)) { New-Item -ItemType Directory -Path $htmlDir -Force | Out-Null }
@@ -146,8 +150,8 @@ Write-Host ''
 # CPU 每核占用用 CIM 的 formatted data（英文类名，不受系统语言影响）。
 # 老驱动/老 nvidia-smi 不认识新字段时整条查询会报错 -> 退回 1.4 的三字段，绝不因此丢数据。
 $capStartedAt = Get-Date   # 降频只统计本次采集窗口内的日志事件
-$sampler = Start-Job -ArgumentList $GamePid, $sensCsv, ($Seconds + 10), $smi, $collectGpuSensors, $collectVram, $collectRam, $collectProcCpu, $collectSysMem, $collectShared, $collectCpuPower, $script:AppModuleDir -ScriptBlock {
-    param($gpid, $csv, $maxSec, $smi, $wantGpu, $wantVram, $wantRam, $wantProcCpu, $wantSysMem, $wantShared, $wantCpuPower, $appDir)
+$sampler = Start-Job -ArgumentList $GamePid, $sensCsv, ($Seconds + 10), $smi, $collectGpuSensors, $collectVram, $collectRam, $collectProcCpu, $collectSysMem, $collectShared, $collectCpuPower, $script:AppModuleDir, $bgCsv, $collectBgProc -ScriptBlock {
+    param($gpid, $csv, $maxSec, $smi, $wantGpu, $wantVram, $wantRam, $wantProcCpu, $wantSysMem, $wantShared, $wantCpuPower, $appDir, $bgCsv, $wantBgProc)
     # 平台规则 + 厂商温度：与宿主同一份源码（避免两套实现算出两种结论）
     foreach ($m in @('platform-rules.ps1', 'vendor-sensor.ps1')) {
         $mp = Join-Path $appDir $m
@@ -230,6 +234,10 @@ if (-not ('NvGpu' -as [type])) {
     try { Add-Type -TypeDefinition $nvcs -Language CSharp -ErrorAction Stop } catch { }
 }
 if ('NvGpu' -as [type]) { try { $gpuUseNvml = [NvGpu]::Start() } catch { $gpuUseNvml = $false } }
+    # 后台进程 CPU 差分基线：每 5 个 tick 采一次，第一次只记基线不写行
+    $bgPrev = @{}
+    $bgPrevWall = $null
+    if ($wantBgProc) { 'elapsed_s,name,pid,cpu_pct' | Out-File -FilePath $bgCsv -Encoding ASCII }
     $script:t0 = Get-Date
     $cols = @('timestamp_utc', 'gpu_temp_c', 'gpu_util_pct', 'gpu_mem_used_mb', 'proc_vram_mb', 'proc_ram_mb',
               'gpu_clock_mhz', 'gpu_mem_clock_mhz', 'gpu_clock_max_mhz', 'gpu_power_w', 'gpu_fan_pct',
@@ -533,6 +541,38 @@ public static class PerfMem {
         }
         if ($wantShared -and $null -ne $script:sharedVram) { $v['shared_vram_mb'] = $script:sharedVram }
         (($cols | ForEach-Object { [string]$v[$_] }) -join ',') | Out-File -FilePath $csv -Append -Encoding ASCII
+        # ---- 2.1.17：后台进程 CPU 干扰（每 5 秒一次差分，只读 CPU 时间，不碰其它进程 GPU）----
+        # 排除空闲进程 / 目标游戏 / 采样器自身；无权访问的进程直接跳过，不当错误、不写 0。
+        if ($wantBgProc -and (($tick % 5) -eq 0)) {
+            try {
+                $bgNow = @(Get-Process -ErrorAction Stop | Where-Object {
+                        $_.Id -ne 0 -and $_.Id -ne $gpid -and $_.Id -ne $PID
+                    })
+                $bgWall = [DateTime]::Now
+                $bgDt = if ($null -ne $bgPrevWall) { ($bgWall - $bgPrevWall).TotalMilliseconds } else { 0.0 }
+                if ($bgDt -gt 100) {
+                    $bgCores = [math]::Max(1, [Environment]::ProcessorCount)
+                    $bgSeen = @{}
+                    foreach ($bp in $bgNow) {
+                        $bgMs = $null
+                        try { $bgMs = $bp.TotalProcessorTime.TotalMilliseconds } catch { continue }
+                        $bkey = [string]$bp.Id
+                        $bgSeen[$bkey] = $true
+                        if ($bgPrev.ContainsKey($bkey)) {
+                            $bpct = 100.0 * ($bgMs - [double]$bgPrev[$bkey]) / ($bgDt * $bgCores)
+                            if ($bpct -ge 0 -and $bpct -le (100.0 * $bgCores)) {
+                                $bname = ([string]$bp.ProcessName) -replace '[,"\r\n]', '_'
+                                $bel = [math]::Round(($bgWall - $script:t0).TotalSeconds, 1)
+                                "$bel,$bname,$bkey,$([math]::Round($bpct, 1))" | Out-File -FilePath $bgCsv -Append -Encoding ASCII
+                            }
+                        }
+                        $bgPrev[$bkey] = $bgMs
+                    }
+                    foreach ($dead in @($bgPrev.Keys | Where-Object { -not $bgSeen.ContainsKey($_) })) { $bgPrev.Remove($dead) }
+                }
+                $bgPrevWall = $bgWall
+            } catch { }
+        }
         $tick++
         Start-Sleep -Milliseconds 1000
     }
@@ -1166,6 +1206,38 @@ foreach ($k in $thrNames.Keys) {
     if ($seen -gt 0 -and $act -gt 0) { $throttle[$k] = [math]::Round(100.0 * $act / $seen, 1) }
 }
 
+# ── 2.1.17 / F4-2：后台进程 CPU 干扰（独立 CSV，一对多行）──
+$bgRows = @()
+if ($collectBgProc -and (Test-Path -LiteralPath $bgCsv)) {
+    try { $bgRows = @(Import-Csv -LiteralPath $bgCsv -Encoding ASCII) } catch { $bgRows = @() }
+}
+if (-not $collectBgProc) {
+    $bgProc = [ordered]@{ state = 'skipped'; sample_count = 0; interval_sec = 5; procs = @() }
+} elseif (Get-Command Get-BackgroundTop -ErrorAction SilentlyContinue) {
+    $bgProc = Get-BackgroundTop -Rows $bgRows -IntervalSec 5
+} else {
+    $bgProc = [ordered]@{ state = 'noSamples'; sample_count = 0; interval_sec = 5; procs = @() }
+}
+
+# ── 2.1.17 / F4-1：限制类型判读 ──
+# 驱动有没有回报限流状态，看传感器行里 thr_* 列是否取到过值（不是看 $throttle 是否非空：
+# 引擎只在触发时写键，空字典也可能只是「采到了但没触发」）。
+$thrSeen = $false
+foreach ($s0 in $sensors) {
+    if ($null -ne $s0.thr_sw_thermal -and $s0.thr_sw_thermal -ne 'NA') { $thrSeen = $true; break }
+}
+$limit = if (Get-Command Get-LimitType -ErrorAction SilentlyContinue) {
+    Get-LimitType -Throttle $throttle `
+        -GpuTempMaxC $(if ($gpuTemp) { $gpuTemp.Max } else { $null }) `
+        -GpuPowerMaxW $(if ($gpuPower) { $gpuPower.Max } else { $null }) `
+        -GpuLimitW $(if ($gpuLimit) { $gpuLimit.Max } else { $null }) `
+        -CpuTempMaxC $(if ($cpuTemp) { $cpuTemp.Max } else { $null }) `
+        -CpuThrottleState $throttleState -CpuThrottleCount $throttleCount `
+        -GpuThrottleAvailable $thrSeen -CpuTempAvailable ($cpuTempState -eq 'ok')
+} else {
+    [ordered]@{ kind = 'indistinct'; reason_code = 'moduleMissing'; evidence = @() }
+}
+
 $latStat = if ($collectLatency) { Get-Stat $dispLat } else { $null }
 $latP95  = if ($collectLatency) { Get-Percentile $dispLat 0.95 } else { $null }
 $inStat  = Get-Stat $inLat
@@ -1580,7 +1652,8 @@ try {
 } catch { $driverVer = $null }
 
 $summary = [ordered]@{
-    schema_version   = 3
+    # 2.1.17：新增 limit / background_proc 两个顶层块，读取方按 4 处理；3 及更早按缺字段显示 —
+    schema_version   = 4
     na_metrics       = @($naMetrics)
     # 本次数据是否足以支撑结论：level = ok / caution / blocked / unknown（模块缺失）
     # checks 里只列「确实触发的项」，没触发不等于逐项检查过（见 quality-rules.ps1 的说明）
@@ -1606,6 +1679,12 @@ $summary = [ordered]@{
         gpu_wait_ms = $gpuWaitMs
         render_queue = $null
     }
+    # 2.1.17 / F4-1：限制类型判读。kind 只有 thermal/power/driver/unobserved/indistinct 五种，
+    # evidence 里是判读依据的原始数值；indistinct 时 reason_code 说明为什么不能下结论。
+    limit            = $limit
+    # 2.1.17 / F4-2：后台进程 CPU 干扰 Top 3。state=skipped/noSamples/ok，
+    # 口径为「占单核满负荷的百分比」，与游戏进程 proc_cpu_pct 一致。
+    background_proc  = $bgProc
     memory           = [ordered]@{
         proc_ram_max_mb = $(if ($procRam) { [math]::Round($procRam.Max, 0) } else { $null })
         sys_ram_avg_pct = $(if ($sysRam) { [math]::Round($sysRam.Avg, 1) } else { $null })
@@ -1763,6 +1842,7 @@ $summary = [ordered]@{
         res       = $collectRes
         chart     = $collectChart
         diagnosis = $true        # 由已采数据推算，恒有
+        bgproc    = $collectBgProc
     }
 }
 # 深度 6：quality.checks 里的对象在 5 层，深度 3 会被压成字符串（历史遗留的隐患，一并修掉）
@@ -2074,6 +2154,57 @@ if ($diag) {
         $secDiag += '<table class="det" style="margin-top:10px">' + "`n" +
                     '<tr class="sec"><td colspan="2">同时值得注意</td></tr>' + $findRows + '</table>' + "`n"
     }
+}
+
+# ── 2.1.17 / F4-1：限制类型判读（结论 + 为什么 + 原始数值）──
+$secLimit = ''
+if ($limit) {
+    $limitMap = @{
+        thermal    = @('热墙', '驱动明确报告温度降频，或 CPU 固件限速且温度处于高位')
+        power      = @('功耗墙', '驱动明确报告功耗限制，峰值功耗贴近生效上限')
+        driver     = @('驱动 / 应用限制', '驱动报告应用锁频，且没有热或功耗限制同时触发')
+        unobserved = @('未观察到限制', '本次采集到了限流状态，没有发现触发的限制')
+        indistinct = @('无法区分', '现有信号不足以判定是哪一种限制，不做猜测')
+    }
+    $whyMap = @{
+        gpuThermal       = 'GPU 温度降频原因触发'
+        gpuPower         = 'GPU 功耗限制原因触发'
+        appClocks        = '驱动报告应用层锁频'
+        cpuThermal       = 'CPU 固件限速记录 + CPU 温度处于高位'
+        mixedThermal     = '热与功耗同时触发；温度高且功耗未贴上限，可分辨为热墙'
+        mixedPower       = '热与功耗同时触发；功耗贴上限且温度不高，可分辨为功耗墙'
+        mixed            = '多种限制同时触发，辅助信号不足以分辨主因'
+        cpuEventUnknown  = '有 CPU 固件限速记录，但温度不高且事件原因不可解析'
+        hwSlowdown       = '驱动只报硬件降频，未给出具体原因位'
+        none             = '采到了限流状态，没有触发项'
+        noData           = '没有可用的限流状态或事件日志'
+        moduleMissing    = '判定模块缺失，本次未做判读'
+    }
+    $lm = if ($limitMap.ContainsKey([string]$limit.kind)) { $limitMap[[string]$limit.kind] } else { $limitMap['indistinct'] }
+    $why = if ($whyMap.ContainsKey([string]$limit.reason_code)) { $whyMap[[string]$limit.reason_code] } else { '' }
+    $evRows = ''
+    foreach ($e in @($limit.evidence)) {
+        if ($null -eq $e) { continue }
+        $evRows += '<tr><td>' + $e.name + '</td><td>' + $e.value + '</td></tr>'
+    }
+    $secLimit = '<h2>限制类型判读</h2>' + "`n" +
+                '<div class="item ' + $(if ($limit.kind -eq 'indistinct') { 'warn' } else { 'good' }) + '"><div><b>' + $lm[0] + '</b> —— ' + $lm[1] + '</div></div>' + "`n" +
+                $(if ($why) { '<div class="cap">' + $why + '</div>' + "`n" } else { '' }) +
+                '<table class="det"><tr class="sec"><td colspan="2">判读依据（原始数值）</td></tr>' + $evRows + '</table>' + "`n"
+}
+
+# ── 2.1.17 / F4-2：后台干扰 Top 3（只读进程 CPU 时间）──
+$secBg = ''
+if ($bgProc -and $bgProc.state -eq 'ok' -and @($bgProc.procs).Count -gt 0) {
+    $bgRowsHtml = ''
+    foreach ($p in @($bgProc.procs)) {
+        $pnm = ([string]$p.name) -replace '&', '&amp;' -replace '<', '&lt;' -replace '>', '&gt;'
+        $bgRowsHtml += '<tr><td>' + $pnm + '</td><td>' + (Fmt $p.avg_cpu_pct '0.0') + ' %</td><td>' +
+                       (Fmt $p.peak_cpu_pct '0.0') + ' %</td><td>' + $p.samples + ' / ' + $bgProc.sample_count + '</td></tr>'
+    }
+    $secBg = '<h2>后台干扰 Top 3</h2>' + "`n" +
+             '<div class="cap">每 ' + $bgProc.interval_sec + ' 秒采样一次其它进程的 CPU 时间；占用按「占单核满负荷 = 100%」计，同名进程合并。只读进程 CPU，不读其它进程的 GPU。</div>' + "`n" +
+             '<table class="det"><tr class="sec"><td>进程</td><td>平均占用</td><td>峰值</td><td>出现采样</td></tr>' + $bgRowsHtml + '</table>' + "`n"
 }
 
 # ── 详细数据：按指标字典的板块分组 ──
@@ -2430,6 +2561,8 @@ $verdictItems
 $secChart$secTrend
 $secStutter
 $secDiag
+$secLimit
+$secBg
 <table class="det">
 $detOrdered
 </table>
@@ -2440,7 +2573,7 @@ ${skipNote}数据来源：Intel PresentMon 2.6（ETW，不注入游戏进程）�
 GPU Process Memory 计数器取本程序显存；Get-Process 取本程序内存；分辨率取自游戏窗口客户区。<br>
 1% Low = 最慢 1% 帧的平均帧时间换算 FPS；PC 延迟 = 帧生成时间 + 上屏延迟，即「开始生成这一帧 → 被看到」的整段时间；<br>
 上屏延迟 = 生成好的帧 到 它在屏幕上被看到 的时间（DisplayLatency，帧提交 → 扫描输出）；<br>
-原始数据：<code>$pmCsv</code> · <code>$sensCsv</code>
+原始数据：<code>$pmCsv</code> · <code>$sensCsv</code>$(if ($collectBgProc) { ' · <code>' + $bgCsv + '</code>' } else { '' })
 </footer>
 </div></body></html>
 "@

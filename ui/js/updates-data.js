@@ -19,6 +19,16 @@ window.PerfUpdateAreas = ['capture', 'realtime', 'other'];
 
 window.PerfUpdates = [
   {
+    date: '2026-11-23', version: '2.1.17',
+    title: '判读增强：限制类型与后台干扰',
+    items: [
+      ['metrics', '报告新增「限制类型判读」：结合温度、功耗上限与固件限速记录，给出热墙 / 功耗墙 / 驱动限制结论，并列出判读依据的原始数值。', 'capture'],
+      ['metrics', '新增「后台干扰 Top 3」：每 5 秒采样一次其它进程的 CPU 占用，给出平均、峰值与出现次数；只读进程 CPU，不读其它进程的 GPU。', 'capture'],
+      ['fix', '信号不足时如实写「无法区分」，没有可用数据时也不说成「未观察到限制」——判读不靠猜测。', 'other'],
+      ['ui', '采集项清单新增「后台进程 CPU 干扰」开关，可单独关闭。', 'other']
+    ]
+  },
+  {
     date: '2026-11-23', version: '2.1.16',
     title: '全局热键、每游戏记忆与采集结束提醒',
     items: [

@@ -215,6 +215,9 @@
 .rp-diag.warn .w.note { border-left-color: color-mix(in srgb, var(--warn) 50%, transparent); }
 .rp-diag.good .w.note { border-left-color: color-mix(in srgb, var(--good) 50%, transparent); }
 
+/* 2.1.17：后台干扰行的辅助说明（出现 x/y 次采样），比进程名轻一级 */
+.rp-bg-sub { display: block; margin-top: 0.12rem; font-size: 0.66rem; color: var(--faint); }
+
 .rp-chart-title .u { margin-left: 0.35rem; font-style: normal; font-size: 0.66rem; color: var(--faint); }
 .rp-rows .row.is-finding .k { color: var(--warn); }
 /* ── 图表块：标题 + 画布 + 说明，两张图平铺 ── */

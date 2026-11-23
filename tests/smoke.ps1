@@ -1041,7 +1041,7 @@ foreach ($impure in 'Get-CimInstance', 'Get-WinEvent', 'Get-ItemProperty', 'Star
 }
 # 引擎：点源该模块，并把可信度与指纹写进汇总
 if ($engPs -notmatch [regex]::Escape('quality-rules.ps1')) { Bad '采集引擎没有点源 quality-rules.ps1' }
-foreach ($need in 'Get-CaptureQuality', 'quality          = $quality', 'driver_version', 'bios_version', 'os_version', 'schema_version   = 3') {
+foreach ($need in 'Get-CaptureQuality', 'quality          = $quality', 'driver_version', 'bios_version', 'os_version', 'schema_version   = 4') {
     if ($engPs -notmatch [regex]::Escape($need)) { Bad "采集引擎缺数据可信度/指纹：$need" }
 }
 if ($engPs -notmatch 'ConvertTo-Json\s+-Depth\s+6') { Bad '报告 JSON 深度不足（quality.checks 会被压成字符串）' }
@@ -1158,6 +1158,51 @@ foreach ($k in 'capture.rerun', 'settings.hotkeys', 'settings.hotkeyStart') {
     if ($n -lt 3) { Bad "i18n 的 $k 只有 $n 种语言（应 3）" }
 }
 if (-not (Test-Path (Join-Path $root 'tests\probe-hotkeys.ps1'))) { Bad '缺少 tests\probe-hotkeys.ps1' }
+
+# ---- 2.1.17 判读增强：限制类型判读 / 后台干扰 Top 3 ----
+$limMod = Join-Path $root 'src\app\limit-rules.ps1'
+$bgMod  = Join-Path $root 'src\app\bgproc.ps1'
+if (-not (Test-Path -LiteralPath $limMod)) { Bad '缺少 src\app\limit-rules.ps1' }
+if (-not (Test-Path -LiteralPath $bgMod))  { Bad '缺少 src\app\bgproc.ps1' }
+$limPs = if (Test-Path -LiteralPath $limMod) { Get-Content $limMod -Raw -Encoding UTF8 } else { '' }
+$bgPs  = if (Test-Path -LiteralPath $bgMod)  { Get-Content $bgMod -Raw -Encoding UTF8 } else { '' }
+$repCss17 = Get-Content (Join-Path $root 'ui\css\report.css') -Raw -Encoding UTF8
+foreach ($fn in 'Get-LimitType', 'ConvertTo-LimitNum') { if ($limPs -notmatch ('function ' + $fn)) { Bad "limit-rules.ps1 缺函数 $fn" } }
+foreach ($fn in 'Get-BackgroundTop', 'ConvertTo-BgNum') { if ($bgPs -notmatch ('function ' + $fn)) { Bad "bgproc.ps1 缺函数 $fn" } }
+# 纯函数红线：判定/聚合模块不得做 IO，探针才能独立验证
+foreach ($p in @(@($limPs, 'limit-rules.ps1'), @($bgPs, 'bgproc.ps1'))) {
+    if ($p[0] -match 'Get-WinEvent|Get-CimInstance|Get-Process|Out-File|Set-Content|Invoke-WebRequest') {
+        Bad ($p[1] + ' 不是纯函数（出现 IO 调用）')
+    }
+}
+# 「无法区分」优先：信息不足时必须说无法区分，不能说「未观察到限制」
+if ($limPs -notmatch "kind = 'indistinct'") { Bad 'limit-rules.ps1 缺少 indistinct 结论' }
+if ($limPs -notmatch 'noData') { Bad 'limit-rules.ps1 缺少 noData 原因码（数据不可用）' }
+if ($limPs -notmatch 'cpuEventUnknown') { Bad 'limit-rules.ps1 缺少 CPU 事件原因不明分支' }
+$engPs17 = Get-Content (Join-Path $root 'src\engine\Measure-GamePerf.ps1') -Raw -Encoding UTF8
+foreach ($need in 'limit-rules.ps1', 'bgproc.ps1', '$bgCsv', '$collectBgProc', 'Get-LimitType', 'Get-BackgroundTop',
+                  'limit            = $limit', 'background_proc  = $bgProc', '$secLimit', '$secBg') {
+    if ($engPs17 -notmatch [regex]::Escape($need)) { Bad "引擎未接线 $need" }
+}
+if ($engPs17 -notmatch "kind = 'indistinct'") { Bad '引擎判定模块缺失时也必须给 indistinct' }
+# 后台采样只读进程 CPU 时间，不许碰其它进程 GPU
+$repCss17 = Get-Content (Join-Path $root 'ui\css\report.css') -Raw -Encoding UTF8
+$bgBlock = ''
+if ($engPs17 -match '(?s)if \(\$wantBgProc -and \(\(\$tick % 5\).*?\$tick\+\+') { $bgBlock = $Matches[0] }
+if (-not $bgBlock -or $bgBlock -notmatch 'TotalProcessorTime') { Bad '后台采样未用 TotalProcessorTime 差分' }
+if ($bgBlock -match 'Get-Counter|nvidia-smi|NvGpu|gpu_') { Bad '后台采样不得读取其它进程的 GPU' }
+foreach ($need in 'limitBlock', 'bgProcBlock', 'limitEvidenceLabel', 'rp-bg-sub') {
+    if ($repJs -notmatch [regex]::Escape($need)) { Bad "report.js 缺 $need" }
+}
+if ($repCss17 -notmatch '\.rp-bg-sub') { Bad 'report.css 缺后台干扰辅助样式' }
+foreach ($k in 'diag.limit.thermal', 'diag.limit.indistinct', 'diag.limitWhy.noData', 'diag.limitEvidence',
+               'report.bgProc.title', 'report.bgProc.cap', 'capture.item.bgproc') {
+    $n = ([regex]::Matches($i18nText, [regex]::Escape("'" + $k + "'"))).Count
+    if ($n -lt 3) { Bad "i18n 的 $k 只有 $n 种语言（应 3）" }
+}
+foreach ($tf in 'probe-limit-rules.ps1', 'probe-bgproc.ps1', 'probe-report-verdicts.js') {
+    if (-not (Test-Path (Join-Path $root ('tests\' + $tf)))) { Bad ('缺少 tests\' + $tf) }
+}
 
 $rtJs = Get-Content (Join-Path $root 'ui\js\realtime.js') -Raw -Encoding UTF8
 foreach ($need in 'window.PerfRealtime', '__refreshRealtime', 'metricsStart', 'metricsStop', 'is-na', 'FIELDS') {

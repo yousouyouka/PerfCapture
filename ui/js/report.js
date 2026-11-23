@@ -242,6 +242,11 @@ function renderReport(r) {
   const sec05 = haveDict ? renderMetricModules(r, ['bottleneck']) : '';
   if (diagHtml || sec05) html += rpSec('05', 'report.s5', '瓶颈诊断') + diagHtml + sec05;
 
+  /* 2.1.17：限制判读与后台干扰与引擎导出 HTML 同一顺序；
+     不编号——卡顿时刻已经有过「两个 02」的教训。 */
+  html += limitBlock(r);
+  html += bgProcBlock(r);
+
   const sec06 = haveDict ? renderMetricModules(r, ['perf', 'thermal']) : '';
   if (sec06) html += rpSec('06', 'report.s6', '完整明细') + sec06;
   if (!haveDict && rows.length) {
@@ -342,6 +347,62 @@ function renderDiagnosis(r) {
   }
   return h;
 }
+
+/* ── 2.1.17 / F4-1：限制类型判读 ──
+   结论只有五种；「无法区分」时 reason_code 必须说清为什么不能下结论。
+   evidence 是引擎给判读用的原始数值，全部照实列出，缺的不写。 */
+function limitEvidenceLabel(e) {
+  const m = String((e && e.metric) || '');
+  const fallback = String((e && e.name) || m);
+  if (m.indexOf('throttle.') === 0) return t('metric.throttle.' + m.slice(9), fallback);
+  return t('diag.limit.ev.' + m, fallback);
+}
+function limitBlock(r) {
+  const l = r && r.limit;
+  if (!l || !l.kind) return '';
+  const kind = String(l.kind);
+  const title = t('diag.limit.' + kind, kind);
+  const why = l.reason_code ? t('diag.limitWhy.' + l.reason_code, '') : '';
+  const cls = kind === 'indistinct' ? 'warn' : (kind === 'unobserved' ? '' : 'good');
+  let h = `<div class="rp-diag ${cls}"><div class="h">${escapeHtml(title)}</div>` +
+          (why ? `<div class="w note">${escapeHtml(why)}</div>` : '') + '</div>';
+  const ev = Array.isArray(l.evidence) ? l.evidence : [];
+  if (ev.length) {
+    h += `<div class="rp-section">${escapeHtml(t('diag.limitEvidence', '判读依据（原始数值）'))}</div>` +
+         '<div class="rp-rows rp-diagrows">' +
+         ev.map((e) => `<div class="row" data-metric="${escapeHtml(String((e && e.metric) || ''))}">` +
+           `<span class="k">${escapeHtml(limitEvidenceLabel(e))}</span>` +
+           `<span class="v">${escapeHtml(String((e && e.value) || ''))}</span></div>`).join('') +
+         '</div>';
+  }
+  return h;
+}
+
+/* ── 2.1.17 / F4-2：后台干扰 Top 3 ──
+   只在确实采到样本时占版面；关掉或没采到就什么都不写，不写「无干扰」这种结论。 */
+function bgProcBlock(r) {
+  const b = r && r.background_proc;
+  if (!b || b.state !== 'ok' || !Array.isArray(b.procs) || !b.procs.length) return '';
+  const cap = fillParams(t('report.bgProc.cap',
+    '每 {n} 秒采样一次其它进程的 CPU 时间；占用按「占单核满负荷 = 100%」计，同名进程合并。只读进程 CPU，不读其它进程的 GPU。'),
+    { n: b.interval_sec != null ? b.interval_sec : 5 });
+  let h = `<div class="rp-section">${escapeHtml(t('report.bgProc.title', '后台干扰 Top 3'))}</div>` +
+          `<div class="rp-note">${escapeHtml(cap)}</div>` +
+          '<div class="rp-rows rp-bgrows">' +
+          b.procs.map((p) => {
+            const nm = String((p && p.name) || '');
+            const hit = fillParams(t('report.bgProc.samples', '出现 {a}/{b} 次采样'),
+              { a: (p && p.samples) != null ? p.samples : '—', b: b.sample_count != null ? b.sample_count : '—' });
+            const val = fillParams(t('report.bgProc.value', '平均 {a} % · 峰值 {b} %'),
+              { a: (p && p.avg_cpu_pct) != null ? p.avg_cpu_pct : '—', b: (p && p.peak_cpu_pct) != null ? p.peak_cpu_pct : '—' });
+            return `<div class="row" data-proc="${escapeHtml(nm)}">` +
+                   `<span class="k">${escapeHtml(nm)}<span class="rp-bg-sub">${escapeHtml(hit)}</span></span>` +
+                   `<span class="v">${escapeHtml(val)}</span></div>`;
+          }).join('') +
+          '</div>';
+  return h;
+}
+
 /* ─────────── B2：指标字典驱动的 7 个板块 ───────────
    doc = window.PerfMetricsDoc（宿主随 init 下发，源自 capture-metrics.json）。
    status=na 的指标显示「—」+「暂不可用」徽标，并在下一行写出原因：
@@ -1184,6 +1245,13 @@ function buildExportHtml() {
     .rp-rows .row:last-child { border-bottom: none; }
     .rp-rows .row .k { color: ${c.muted}; }
     .rp-rows .row .v { color: ${c.strong}; font-variant-numeric: tabular-nums; }
+    .rp-note { color: ${c.muted}; font-size: .74rem; line-height: 1.6; margin: 0 0 8px; }
+    .rp-diag { border: 1px solid ${c.line}; border-left: 3px solid ${c.good}; border-radius: 9px;
+               padding: 10px 12px; margin: 10px 0; }
+    .rp-diag.warn { border-left-color: ${c.warn}; }
+    .rp-diag .h { color: ${c.strong}; font-size: .86rem; }
+    .rp-diag .w { color: ${c.muted}; font-size: .74rem; line-height: 1.6; margin-top: 4px; }
+    .rp-bg-sub { display: block; color: ${c.muted}; font-size: .68rem; margin-top: 2px; }
     .rp-chart { border: 1px solid ${c.line}; border-radius: 9px; padding: 10px; }
     .rp-chart canvas, .rp-chart img { width: 100%; height: 180px; display: block; }
     .rp-chart .cap { color: ${c.muted}; font-size: .72rem; margin-top: 6px; }

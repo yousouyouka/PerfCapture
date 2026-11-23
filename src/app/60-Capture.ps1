@@ -10,7 +10,7 @@ $script:KnownCommands = @('ready', 'refreshProcs', 'saveSettings', 'openReports'
     'cancelExtensionProvision',
     # 2.1.8：网络不可达时的手动导入（选包 / 导入）与官方下载页
     'pickExtensionPackage', 'importExtensionPackage', 'openExtensionPage',
-    # 2.1.14：历史报告库（列表 / 详情 / 对比 / 打开伴随文件 / 删除）
+    # 2.1.13：历史报告库（列表 / 详情 / 对比 / 打开伴随文件 / 删除）
     'reportsList', 'reportDetail', 'reportCompare', 'reportOpenFile', 'reportDelete')
 
 function Handle-UiMessage($msg) {

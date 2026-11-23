@@ -48,7 +48,7 @@
     staleData:        'extensions.reason.staleData',
     noFrames:         'extensions.reason.noFrames',
     readException:    'extensions.reason.readException',
-    // 内置厂商通道（v2.1.11）：为什么这台机器没有 CPU 温度
+    // 内置厂商通道（v2.1.10）：为什么这台机器没有 CPU 温度
     vendorNotSupported: 'extensions.reason.vendorNotSupported',
     vendorNeedsAdmin:   'extensions.reason.vendorNeedsAdmin',
     vendorNoChannel:    'extensions.reason.vendorNoChannel',

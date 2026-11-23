@@ -1,4 +1,4 @@
-﻿# CPU 降频事件日志探针（v2.1.11）
+﻿# CPU 降频事件日志探针（v2.1.10）
 # 验证：
 #   - Event 37 XML 解析（命名 Data / 仅有位置 Data / 坏 XML 三类）
 #   - 真实查询：本机 System 日志可读 → ok=true；无事件 → count=0（不是失败）

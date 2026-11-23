@@ -32,7 +32,7 @@
 }
 .rp-section { font-size: 0.78rem; color: var(--muted); margin: 0.9rem 0 0.45rem; }
 
-/* 数据可信度横幅（2.1.13）：只在确实有问题时出现；不整块染色，只用左侧竖条提示级别 */
+/* 数据可信度横幅（2.1.12）：只在确实有问题时出现；不整块染色，只用左侧竖条提示级别 */
 .rp-quality {
   background: var(--tile);
   border: 1px solid var(--line);

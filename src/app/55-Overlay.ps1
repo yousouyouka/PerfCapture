@@ -48,7 +48,7 @@ $script:OverlayItemDefs = @(
 
 $script:OverlayItemKeys = @($script:OverlayItemDefs | ForEach-Object { $_.key })
 # 本机拿不到的项：界面上灰掉、不可勾选，也不写进配置。
-# 2.1.12 起 cputemp 不再写死——2.1.11 已接入联想固件通道，写死会把已经有数的机器也锁上。
+# 2.1.11 起 cputemp 不再写死——2.1.10 已接入联想固件通道，写死会把已经有数的机器也锁上。
 # 静态 locked 管「永远没有」；dynamic 管「这台机器现在有没有」，每次现算。
 function Get-OverlayLockedKeys {
     $keys = @($script:OverlayItemDefs | Where-Object { $_.locked } | ForEach-Object { $_.key })

@@ -19,7 +19,7 @@ window.PerfUpdateAreas = ['capture', 'realtime', 'other'];
 
 window.PerfUpdates = [
   {
-    date: '2026-11-23', version: '2.1.16',
+    date: '2026-11-23', version: '2.1.15',
     title: '报告新增卡顿时刻：看清楚卡的那一下在干什么',
     items: [
       ['metrics', '报告会列出最严重的 5 段卡顿，以及每段前后 2 秒的 GPU 占用与温度、显存、功耗、CPU 占用与温度。', 'capture'],
@@ -28,7 +28,7 @@ window.PerfUpdates = [
     ]
   },
   {
-    date: '2026-11-23', version: '2.1.15',
+    date: '2026-11-23', version: '2.1.14',
     title: '修复历史报告页点了没反应',
     items: [
       ['fix', '历史报告页的列表、查看、对比、删除与「打开目录」都能正常响应了。此前这些操作发出的消息格式不对，被程序直接丢弃，表现为「列表空的、按钮点了没反应」。', 'other'],
@@ -36,7 +36,7 @@ window.PerfUpdates = [
     ]
   },
   {
-    date: '2026-11-23', version: '2.1.14',
+    date: '2026-11-23', version: '2.1.13',
     title: '新增历史报告：把历次采集翻出来对比',
     items: [
       ['feature', '侧边栏新增「历史报告」：历次采集按时间列出，可按游戏筛选、按关键字搜索，每条都能直接打开原始报告。', 'other'],
@@ -46,7 +46,7 @@ window.PerfUpdates = [
     ]
   },
   {
-    date: '2026-11-23', version: '2.1.13',
+    date: '2026-11-23', version: '2.1.12',
     title: '报告新增数据可信度提示与条件指纹',
     items: [
       ['metrics', '报告顶部会先说明这次数据能不能支撑结论：样本过少、采集中断、游戏大部分时间不在前台、GPU 指标缺失过多都会被列出；正常时不显示任何提示，不打扰。', 'capture'],
@@ -55,7 +55,7 @@ window.PerfUpdates = [
     ]
   },
   {
-    date: '2026-11-22', version: '2.1.12',
+    date: '2026-11-22', version: '2.1.11',
     title: '采集项补齐温度与降频、浮窗温度解锁、1%L 冷启动说明',
     items: [
       ['ux', '采集项清单补上「CPU 温度」与「CPU 降频记录」，两项可以单独关闭；关掉后报告显示「未采集」，不再和「这台机器不支持」混为一谈。', 'capture'],
@@ -66,7 +66,7 @@ window.PerfUpdates = [
     ]
   },
   {
-    date: '2026-11-22', version: '2.1.11',
+    date: '2026-11-22', version: '2.1.10',
     title: 'CPU 温度与降频上线：厂商固件只读通道 + Windows 系统日志',
     items: [
       ['feature', 'CPU 温度不再恒为「暂不可用」：联想机型直接读固件通过 ACPI-WMI 暴露的只读温度接口，不需要装驱动、不注入游戏；其它品牌如实显示不可用并说明原因。', 'realtime'],
@@ -78,7 +78,7 @@ window.PerfUpdates = [
     ]
   },
   {
-    date: '2026-11-22', version: '2.1.10',
+    date: '2026-11-22', version: '2.1.9',
     title: '报告标注数据来源、扩展崩溃自愈、更新下载多一层兜底',
     items: [
       ['metrics', '性能报告的「测试环境」新增「帧数据源」一行，如实标注这次的帧率是 PresentMon ETW 还是某个扩展；不同数据源的报告不再混着比。', 'capture'],

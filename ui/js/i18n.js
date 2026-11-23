@@ -10,7 +10,7 @@ const I18N = {
     'nav.capture': '性能采集',
     'nav.reports': '历史报告',
 
-    /* ── 历史报告库（2.1.14）── */
+    /* ── 历史报告库（2.1.13）── */
     'reports.eyebrow': 'REPORTS',
     'reports.title': '历史报告',
     'reports.lead': '每次采集都会留下一份报告；勾选两份可以直接对比，条件不同的会明确标出来。',
@@ -608,7 +608,7 @@ const I18N = {
     'report.naWhy.cpuTemp': '这台机器没有可用的固件温度通道（目前仅联想机型支持）。这里不会用估算值或主板热区温度替代。',
     'report.naWhy.cpuThrottle': 'Windows 系统日志不可读，本次无法判断是否发生固件限速；不会用频率或温度去猜测原因。',
     'report.naWhy.noDriverVersion': 'nvidia-smi 没有返回驱动版本，本次无法记录这一项（不影响其它数据）。',
-    /* 数据可信度（2.1.13）：只在确实有问题时显示，措辞说明「影响了什么」，不做一刀切否定 */
+    /* 数据可信度（2.1.12）：只在确实有问题时显示，措辞说明「影响了什么」，不做一刀切否定 */
     'report.quality.blockedTitle': '本次数据不足以支撑结论',
     'report.quality.cautionTitle': '本次数据可用，但有以下情况需要注意',
     'report.quality.fewSamples': '只采到 {frames} 帧 / {seconds} 秒：1% Low 与卡顿统计不可靠，不建议据此对比或下结论。',
@@ -616,7 +616,7 @@ const I18N = {
     'report.quality.partial': '有效时长只占采集窗口的 {pct}%：中间有停帧，数值偏乐观。',
     'report.quality.targetLost': '有 {pct}% 的采样时间游戏不在前台：画面可能被其它窗口干扰。',
     'report.quality.gpuSparse': 'GPU 指标只有 {pct}% 的采样取到：GPU 相关结论请谨慎。',
-    /* 卡顿时刻（2.1.16） */
+    /* 卡顿时刻（2.1.15） */
     'report.sc.title': '卡顿时刻',
     'report.sc.cap': '最严重的 {n} 段；列出每段前后 ±{w} 秒的平均值。逐帧与传感器两路数据不同源，按采集进度比例对齐，误差约 {tol} 秒——不要当成精确到毫秒的因果证据。',
     'report.sc.capNoTol': '最严重的 {n} 段；列出每段前后 ±{w} 秒的平均值。（本次没有可用的传感器样本，无法给出对齐误差。）',
@@ -2216,7 +2216,7 @@ function applyTranslations(root) {
     const val = t(el.dataset.i18nTitle, null);
     if (val != null) el.title = val;
   });
-  // 占位符也要跟随语言（2.1.14 历史报告库的搜索框）
+  // 占位符也要跟随语言（2.1.13 历史报告库的搜索框）
   scope.querySelectorAll('[data-i18n-ph]').forEach((el) => {
     const val = t(el.dataset.i18nPh, null);
     if (val != null) el.placeholder = val;

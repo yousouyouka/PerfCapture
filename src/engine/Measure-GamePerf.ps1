@@ -43,7 +43,7 @@ $collectProcCpu  = -not ($skipList -contains 'proccpu')
 $collectSysMem   = -not ($skipList -contains 'sysmem')
 $collectShared   = -not ($skipList -contains 'sharedmem')
 $collectCpuPower = -not ($skipList -contains 'cpupower')   # 2.0.17：CPU 封装功耗（PDH Energy Meter）
-# 2.1.12：CPU 温度与降频进可选清单。默认开（与 2.1.11 行为一致），关掉可省掉 WMI 与事件日志查询。
+# 2.1.11：CPU 温度与降频进可选清单。默认开（与 2.1.10 行为一致），关掉可省掉 WMI 与事件日志查询。
 $collectCpuTemp  = -not ($skipList -contains 'cputemp')
 $collectCpuThrottle = -not ($skipList -contains 'cputhrottle')
 $collectFeatures = -not ($skipList -contains 'features')
@@ -989,7 +989,7 @@ $gpuMemUsed = if ($collectGpuUsage) { Get-SensorStat 'gpu_mem_used_mb' } else { 
 $procVram   = if ($collectVram) { Get-SensorStat 'proc_vram_mb' } else { $null }
 $procRam    = if ($collectRam)  { Get-SensorStat 'proc_ram_mb' } else { $null }
 
-# ---- 卡顿时刻上下文（2.1.16）：把 Top 卡顿与传感器样本按采集进度对齐 ----
+# ---- 卡顿时刻上下文（2.1.15）：把 Top 卡顿与传感器样本按采集进度对齐 ----
 # 两条流不同源、没有共同时间戳，只能按比例对齐；容差写进报告，不许说成精确对齐。
 $stutterCtx = $null
 if (Get-Command Get-StutterContext -ErrorAction SilentlyContinue) {
@@ -1032,8 +1032,8 @@ $sysCommit = if ($collectSysMem) { Get-SensorStat 'sys_commit_mb' } else { $null
 $sharedVram = if ($collectShared) { Get-SensorStat 'shared_vram_mb' } else { $null }
 $cpuPkg   = if ($collectCpuPower) { Get-SensorStat 'cpu_pkg_w' } else { $null }
 
-# ---- CPU 温度与降频（v2.1.11）：温度走厂商固件通道（仅联想），降频走 Windows 事件日志 ----
-# 2.1.12：两项都受采集项开关控制。关掉时状态是 skipped（不是 unsupported），
+# ---- CPU 温度与降频（v2.1.10）：温度走厂商固件通道（仅联想），降频走 Windows 事件日志 ----
+# 2.1.11：两项都受采集项开关控制。关掉时状态是 skipped（不是 unsupported），
 # 报告据此显示「未采集」而不是「暂不可用」——这两者不能混。
 $cpuTemp = if ($collectCpuTemp) { Get-SensorStat 'cpu_temp_c' } else { $null }
 $cpuThrottle = $null
@@ -1553,7 +1553,7 @@ if ($stalled) { [void]$verdicts.Add(@('bad', 'verdict.stalled')) }
 elseif ($wallSec -gt 0 -and $durSec -lt ($wallSec * 0.6)) {
     [void]$verdicts.Add(@('warn', 'verdict.partial', @{ dur = [math]::Round($durSec,1); wall = $wallSec }))
 }
-# ---------------------------------------------------------------- 数据可信度与条件指纹（2.1.13）
+# ---------------------------------------------------------------- 数据可信度与条件指纹（2.1.12）
 # 判定逻辑在 quality-rules.ps1（纯函数、无副作用，探针可直接验证）；这里只负责喂事实，不在这里做判断。
 $gpuSampleTotal = @($sensors).Count
 $gpuSampleOk = 0
@@ -1595,7 +1595,7 @@ $summary = [ordered]@{
         worst_ms = [math]::Round($stutterWorstMs, 1)
         severe = $severeCount
         top = @($stutterTop | ForEach-Object { [ordered]@{ start_frame = $_.start; frames = $_.frames; ms = $_.ms } })
-        # 卡顿时刻上下文（2.1.16）：Top N 卡顿前后 ±window 秒的机器状态。
+        # 卡顿时刻上下文（2.1.15）：Top N 卡顿前后 ±window 秒的机器状态。
         # reason 说明「为什么没有」：noStutter / noSensors / noFrames / moduleMissing，不写空数组冒充「没卡顿」。
         context = $stutterCtx
     }
@@ -1649,7 +1649,7 @@ $summary = [ordered]@{
         ram_type = $ramTypeText
         gpu_model = $gpuModelText
         vram_type = $null
-        # 帧数据源（2.1.10）：同一次采集单一来源，presentmon 或扩展 id；跨机器比较报告必须先对齐这里。
+        # 帧数据源（2.1.9）：同一次采集单一来源，presentmon 或扩展 id；跨机器比较报告必须先对齐这里。
         fps_source = $FpsSource
         present_api = $apiName
         present_mode = $presentMode
@@ -1664,13 +1664,13 @@ $summary = [ordered]@{
         power_events        = $powerEvents        # 采集窗口内 Kernel-Power 105 的条数
         power_health        = $powerHealth        # ok / events / $null(查询失败)
         power_health_detail = $powerHealthDetail
-        # 平台覆盖（v2.1.11）：跨机器对比前先看这里；不支持的组合在指标处如实 N/A
+        # 平台覆盖（v2.1.10）：跨机器对比前先看这里；不支持的组合在指标处如实 N/A
         cpu_vendor          = $(if ($platform) { [string]$platform.cpuVendor } else { $null })
         gpu_vendor          = $(if ($platform) { [string]$platform.gpuVendor } else { $null })
         system_vendor       = $(if ($platform) { [string]$platform.systemVendor } else { $null })
         system_model        = $(if ($platform) { [string]$platform.systemModel } else { $null })
         os_build            = $(if ($platform) { [int]$platform.osBuild } else { $null })
-        # 条件指纹（2.1.13）：跨次/跨机器对比前先对齐这几项，任何一项不同都不能直接比「提升」。
+        # 条件指纹（2.1.12）：跨次/跨机器对比前先对齐这几项，任何一项不同都不能直接比「提升」。
         # 驱动版本取不到就是 null —— 报告按「无法确认」渲染，不写猜测值。
         driver_version      = $driverVer
         os_version          = $(if ($platform) { [string]$platform.osName } else { $null })
@@ -1852,7 +1852,7 @@ foreach ($x in $features) {
 $chartSvg = ''
 $chartYlab = ''
 $chartCap = ''
-# 卡顿位置标注（2.1.16）：按 at_pct 画竖虚线，让人一眼看到「卡在哪一段」
+# 卡顿位置标注（2.1.15）：按 at_pct 画竖虚线，让人一眼看到「卡在哪一段」
 $markSvg = ''
 if ($stutterCtx -and $stutterCtx.items) {
     foreach ($it in @($stutterCtx.items)) {
@@ -2003,7 +2003,7 @@ if ($trend) {
     }
 }
 
-# ── 卡顿时刻（2.1.16）：Top N 卡顿前后 ±N 秒的机器状态 ──
+# ── 卡顿时刻（2.1.15）：Top N 卡顿前后 ±N 秒的机器状态 ──
 # 两路数据不同源，只能按采集进度比例对齐；容差写在正文里，不许当成毫秒级因果证据。
 $secStutter = ''
 if ($stutterCtx -and @($stutterCtx.items).Count -gt 0) {
@@ -2233,10 +2233,10 @@ if ($summary.environment.system_vendor) {
 if ($platParts.Count -gt 0) {
     $detRows += '<tr><td>平台</td><td>' + ($platParts -join ' · ') + '</td></tr>'
 }
-# 帧数据源：同一次采集只有一个来源，报告必须如实标注（2.1.10）
+# 帧数据源：同一次采集只有一个来源，报告必须如实标注（2.1.9）
 $srcLabel = if ($FpsSource -eq 'presentmon') { 'PresentMon ETW（零注入基线）' } else { $FpsSource + '（扩展数据源）' }
 $detRows += '<tr><td>帧数据源</td><td>' + $srcLabel + '</td></tr>'
-# 条件指纹（2.1.13）：这三行是「两次报告能不能直接比」的前提，缺一项就少一个可比性依据
+# 条件指纹（2.1.12）：这三行是「两次报告能不能直接比」的前提，缺一项就少一个可比性依据
 if ($summary.environment.os_version) {
     $osTxt = [string]$summary.environment.os_version
     if ($summary.environment.os_build) { $osTxt += '（Build ' + $summary.environment.os_build + '）' }
@@ -2330,7 +2330,7 @@ if (-not $collectChart)     { $skipNames += '帧时间曲线' }
 $skipNote = ''
 if ($skipNames.Count -gt 0) { $skipNote = '本次未采集：' + ($skipNames -join '、') + '。<br>' }
 
-# ── 数据可信度横幅（2.1.13）──
+# ── 数据可信度横幅（2.1.12）──
 # 只在确实有问题时出现：ok 不显示，避免每份报告都多一条无信息量的横幅。
 # 措辞只说明「影响了什么」，不下「数据完全不可用」这种一刀切结论。
 $qualHtml = ''

@@ -480,7 +480,7 @@
   const FALLBACK_ITEMS = ['fps', 'fpslow', 'rlat', 'pcl', 'gpuutil', 'gputemp', 'gpuclock', 'gpupower',
     'gpufan', 'vramclk', 'gpuvolt', 'cpuutil', 'cpuclock', 'cpupower', 'cputemp', 'ram'];
   /* 宿主没下发清单时的兜底（正常由 overlayState.itemKeys / itemLocked 下发）
-     cputemp 不再固定锁死：2.1.11 起联想机型有真实读数，锁不锁由宿主按平台能力判。 */
+     cputemp 不再固定锁死：2.1.10 起联想机型有真实读数，锁不锁由宿主按平台能力判。 */
   const FALLBACK_LOCKED = ['gpuvolt'];
   const KEYS = [];
   for (let c = 65; c <= 90; c++) KEYS.push(String.fromCharCode(c));

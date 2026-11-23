@@ -22,7 +22,7 @@ $form.Add_FormClosing({
     try { $script:Mutex.ReleaseMutex() } catch { }
 })
 
-# 平台覆盖（v2.1.11）：启动时记录一次画像，支持时能一眼区分「不在覆盖范围」与「读取失败」。
+# 平台覆盖（v2.1.10）：启动时记录一次画像，支持时能一眼区分「不在覆盖范围」与「读取失败」。
 # 不阻止启动：表外组合仍可用帧采集等基线功能，只是相关指标如实 N/A（规则文档 §1）。
 try {
     if (Get-Command Get-PlatformProfile -ErrorAction SilentlyContinue) {

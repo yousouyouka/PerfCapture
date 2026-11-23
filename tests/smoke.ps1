@@ -351,7 +351,7 @@ if ($repJs -notmatch 'class="p"') { Bad 'report.js 缺占比的 .p 标记' }
 if ($repCss -notmatch '(?s)\.rp-tile \.v small,\s*\n\.rp-tile \.v \.p \{') { Bad 'report.css 里占比没有和单位（small）共用同一套样式' }
 if ($engPs -notmatch '\.card \.p\{font-size:12px;color:\$cMuted') { Bad '引擎 HTML 的 .card .p 没有跟单位（.card .u）同样式' }
 
-# ---------- 5g-2. 2.1.10 报告元数据：帧数据源单一口径 ----------
+# ---------- 5g-2. 2.1.9 报告元数据：帧数据源单一口径 ----------
 if ($engPs -notmatch '\$FpsSource = ''presentmon''') { Bad '引擎缺 FpsSource 参数（报告无法标注帧数据源）' }
 if ($engPs -notmatch 'fps_source = \$FpsSource') { Bad '引擎报告 environment 缺 fps_source 字段' }
 if ($engPs -notmatch '-FpsSource') { Bad '引擎自我提权时没有透传 FpsSource' }
@@ -378,7 +378,7 @@ elseif ($navPages[1] -ne 'reports' -or $navPages[2] -ne 'realtime') { Bad "侧�
 
 # 版本清单一致性：2.1.x 每个 CHANGELOG 版本都必须有更新公告条目，反之亦然。
 # 2.1.0 之前是「版本号重编号」前的历史段落（1.6–1.9 / 1.0），公告里本来就不收，不参与比对。
-# 这条守卫的由来：2.1.14 曾只写进 CHANGELOG、公告里被合并掉，用户看着就是「少了一版」。
+# 这条守卫的由来：2.1.13 曾只写进 CHANGELOG、公告里被合并掉，用户看着就是「少了一版」。
 $chgAll = Get-Content (Join-Path $root 'CHANGELOG.md') -Raw -Encoding UTF8
 $chgVers = @([regex]::Matches($chgAll, '(?m)^## ([0-9]+\.[0-9]+\.[0-9]+)') |
     ForEach-Object { $_.Groups[1].Value } | Where-Object { [version]$_ -ge [version]'2.1.0' })
@@ -682,7 +682,7 @@ $reg       = $regJson | ConvertFrom-Json
 # 注册表：结构与「如实发布」（批次 D 起 RTSS 为首个 available=true 的真实扩展）
 if (@($reg.extensions).Count -lt 1) { Bad 'extensions.json 没有任何扩展条目' }
 $published = @($reg.extensions | Where-Object { $_.available -eq $true })
-# v2.1.11：可发布的条目 = 1 个可安装扩展（rtss-shm）+ 1 个内置能力（cpu-sensor）。
+# v2.1.10：可发布的条目 = 1 个可安装扩展（rtss-shm）+ 1 个内置能力（cpu-sensor）。
 # 内置能力没有 package、不参与供应层/看护；可安装扩展仍然只能有 rtss-shm 一个。
 $pubReal = @($published | Where-Object { -not $_.builtin })
 if ($pubReal.Count -ne 1 -or $pubReal[0].id -ne 'rtss-shm') {
@@ -692,7 +692,7 @@ if ($pubReal.Count -eq 1 -and ($pubReal[0].mode -ne 'external-shm' -or -not $pub
     Bad 'RTSS 应为 external-shm 模式且声明 shmName（不捆绑 payload）'
 }
 $cpuReg = @($published | Where-Object { $_.id -eq 'cpu-sensor' })
-if ($cpuReg.Count -ne 1) { Bad 'cpu-sensor 未以 available=true 发布（v2.1.11 起为内置能力）' }
+if ($cpuReg.Count -ne 1) { Bad 'cpu-sensor 未以 available=true 发布（v2.1.10 起为内置能力）' }
 else {
     if (-not $cpuReg[0].builtin) { Bad 'cpu-sensor 必须标记 builtin=true（随主程序提供，不安装）' }
     if ($cpuReg[0].package) { Bad 'cpu-sensor 不应有 package（不捆绑任何组件）' }
@@ -745,7 +745,7 @@ foreach ($hard in 'ftp.nluug.nl', '9B084A8CB3E', 'RTSSSetup737') {
 $mainPs = Get-Content (Join-Path $root 'src\app\90-Main.ps1') -Raw -Encoding UTF8
 if ($mainPs -notmatch 'Start-EnabledExtensions') { Bad '90-Main.ps1 缺启动自启钩子' }
 if ($mainPs -notmatch 'Stop-AllExtensionProcesses') { Bad '90-Main.ps1 缺退出清理钩子' }
-# 2.1.10 运行期看护（§10.5）：独立计时器 + 退出前先停，用户关闭有抑制窗
+# 2.1.9 运行期看护（§10.5）：独立计时器 + 退出前先停，用户关闭有抑制窗
 if ($mainPs -notmatch 'Invoke-ExtensionWatchdogTick') { Bad '90-Main.ps1 未接入扩展看护 tick' }
 if ($mainPs -notmatch '\$script:ExtWatchTimer\.Stop\(\)') { Bad '退出时未先停看护计时器（杀进程会被误判成崩溃重启）' }
 if ($extHostPs -notmatch 'function Invoke-ExtensionWatchdogTick') { Bad '80-Extensions.ps1 缺看护 tick 实现' }
@@ -938,7 +938,7 @@ foreach ($need in 'Get-MetricsCapabilities', 'Start-MetricsSampler', 'Stop-Metri
 }
 if ($metPs -notmatch 'MetricsIntervalMs = 1000') { Bad '实时监控采样间隔不是 1 秒' }
 if ($metPs -notmatch 'MetricsRingSize = 120') { Bad '实时监控环形缓冲不是 120 点' }
-if ($metPs -match 'cpuTemp = \$false') { Bad 'CPU 温度仍是恒 false 占位（v2.1.11 起应由真实样本校正）' }
+if ($metPs -match 'cpuTemp = \$false') { Bad 'CPU 温度仍是恒 false 占位（v2.1.10 起应由真实样本校正）' }
 if ($metPs -notmatch 'Get-VendorCpuTempSnapshot') { Bad 'CPU 温度未接入厂商固件通道' }
 if ($metPs -notmatch 'Get-CpuThrottleState') { Bad 'CPU 降频未接入 Windows 事件日志' }
 if ($metPs -notmatch 'VendorReaderCode' -or $metPs -notmatch 'ThrottleReaderCode') { Bad '采样 runspace 未注入平台/温度/降频模块源码' }
@@ -964,7 +964,7 @@ else {
 if ($metPs -notmatch 'type = ''metricSample''') { Bad '没有向界面推送 metricSample' }
 if ($metPs -notmatch 'type = ''metricsCaps''') { Bad '没有向界面推送 metricsCaps' }
 
-# ---------- 5n-2. 平台覆盖与数据源规则（v2.1.11） ----------
+# ---------- 5n-2. 平台覆盖与数据源规则（v2.1.10） ----------
 # 规则先行：没有规则文档就不允许有对应实现（防止「先写功能、后补口径」）
 $ruleDoc = Join-Path $root '数据源与平台覆盖规则.md'
 if (-not (Test-Path $ruleDoc)) { Bad '缺少《数据源与平台覆盖规则.md》（数据源必须先有规则）' }
@@ -1030,7 +1030,7 @@ foreach ($need in "cpuThermal", "cpuThrottleText", "'cpu.temp'", "'cpu.throttle'
     if ($repJs -notmatch [regex]::Escape($need)) { Bad "report.js 缺 CPU 温度/降频渲染：$need" }
 }
 
-# ---- 2.1.13 数据可信度与条件指纹 ----
+# ---- 2.1.12 数据可信度与条件指纹 ----
 # 判定模块必须是纯函数（探针直接 dot-source 它）：一旦混进 CIM / 事件日志 / 注册表读写就不可测了
 $qualMod = Join-Path $root 'src\app\quality-rules.ps1'
 if (-not (Test-Path -LiteralPath $qualMod)) { Bad '缺少 src\app\quality-rules.ps1' }
@@ -1065,7 +1065,7 @@ foreach ($qk in 'report.quality.blockedTitle', 'report.quality.cautionTitle', 'r
     if ($n -lt 3) { Bad "i18n 的 $qk 只有 $n 种语言（应 3）" }
 }
 
-# ---- 2.1.14 历史报告库 ----
+# ---- 2.1.13 历史报告库 ----
 $repMod = Join-Path $root 'src\app\62-Reports.ps1'
 if (-not (Test-Path -LiteralPath $repMod)) { Bad '缺少 src\app\62-Reports.ps1' }
 $repPs = if (Test-Path -LiteralPath $repMod) { Get-Content $repMod -Raw -Encoding UTF8 } else { '' }
@@ -1091,7 +1091,7 @@ if (-not (Test-Path -LiteralPath $repJsPath)) { Bad '缺少 ui\js\reports.js' } 
     }
     # 红线：条件不可比时不许出现百分比结论（必须有 blocked 分支）
     if ($repJsText -notmatch 'blocked\s*\?\s*') { Bad 'reports.js 缺「不可比就不给百分比」的分支' }
-    # 回归守卫（2.1.14 实测踩坑）：bridge 的 send() 只收一个对象，写成 send('cmd', {...}) 会被宿主静默丢弃
+    # 回归守卫（2.1.13 实测踩坑）：bridge 的 send() 只收一个对象，写成 send('cmd', {...}) 会被宿主静默丢弃
     if ($repJsText -match "send\(\s*'") { Bad 'reports.js 不得用 send(字符串, 参数)——bridge.send 只接受 {cmd:...} 对象' }
     if ($repJsText -notmatch 'function sendCmd') { Bad 'reports.js 缺 sendCmd 包装（消息体形状的唯一出口）' }
     if (-not (Test-Path (Join-Path $root 'tests\probe-reports-ui.js'))) { Bad '缺少 tests\probe-reports-ui.js（消息体形状探针）' }
@@ -1103,7 +1103,7 @@ foreach ($rk in 'nav.reports', 'reports.title', 'reports.cmpBlocked', 'reports.c
     if ($n -lt 3) { Bad "i18n 的 $rk 只有 $n 种语言（应 3）" }
 }
 
-# ---- 2.1.16 卡顿时刻快照 ----
+# ---- 2.1.15 卡顿时刻快照 ----
 $scMod = Join-Path $root 'src\app\stutter-context.ps1'
 if (-not (Test-Path -LiteralPath $scMod)) { Bad '缺少 src\app\stutter-context.ps1' }
 $scPs = if (Test-Path -LiteralPath $scMod) { Get-Content $scMod -Raw -Encoding UTF8 } else { '' }
@@ -1171,8 +1171,8 @@ if ($ovPs -notmatch 'locked = \[bool\]') { Bad 'overlayState 没有回传 locked
 if ($idx -notmatch 'id="ovLockDrag"') { Bad 'index.html 缺「禁用鼠标拖动」开关' }
 if ($rtJs -notmatch 'ovLockDrag') { Bad 'realtime.js 没有绑定拖动锁开关' }
 
-# 2.1.12：浮窗 CPU 温度不许再写死 locked。
-# 2.1.11 已接入厂商固件通道，写死会让联想机型「报告里有温度、浮窗却勾不上」。
+# 2.1.11：浮窗 CPU 温度不许再写死 locked。
+# 2.1.10 已接入厂商固件通道，写死会让联想机型「报告里有温度、浮窗却勾不上」。
 # 判定必须按平台能力动态算（非联想才灰掉），且要有独立的判定函数供状态回传复用。
 if ($ovPs -match 'key = ''cputemp''[^\r\n]*locked = \$true') {
     Bad '浮窗把 cputemp 写死 locked（应按平台能力判定）'

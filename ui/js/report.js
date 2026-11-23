@@ -11,7 +11,7 @@ function tile(k, v, unit, digits, extra) {
          `<div class="v">${f.v}${f.unit ? `<small>${f.unit}</small>` : ''}${tail}</div></div>`;
 }
 
-/** 数据可信度横幅（2.1.13）
+/** 数据可信度横幅（2.1.12）
  *  level = ok / unknown（模块缺失）时**什么都不输出** —— 没有触发项就不该占版面。
  *  文案只说明「影响了什么」，不下「数据完全不可用」的一刀切结论。
  *  未知 code 直接跳过：宁可少说一句，也不许猜一个解释。 */
@@ -39,7 +39,7 @@ function qualityBanner(r) {
          `<div class="rp-q-t">${escapeHtml(title)}</div>${lines}</div>`;
 }
 
-/** 卡顿时刻（2.1.16）：把 Top 卡顿与其前后 ±N 秒的机器状态并排列出来。
+/** 卡顿时刻（2.1.15）：把 Top 卡顿与其前后 ±N 秒的机器状态并排列出来。
  *  没有 context（老报告）或没有卡顿时返回空串 —— 不占版面、不写「无卡顿」这种结论。 */
 function stutterContextBlock(r) {
   const c = r && r.stutter && r.stutter.context;
@@ -175,7 +175,7 @@ function renderReport(r) {
     });
   }
 
-  /* ── 卡顿时刻（2.1.16）：Top N 卡顿前后 ±N 秒的机器状态 ──
+  /* ── 卡顿时刻（2.1.15）：Top N 卡顿前后 ±N 秒的机器状态 ──
      两路数据不同源，只能按采集进度比例对齐；容差必须写出来，不许说成精确对齐。 */
   html += stutterContextBlock(r);
 
@@ -264,7 +264,7 @@ function renderReport(r) {
 
   /* 图表要在 DOM 就位之后再画 */
   const cm = chartMetaFrom(r);           // 悬浮提示算时间轴要用
-  /* 卡顿位置（2.1.16）：把 Top 卡顿的百分比位置传给曲线，画成竖虚线 */
+  /* 卡顿位置（2.1.15）：把 Top 卡顿的百分比位置传给曲线，画成竖虚线 */
   const ctx2 = r.stutter && r.stutter.context;
   if (ctx2 && Array.isArray(ctx2.items) && ctx2.items.length) {
     const marks = ctx2.items.map((x) => Number(x && x.at_pct)).filter((v) => isFinite(v));
@@ -407,7 +407,7 @@ function presetCode(r, key) {
   }
   return t('report.presetUnknown', '无法确认档位');
 }
-/** CPU 温度/降频的汇总块（v2.1.11）：老报告没有这个字段，返回 null 而不是 0 */
+/** CPU 温度/降频的汇总块（v2.1.10）：老报告没有这个字段，返回 null 而不是 0 */
 function cpuThermal(r) {
   return (r && r.cpu_thermal && typeof r.cpu_thermal === 'object') ? r.cpu_thermal : null;
 }
@@ -507,7 +507,7 @@ const METRIC_TEXT = {
   'bottleneck.frameGen': (r) => runtimeState(r, 'feature.dlss.framegen'),
   'env.cpuModel': (r) => (r.environment && r.environment.cpu_model) || null,
   'env.gpuModel': (r) => (r.environment && r.environment.gpu_model) || null,
-  /* 条件指纹（2.1.13）：驱动/系统/BIOS 是「两次报告能不能直接比」的前提，缺了要说明而不是静默消失 */
+  /* 条件指纹（2.1.12）：驱动/系统/BIOS 是「两次报告能不能直接比」的前提，缺了要说明而不是静默消失 */
   'env.driverVersion': (r) => (r.environment && r.environment.driver_version) || null,
   'env.osVersion': (r) => {
     const e = (r && r.environment) || {};
@@ -557,7 +557,7 @@ const METRIC_TEXT = {
   'env.dlssPreset': (r) => presetCode(r, 'feature.dlssMode'),
   'env.fgPreset': (r) => presetCode(r, 'feature.framegenModeLevel'),
   'env.foreground': (r) => numText(r.foreground_pct, '%', 0),
-  /* 帧数据源（2.1.10）：同一次采集只有一个来源。旧报告没有该字段时不显示这一行，
+  /* 帧数据源（2.1.9）：同一次采集只有一个来源。旧报告没有该字段时不显示这一行，
      不拿 PresentMon 冒充。扩展源只显示 id + 已标注，不猜它的内部实现。 */
   'env.fpsSource': (r) => {
     const s = (r.environment && r.environment.fps_source) || r.fps_source;
@@ -867,7 +867,7 @@ function renderChart(id) {
     g.stroke();
   }
 
-  // 卡顿位置竖虚线（2.1.16）：只画在帧率/帧时间图上——其余图的 x 轴是样本序号，不代表时间
+  // 卡顿位置竖虚线（2.1.15）：只画在帧率/帧时间图上——其余图的 x 轴是样本序号，不代表时间
   if (isFrame && st.meta && Array.isArray(st.meta.marks) && st.meta.marks.length) {
     g.save();
     g.strokeStyle = colors.bad;

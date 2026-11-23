@@ -994,6 +994,18 @@ else {
     $mainPs18 = Get-Content (Join-Path $root 'src\app\90-Main.ps1') -Raw -Encoding UTF8
     if ($mainPs18 -notmatch 'Set-NetConsumer ''persist''') { Bad '90-Main 缺 persist 常驻消费者（今日/本月会漏算）' }
     if ($mainPs18 -notmatch 'Flush-NetStatsOnExit') { Bad '90-Main 退出时没有网络落盘' }
+    # 托盘与告警（P3）：托盘必须可释放；告警每日/每月各只一次；速率快照有 5 秒失效口径
+    foreach ($fn in 'Initialize-NetTray', 'Remove-NetTray', 'Update-NetTray', 'Show-NetAlert', 'Invoke-NetAlertCheck', 'Get-NetUiRates') {
+        if ($netPs -notmatch ('function ' + $fn)) { Bad "36-NetMetrics.ps1 缺函数 $fn" }
+    }
+    if ($netPs -notmatch '\.Dispose\(\)') { Bad '托盘图标退出时没有 Dispose' }
+    if ($netPs -notmatch 'NetAlertedDay -ne \$dayKey' -or $netPs -notmatch 'NetAlertedMonth -ne \$monKey') { Bad '流量告警缺每日/每月去重标记' }
+    if ($netPs -notmatch 'TotalSeconds -gt 5') { Bad '速率快照缺 5 秒失效口径（不许拿旧数冒充实时）' }
+    # 浮窗网络两项
+    $ovPs = Get-Content (Join-Path $root 'src\app\55-Overlay.ps1') -Raw -Encoding UTF8
+    foreach ($need in 'netdown', 'netup', '__netrecv', '__netsent', 'Get-NetUiRates') {
+        if ($ovPs -notmatch [regex]::Escape($need)) { Bad "55-Overlay.ps1 缺浮窗网络项 $need" }
+    }
     $ns = [regex]::Match($netPs, "(?s)\`$script:NetSampleScript = @'\r?\n(.*?)\r?\n'@")
     if (-not $ns.Success) { Bad '取不到网络内嵌采样脚本' }
     else {
@@ -1019,7 +1031,7 @@ if ($idx -notmatch 'js/network\.js') { Bad 'index.html 未加载 network.js' }
 $iNet = $idx.IndexOf('js/network.js')
 $iMain = $idx.IndexOf('js/main.js')
 if ($iNet -lt 0 -or $iMain -lt 0 -or $iNet -gt $iMain) { Bad 'network.js 必须在 main.js 之前加载' }
-foreach ($nk in 'nav.network', 'net.title', 'net.desc', 'net.stateOn', 'net.stateOff', 'net.totalRecv', 'net.totalSent', 'net.totals', 'net.kind.wifi', 'net.kind.virtual', 'net.status.Up', 'net.caliber', 'net.today', 'net.month', 'net.histTitle', 'net.histDays', 'net.histMonths', 'net.histEmpty') {
+foreach ($nk in 'nav.network', 'net.title', 'net.desc', 'net.stateOn', 'net.stateOff', 'net.totalRecv', 'net.totalSent', 'net.totals', 'net.kind.wifi', 'net.kind.virtual', 'net.status.Up', 'net.caliber', 'net.today', 'net.month', 'net.histTitle', 'net.histDays', 'net.histMonths', 'net.histEmpty', 'settings.net', 'settings.netAlert', 'settings.netAlertHint', 'settings.netDay', 'settings.netMonth') {
     $n2 = ([regex]::Matches($i18nText, [regex]::Escape("'" + $nk + "':"))).Count
     if ($n2 -lt 3) { Bad "i18n 缺 $nk（三语都要有，现仅 $n2 处）" }
 }

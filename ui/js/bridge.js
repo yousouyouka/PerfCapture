@@ -27,6 +27,11 @@ function handleMessage(msg) {
       if (s.seconds) $('#seconds').value = s.seconds;
       $('#chkMin').checked = s.minimize !== false;
       $('#chkSound').checked = s.sound !== false;
+      // 网络流量告警阈值（2.2.0）：0 = 关闭；非法值回落 0
+      const nd = Number(s.netAlertDayMB), nm = Number(s.netAlertMonthMB);
+      const dayEl = document.getElementById('netAlertDay'), monEl = document.getElementById('netAlertMonth');
+      if (dayEl) dayEl.value = (Number.isFinite(nd) && nd >= 0) ? nd : 0;
+      if (monEl) monEl.value = (Number.isFinite(nm) && nm >= 0) ? nm : 0;
 
       /* 顺序不能反：先按 capture-options.json 渲染出勾选框，再套用配置里保存的 skip。
          反过来的话，新增或改名的采集项会拿到错误状态。 */

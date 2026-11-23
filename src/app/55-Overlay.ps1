@@ -44,6 +44,9 @@ $script:OverlayItemDefs = @(
     @{ key = 'rlat';     group = '延迟'; label = 'RLAT';         unit = 'ms';  field = 'rlat' }
     @{ key = 'pcl';      group = '延迟'; label = 'PCL（av）';    unit = 'ms';  field = 'pcl' }
     @{ key = 'ram';      group = 'RAM';  label = 'RAM';          unit = '%';   field = '__ram' }
+    # 网络两项（2.2.0）：来自网络采样器的物理接口合计速率（Get-NetUiRates），与本采样器解耦
+    @{ key = 'netdown';  group = '网络';  label = '下载';         unit = '';    field = '__netrecv' }
+    @{ key = 'netup';    group = '网络';  label = '上传';         unit = '';    field = '__netsent' }
 )
 
 $script:OverlayItemKeys = @($script:OverlayItemDefs | ForEach-Object { $_.key })
@@ -62,7 +65,7 @@ function Get-OverlayLockedKeys {
 }
 $script:OverlayLockedKeys = @(Get-OverlayLockedKeys)
 $script:OverlaySelectableKeys = @($script:OverlayItemDefs | Where-Object { -not $_.locked -and $script:OverlayLockedKeys -notcontains $_.key } | ForEach-Object { $_.key })
-$script:OverlayGroupOrder = @('FPS', 'GPU', 'CPU', '延迟', 'RAM')
+$script:OverlayGroupOrder = @('FPS', 'GPU', 'CPU', '延迟', 'RAM', '网络')
 
 # 首次开启时的默认显示项（想只看 FPS 就在设置里全关掉、只留一项）
 $script:OverlayDefaultItems = @('fps', 'gpuutil', 'gputemp', 'gpupower', 'ram')
@@ -439,6 +442,14 @@ function Save-OverlayPosition {
 function Format-OverlayItemValue {
     param($Def, $S)
     if ($Def.locked) { return $null }
+    # 网络两项不来自指标样本：取网络采样器的物理接口合计速率；超过 5 秒没更新按 N/A 处理
+    if ($Def.field -eq '__netrecv' -or $Def.field -eq '__netsent') {
+        $r = $null
+        if (Get-Command Get-NetUiRates -ErrorAction SilentlyContinue) { $r = Get-NetUiRates }
+        if (-not $r) { return $null }
+        $v = if ($Def.field -eq '__netrecv') { [double]$r.recv } else { [double]$r.sent }
+        return Format-NetRateText $v
+    }
     if (-not $S) { return $null }
     $raw = $null
     if ($Def.field -eq '__ram') {

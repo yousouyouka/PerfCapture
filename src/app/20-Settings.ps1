@@ -12,6 +12,8 @@ function New-DefaultConfig {
         rtTargetPid = 0; rtTargetName = ''
         # 检查更新：auto 关掉后不再自动查；skippedVersion 是用户点过「跳过此版本」的版本号
         updateCheck = @{ auto = $true; lastCheckAt = ''; skippedVersion = '' }
+        # 网络流量告警（2.2.0）：今日/本月累计（物理接口）超过阈值（MB）时提醒一次；0 = 关闭
+        netAlertDayMB = 0; netAlertMonthMB = 0
         # 浮窗：items 是 16 项逐项勾选（老配置的 metrics 四族会一次性迁移过来，见 55-Overlay.ps1）
         overlay     = @{ visible = $false; x = -1; y = -1; opacity = 0; collapsed = $false; anchor = 'tr'; px = 100; py = 0; fontSize = 'normal'; fontColor = 'white'; layout = 'linear'; items = @('fps', 'gpuutil', 'gputemp', 'gpupower', 'ram'); hotkey = @{ ctrl = $true; alt = $true; shift = $false; key = 'M' } }
         # 扩展中心：id -> 状态对象（status/reason/installedAt/updatedAt）。老配置没有就空表。
@@ -83,6 +85,14 @@ function Set-ConfigValue {
             if ($null -ne $n -and $n -ge 640 -and $n -le 10000) { $script:Cfg.windowH = $n }
             else { Write-AppLog ("配置 windowH=$Value 越界，已忽略") 'WARN' }
         }
+        { $_ -in @('netAlertDayMB', 'netAlertMonthMB') } {
+            # 0 = 关闭；上限 1,000,000 MB（约 1 TB）足够任何家用场景
+            $n = ConvertTo-ConfigInt $Value
+            if ($null -ne $n -and $n -ge 0 -and $n -le 1000000) {
+                if ($_ -eq 'netAlertDayMB') { $script:Cfg.netAlertDayMB = $n } else { $script:Cfg.netAlertMonthMB = $n }
+            }
+            else { Write-AppLog ("配置 $_=$Value 越界（0-1000000），已忽略") 'WARN' }
+        }
         default { Write-AppLog ("未知配置项 $Key，已忽略") 'WARN' }
     }
 }
@@ -95,7 +105,8 @@ if (Test-Path $script:CfgPath) {
         # 与 60-Capture.ps1 的 saveSettings 白名单保持一致：preset / customBase / warmup
         # 以前只写不读，重启后又被默认值覆盖（用户选的档位与预热时长静默丢失）。
         foreach ($k in 'theme', 'language', 'seconds', 'minimize', 'sound', 'skip',
-                       'preset', 'customBase', 'warmup', 'lastPid', 'windowW', 'windowH') {
+                       'preset', 'customBase', 'warmup', 'lastPid', 'windowW', 'windowH',
+                       'netAlertDayMB', 'netAlertMonthMB') {
             if ($null -ne $j.$k) { Set-ConfigValue $k $j.$k }
         }
         # 实时监控目标进程（新增键，老配置没有就用默认 0 = 跟随前台）

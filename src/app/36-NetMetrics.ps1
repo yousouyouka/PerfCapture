@@ -140,6 +140,10 @@ $script:NetDayKey = ''           # 正在累加的日期
 $script:NetLastTotals = @{}      # ifIndex -> @{ r; s } 上一次计数器快照（求增量用）
 $script:NetMeta = @{}            # ifIndex -> @{ name; kind }（最近一次见到的分类）
 $script:NetLastFlush = $null
+$script:NetUiRates = $null       # @{ recv; sent; at } 物理接口合计速率快照（浮窗 / 托盘用）
+$script:NetTray = $null          # 托盘图标（tooltip 显示网速，balloon 弹告警）
+$script:NetAlertedDay = ''       # 本日已告警标记（每日最多提醒一次）
+$script:NetAlertedMonth = ''     # 本月已告警标记
 
 function Convert-NetDayNode($node) {
     $h = @{}
@@ -347,6 +351,123 @@ function Send-NetTotals {
     Send-ToUi @{ type = 'netTotals'; totals = (Get-NetTotalsSnapshot) }
 }
 
+# ---------- 浮窗 / 托盘用的速率快照 ----------
+# 物理接口合计；超过 5 秒没更新就视为失效（返回 $null → 界面显示 N/A，不拿旧数冒充实时）
+function Get-NetUiRates {
+    $u = $script:NetUiRates
+    if (-not $u -or -not $u.at) { return $null }
+    try { if (((Get-Date) - $u.at).TotalSeconds -gt 5) { return $null } } catch { }
+    return @{ recv = [double]$u.recv; sent = [double]$u.sent }
+}
+
+function Update-NetUiRatesFromSample($sample) {
+    if (-not $sample -or -not $sample.ifs) { return }
+    $rr = 0.0; $ss = 0.0; $any = $false
+    foreach ($ifi in $sample.ifs) {
+        $idx = 0
+        try { $idx = [int]$ifi.ifIndex } catch { }
+        $kind = if ($script:NetMeta.ContainsKey($idx)) { [string]$script:NetMeta[$idx].kind } else { [string]$ifi.kind }
+        if ($kind -ne 'wifi' -and $kind -ne 'ethernet') { continue }
+        if ($null -ne $ifi.recvBps) { $rr += [double]$ifi.recvBps; $any = $true }
+        if ($null -ne $ifi.sentBps) { $ss += [double]$ifi.sentBps }
+    }
+    if (-not $any) { return }
+    $script:NetUiRates = @{ recv = $rr; sent = $ss; at = Get-Date }
+    Update-NetTray $rr $ss
+}
+
+# ---------- 托盘图标 ----------
+function Format-NetRateText([double]$Bps) {
+    if ($Bps -ge 1MB) { return ('{0:0.0} MB/s' -f ($Bps / 1MB)) }
+    if ($Bps -ge 1KB) { return ('{0:0.0} KB/s' -f ($Bps / 1KB)) }
+    return ('{0:0} B/s' -f $Bps)
+}
+
+function Initialize-NetTray {
+    if ($script:NetTray) { return }
+    try {
+        $tray = New-Object System.Windows.Forms.NotifyIcon
+        $tray.Visible = $true
+        try {
+            $ico = Join-Path $script:Root 'assets\app-icon.ico'
+            if (Test-Path $ico) { $tray.Icon = New-Object System.Drawing.Icon($ico) }
+        } catch { }
+        $tray.Text = 'PerfCapture'
+        $tray.Add_MouseClick({
+            param($s, $e)
+            if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
+                try {
+                    $f = $script:MainForm
+                    if ($f) {
+                        $f.Show(); $f.WindowState = 'Normal'; $f.Activate()
+                        try { $f.TopMost = $true; $f.TopMost = $false } catch { }
+                    }
+                } catch { }
+            }
+        })
+        $script:NetTray = $tray
+    } catch {
+        Write-AppLog ('托盘图标创建失败: ' + $_.Exception.Message) 'WARN'
+        $script:NetTray = $null
+    }
+}
+
+function Update-NetTray([double]$Recv, [double]$Sent) {
+    if (-not $script:NetTray) { return }
+    try {
+        $txt = 'PerfCapture · ↓' + (Format-NetRateText $Recv) + ' ↑' + (Format-NetRateText $Sent)
+        if ($script:NetTray.Text -ne $txt) { $script:NetTray.Text = $txt }
+    } catch { }
+}
+
+function Remove-NetTray {
+    if (-not $script:NetTray) { return }
+    try { $script:NetTray.Visible = $false; $script:NetTray.Dispose() } catch { }
+    $script:NetTray = $null
+}
+
+# ---------- 阈值告警 ----------
+# 今日/本月（物理接口，收+发）达到配置阈值时提醒；每日/每月各最多一次，重开程序不重复轰炸
+function Show-NetAlert([string]$Text) {
+    Write-AppLog ('网络流量告警: ' + $Text) 'WARN'
+    try {
+        if ($script:NetTray) {
+            $script:NetTray.BalloonTipTitle = 'PerfCapture · 流量提醒'
+            $script:NetTray.BalloonTipText = $Text
+            $script:NetTray.ShowBalloonTip(10000)
+        }
+    } catch { }
+    try { if (Get-Command Flash-PerfTaskbar -ErrorAction SilentlyContinue) { Flash-PerfTaskbar } } catch { }
+}
+
+function Invoke-NetAlertCheck {
+    $dayMB = 0; $monMB = 0
+    try { $dayMB = [int]$script:Cfg.netAlertDayMB } catch { }
+    try { $monMB = [int]$script:Cfg.netAlertMonthMB } catch { }
+    if ($dayMB -le 0 -and $monMB -le 0) { return }
+    $dayKey = (Get-Date).ToString('yyyy-MM-dd')
+    $monKey = (Get-Date).ToString('yyyy-MM')
+    if ($dayMB -gt 0 -and $script:NetAlertedDay -ne $dayKey) {
+        $today = Get-NetDaySum $script:NetDayKey
+        if ([double]$today.recv + [double]$today.sent -ge ($dayMB * 1MB)) {
+            $script:NetAlertedDay = $dayKey
+            Show-NetAlert ('今日流量已达 ' + $dayMB + ' MB，注意用量')
+        }
+    }
+    if ($monMB -gt 0 -and $script:NetAlertedMonth -ne $monKey) {
+        $mr = 0.0; $ms = 0.0
+        foreach ($k in $script:NetDays.Keys) {
+            if (-not $k.StartsWith($monKey)) { continue }
+            $d = Get-NetDaySum $k
+            $mr += [double]$d.recv; $ms += [double]$d.sent
+        }
+        if ([math]::Round($mr + $ms, 0) -ge ($monMB * 1MB)) {
+            $script:NetAlertedMonth = $monKey
+            Show-NetAlert ('本月流量已达 ' + $monMB + ' MB，注意用量')
+        }
+    }
+}
+
 # ---------- 能力表与采样调度 ----------
 function Build-NetCaps {
     $script:NetCaps = @{
@@ -416,6 +537,8 @@ function Invoke-NetTick {
         while ($script:NetQueue.TryDequeue([ref]$sample)) {
             $got = $true
             Add-NetSampleToAccum $sample
+            Update-NetUiRatesFromSample $sample
+            if (-not $script:NetTray) { Initialize-NetTray }
             [void]$script:NetSamples.Add($sample)
             if ($script:NetSamples.Count -gt $script:NetRingSize) {
                 [void]$script:NetSamples.RemoveAt(0)
@@ -430,11 +553,12 @@ function Invoke-NetTick {
         $script:NetRunning = $true
         if ($wantUi) { Send-NetCaps }
     }
-    # 持久化：内存累加，每 FlushSec 秒落盘一次（有增量才写）
+    # 持久化：内存累加，每 FlushSec 秒落盘一次（有增量才写）；落盘后顺手做一次阈值告警检查
     try {
         if ($script:NetDayAcc.Count -gt 0 -and
             ($null -eq $script:NetLastFlush -or ((Get-Date) - $script:NetLastFlush).TotalSeconds -ge $script:NetFlushSec)) {
             Flush-NetStats
+            Invoke-NetAlertCheck
             if ($wantUi) { Send-NetTotals }
         }
     } catch { }
@@ -487,6 +611,7 @@ function Set-NetConsumer([string]$Key, [bool]$On) {
 # ---------- 退出落盘（90-Main FormClosing 调用） ----------
 function Flush-NetStatsOnExit {
     try { Flush-NetStats } catch { }
+    Remove-NetTray
     Stop-NetSampler
 }
 

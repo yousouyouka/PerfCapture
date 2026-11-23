@@ -306,11 +306,29 @@
         </section>
 
         <section class="card">
+          <h2 class="card-title" data-i18n="settings.net">网络监控</h2>
+          <div class="setting-block">
+            <div class="setting-label">
+              <strong data-i18n="settings.netAlert">流量告警</strong>
+              <small data-i18n="settings.netAlertHint">今日 / 本月累计（物理接口）超过阈值时，托盘气泡与任务栏提醒一次；0 = 关闭</small>
+            </div>
+            <div class="setting-row">
+              <label class="field-label" for="netAlertDay" data-i18n="settings.netDay">每日阈值 (MB)</label>
+              <input id="netAlertDay" class="input input-num" type="number" min="0" max="1000000" step="100" value="0">
+            </div>
+            <div class="setting-row">
+              <label class="field-label" for="netAlertMonth" data-i18n="settings.netMonth">每月阈值 (MB)</label>
+              <input id="netAlertMonth" class="input input-num" type="number" min="0" max="1000000" step="100" value="0">
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
           <h2 class="card-title" data-i18n="settings.about">关于</h2>
           <div class="setting-block">
             <div class="setting-label">
               <strong>PerfCapture</strong>
-              <small>v2.1.17 · PresentMon ETW · 默认零注入</small>
+              <small>v2.2.0 · PresentMon ETW · 默认零注入</small>
             </div>
           </div>
 

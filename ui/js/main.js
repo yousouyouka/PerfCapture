@@ -141,11 +141,16 @@ function saveSettings() {
       warmup: (typeof currentWarmup === 'function') ? currentWarmup() : 0,
       theme: state.themeMode,
       language: state.language || LANG,
+      netAlertDayMB: parseInt($('#netAlertDay').value, 10) || 0,
+      netAlertMonthMB: parseInt($('#netAlertMonth').value, 10) || 0,
     },
   });
 }
 ['#seconds', '#chkMin', '#chkSound'].forEach(sel => {
   $(sel).addEventListener('change', () => { if (sel === '#seconds') markPresetCustom(); saveSettings(); });
+});
+['#netAlertDay', '#netAlertMonth'].forEach(sel => {
+  $(sel).addEventListener('change', () => saveSettings());
 });
 /* 勾选框是运行时渲染的，用事件委托，避免渲染顺序影响绑定 */
 $('.collect-grid').addEventListener('change', () => { markPresetCustom(); saveSettings(); });

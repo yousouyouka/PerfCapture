@@ -236,6 +236,10 @@ ok(ids.netConnBody.children.length === 0 && ids.netConnNoMatch.hidden === false,
 ok(ids.netConnHint.textContent.indexOf('0 / 共 2') >= 0, '筛选后显示「筛选后 0 / 共 2 条」', '实际 ' + ids.netConnHint.textContent);
 P.applyConnFilters('', '', '');
 ok(ids.netConnBody.children.length === 2 && ids.netConnNoMatch.hidden === true, '清空筛选恢复全部');
+/* 同一批连接、只改变 truncated：提示也要更新（key 必须含 truncated） */
+P.handle({ type: 'netSample', sample: { at: 'u', ifs: s1.sample.ifs, conns: conns, connTruncated: true } });
+ok(ids.netConnHint.textContent.indexOf('100') >= 0, '截断状态变化触发提示更新', '实际 ' + ids.netConnHint.textContent);
+P.handle({ type: 'netSample', sample: { at: 't', ifs: s1.sample.ifs, conns: conns, connTruncated: false } });
 ok(ids.netConnSearch.value === undefined || ids.netConnSearch.value === '', '筛选状态不写回输入框（刷新不重置）');
 /* 1 Hz 刷新期间筛选条件保持 */
 P.applyConnFilters('game', '', '');

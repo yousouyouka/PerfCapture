@@ -274,8 +274,9 @@ Assert ($r8.badges -ge 4) '口径表每层都有来源角标'
 Assert ($r8.totalBadges -eq 5) '汇总五个数字旁都有 L1 角标（实际 ' + $r8.totalBadges + '）'
 Assert ($r8.ph -ne '' -and $r8.ph -notmatch 'net\.') '搜索框占位文案已渲染（不是 key）'
 Assert ([double]$r8.openH -gt 80) '展开后口径表有实际高度（实际 ' + $r8.openH + '）'
-$r9 = Exec "(function(){ var zh=t('net.calL1'); setLanguage('en-US'); var en=t('net.calL1'); setLanguage('ja-JP'); var ja=t('net.calL1'); setLanguage('zh-CN'); return JSON.stringify({ zh: zh, en: en, ja: ja }); })()"
+$r9 = Exec "(function(){ var zh=t('net.calL1'); setLanguage('en-US'); var en=t('net.calL1'); var allOpt=document.querySelector('#netConnSvc option').textContent; setLanguage('ja-JP'); var ja=t('net.calL1'); setLanguage('zh-CN'); return JSON.stringify({ zh: zh, en: en, ja: ja, allOpt: allOpt }); })()"
 Assert ($r9.zh -ne '' -and $r9.en -ne '' -and $r9.ja -ne '' -and $r9.zh -ne $r9.en -and $r9.en -ne $r9.ja) '口径表三语文案齐全（zh/en/ja 各不相同）'
+Assert ($r9.allOpt -match 'All services') "语言切换后服务下拉首项也翻译（实际 '$($r9.allOpt)'）"
 
 if ($fail -eq 0) { Ok '网络页真 WebView2 自证全部通过' } else { Write-Host "失败 $fail 项" -ForegroundColor Red }
 try { $form.Dispose() } catch { }

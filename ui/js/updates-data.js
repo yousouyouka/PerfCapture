@@ -19,6 +19,16 @@ window.PerfUpdateAreas = ['capture', 'realtime', 'network', 'other'];
 
 window.PerfUpdates = [
   {
+    date: '2026-11-24', version: '2.2.7',
+    title: '批次 A 自检修正与启动兜底',
+    items: [
+      ['fix', '网络页切换到英文/日文后，服务筛选里的「全部服务」也会跟着切换（此前重建缓存命中，仍显示旧语言）。', 'network'],
+      ['fix', '连接快照被截断的状态变化现在会触发提示更新；TCP/UDP 分段补上 aria-pressed，读屏器可识别当前选项。', 'network'],
+      ['fix', '开机自启走兜底登录项前先清掉旧计划任务，避免同时拉起两份；自启失败路径不再叠加重复启动。', 'other'],
+      ['fix', '界面 ready 消息若因 WebView2 异常一直不来，8 秒后兜底执行后台初始化（扩展自启、自启校正、网络持久化不会永久跳过）。', 'other']
+    ]
+  },
+  {
     date: '2026-11-24', version: '2.2.6',
     title: '连接视图过滤与搜索、四层口径表',
     items: [

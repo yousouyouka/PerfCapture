@@ -333,7 +333,7 @@
     const active = !!(state.filters.q || state.filters.proto || state.filters.svc);
     const filtered = active ? list.filter(connMatches) : list;
     /* 稳定排序：TCP 在前，按远程端口分组无意义，保持采样顺序即可 */
-    const key = [state.filters.q, state.filters.proto, state.filters.svc,
+    const key = [state.filters.q, state.filters.proto, state.filters.svc, truncated ? '1' : '0',
       list.map((c) => [c.pr, c.p, c.lp, c.ra, c.rp, c.st, c.hn || '', c.n || '', c.sv || ''].join('|')).join('\n')
     ].join('\u0001');
     if (key === lastConnKey) return;
@@ -386,7 +386,9 @@
         const proto = b.getAttribute('data-proto') || '';
         if (pb.querySelectorAll) {
           Array.prototype.forEach.call(pb.querySelectorAll('[data-proto]'), (x) => {
-            if (x.classList) x.classList.toggle('is-on', x === b);
+            const on = (x === b);
+            if (x.classList) x.classList.toggle('is-on', on);
+            x.setAttribute('aria-pressed', on ? 'true' : 'false');
           });
         }
         applyConnFilters(state.filters.q, proto, state.filters.svc);
@@ -401,8 +403,11 @@
   /* 语言切换后重画 JS 生成的文案 */
   function refresh() {
     setRunning(state.running);
-    if (state.lastSample) { renderSample(state.lastSample); renderConns(state.lastSample.conns, !!(state.lastSample && state.lastSample.connTruncated)); }
-    if (lastTotals) renderTotals(lastTotals);
+    /* JS 生成的服务下拉不依赖完整样本：先单独重建，避免某次重绘异常把它留在旧语言 */
+    state.svcSig = '';
+    updateConnServices(state.conns || []);
+    try { if (state.lastSample) renderSample(state.lastSample); } catch (e) { }
+    if (lastTotals) { try { renderTotals(lastTotals); } catch (e2) { } }
   }
 
   window.PerfNetwork = { handle: handle, refresh: refresh, state: state, applyConnFilters: applyConnFilters };

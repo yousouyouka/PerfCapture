@@ -134,6 +134,9 @@ $form.Add_FormClosing({
     try {
         if ($script:ExtWatchTimer) { $script:ExtWatchTimer.Stop(); $script:ExtWatchTimer.Dispose(); $script:ExtWatchTimer = $null }
     } catch { }
+    try {
+        if ($script:BootFallbackTimer) { $script:BootFallbackTimer.Stop(); $script:BootFallbackTimer.Dispose(); $script:BootFallbackTimer = $null }
+    } catch { }
     # 退出时清掉所有在跑的扩展进程，绝不留孤儿（扩展隔离进程的兜底清理）
     try { if (Get-Command Stop-AllExtensionProcesses -ErrorAction SilentlyContinue) { Stop-AllExtensionProcesses } } catch { }
     try { $script:Mutex.ReleaseMutex() } catch { }
@@ -217,6 +220,22 @@ function Start-BootDeferred {
         $script:BootTimer.Start()
     } catch { Write-AppLog ('后台初始化计时器启动失败: ' + $_.Exception.Message) 'WARN' }
 }
+
+# 2.2.7：界面 ready 消息可能因 WebView2 异常永远不来。8 秒兜底跑一次后台初始化，
+# 否则扩展自启、自启校正、网络持久化会被永久跳过（首屏已经出来，兜底不影响观感）。
+try {
+    $script:BootFallbackTimer = New-Object System.Windows.Forms.Timer
+    $script:BootFallbackTimer.Interval = 8000
+    $script:BootFallbackTimer.Add_Tick({
+        $script:BootFallbackTimer.Stop()
+        $script:BootFallbackTimer.Dispose()
+        $script:BootFallbackTimer = $null
+        if ($script:BootDeferredDone -or $script:BootTimer) { return }
+        Write-AppLog '界面 ready 超时，走兜底初始化' 'WARN'
+        try { Invoke-DeferredStartup } catch { Write-AppLog ('后台初始化失败: ' + $_.Exception.Message) 'WARN' }
+    })
+    $script:BootFallbackTimer.Start()
+} catch { }
 
 # 主循环：$form.ShowDialog() 只在窗口被**用户关掉**时才应该返回。
 # 万一有代码路径让它提前返回（例如误把窗口设成不可见 —— 模态循环的条件就是"仍可见"），

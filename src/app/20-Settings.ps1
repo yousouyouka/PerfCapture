@@ -208,6 +208,8 @@ function Set-PerfAutoStart {
         Write-AppLog ('开机自启已开启（计划任务 · 最高权限 · 登录时）: ' + $exe + ' --autostart')
     } catch {
         # 兜底：写回 HKCU Run。这条路径登录时会弹 UAC，但总比完全不启动好。
+        # 先清掉可能残留的旧任务，避免「任务 + 登录项」同时拉起两份。
+        Remove-PerfAutoStartTask
         try {
             if (-not (Test-Path -LiteralPath $script:AutoStartRunKey)) { New-Item -Path $script:AutoStartRunKey -Force | Out-Null }
             $cmd = '"' + $exe + '" --autostart'

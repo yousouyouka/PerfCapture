@@ -21,6 +21,22 @@
 > 从 2.1.12 起（重编号后新构建）不再有此问题。git 历史本身未改写：tag 只是移动到同一提交，
 > 提交内容里的 `VERSION` 仍是当时的数字，读历史时以本表为准。
 
+## 2.2.5 — 2026-11-24
+
+> 2.2.4 验收反馈：开启开机自启后，登录时并未启动。
+
+- 根因：程序启动必须提权（PresentMon 依赖 ETW），但 `HKCU\...\Run` 只能以普通权限拉起。
+  登录时 Windows 先起 launcher → PowerShell → 10-Bootstrap 的 `Start-Process -Verb RunAs`，
+  此时 UAC 弹在登录瞬间，往往无人确认或根本不可见，进程被取消，表现为「开了自启却没启动」。
+- 修复：自启改用**计划任务** `PerfCapture-Autostart`：
+  - 触发：当前用户 `AtLogOn`；运行级别 `Highest`；交互式登录；
+  - 动作：`"<exe>" --autostart`，由 Windows 直接以管理员身份拉起，**不弹 UAC**；
+  - 每次启动按配置校正；任务已是最新（exe / 参数 / Highest）时不重复写入；
+  - 创建成功后删除旧的 `HKCU\...\Run\PerfCapture`，避免登录时启动两份；关闭开关时两者一起清理。
+- 计划任务创建失败（如非管理员/策略限制）时才退回 Run 登录项，日志明确写「登录时会弹 UAC」。
+- 探测：`tests/probe-tray-autostart.ps1` 增加计划任务守卫；`smoke.ps1` 钉住
+  `Register-ScheduledTask` / `RunLevel Highest` / `AtLogOn` / 任务名。
+
 ## 2.2.4 — 2026-11-23
 
 > 2.2.3 验收反馈：收起后任务栏仍挂着按钮。

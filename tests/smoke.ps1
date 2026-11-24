@@ -1241,8 +1241,12 @@ if ($setPsDef -notmatch '(?s)hotkeys\s*=\s*@\{.*?enabled\s*=\s*\$false') { Bad '
 # 2.2.2：关闭到托盘 / 开机自启（默认关闭，宿主侧是唯一事实来源）
 if ($setPsDef -notmatch 'closeToTray\s*=\s*\$false') { Bad '配置默认值缺 closeToTray = $false' }
 if ($setPsDef -notmatch 'autoStart\s*=\s*\$false') { Bad '配置默认值缺 autoStart = $false' }
-if ($setPsDef -notmatch 'CurrentVersion\\Run') { Bad '开机自启没有写 HKCU 的 Run 键' }
+if ($setPsDef -notmatch 'CurrentVersion\\Run') { Bad '开机自启兜底缺 HKCU Run 写入' }
 if ($setPsDef -notmatch '--autostart') { Bad '开机自启命令行缺 --autostart' }
+if ($setPsDef -notmatch 'Register-ScheduledTask') { Bad '开机自启必须用计划任务（Run 只能普通权限，登录会被 UAC 拦住）' }
+if ($setPsDef -notmatch 'RunLevel Highest') { Bad '开机自启计划任务必须是最高权限（否则登录仍会被 UAC 拦住）' }
+if ($setPsDef -notmatch 'AtLogOn') { Bad '开机自启计划任务缺登录触发' }
+if ($setPsDef -notmatch 'PerfCapture-Autostart') { Bad '开机自启计划任务名应为 PerfCapture-Autostart' }
 if ($capPs -notmatch "'closeToTray'") { Bad 'saveSettings 白名单缺 closeToTray' }
 if ($capPs -notmatch "'autoStart'") { Bad 'saveSettings 白名单缺 autoStart' }
 if ($mainPs -notmatch 'ForceExit') { Bad '90-Main.ps1 缺真正退出的 ForceExit 标记' }

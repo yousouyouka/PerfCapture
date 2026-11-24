@@ -123,46 +123,110 @@ function Set-ConfigValue {
     }
 }
 
-# ---------- 开机自启（2.2.2）----------
-# 只写 HKCU 的 Run 键（无需管理员、不装服务、不建计划任务）。
-# 配置是唯一事实来源：启动时按配置校正一次，用户切换开关时立即生效。
-function Get-PerfAutoStartCommand {
+# ---------- 开机自启（2.2.5）----------
+# 程序自身必须提权（PresentMon 需要 ETW），而 HKCU Run 只能以普通权限拉起：
+# 登录时先起 launcher，再被 10-Bootstrap 的 RunAs 拦在 UAC —— 登录瞬间往往没人点确认，
+# 于是「开了自启却没启动」。改用计划任务（登录触发 + RunLevel Highest），由 Windows 直接
+# 以管理员身份拉起，不弹 UAC。计划任务建不了时才退回 Run 登录项（会弹 UAC，日志明确标注）。
+$script:AutoStartTaskName = 'PerfCapture-Autostart'
+$script:AutoStartRunKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+
+function Get-PerfAutoStartExe {
     $candidates = @(
         (Join-Path $script:Root 'PerfCapture.exe'),
         (Join-Path $env:LOCALAPPDATA 'Programs\PerfCapture\PerfCapture.exe')
     )
     foreach ($p in $candidates) {
-        if ($p -and (Test-Path -LiteralPath $p)) { return ('"' + $p + '" --autostart') }
+        if ($p -and (Test-Path -LiteralPath $p)) { return $p }
     }
     return $null
 }
 
+function Remove-PerfAutoStartRunValue {
+    try {
+        if (Test-Path -LiteralPath $script:AutoStartRunKey) {
+            Remove-ItemProperty -Path $script:AutoStartRunKey -Name 'PerfCapture' -ErrorAction SilentlyContinue
+        }
+    } catch { }
+}
+
+function Remove-PerfAutoStartTask {
+    try {
+        if (-not (Get-Command Unregister-ScheduledTask -ErrorAction SilentlyContinue)) { return }
+        $t = Get-ScheduledTask -TaskName $script:AutoStartTaskName -ErrorAction SilentlyContinue
+        if ($t) { Unregister-ScheduledTask -TaskName $script:AutoStartTaskName -Confirm:$false -ErrorAction Stop }
+    } catch {
+        Write-AppLog ('删除开机自启任务失败: ' + $_.Exception.Message) 'WARN'
+    }
+}
+
+# 任务是否已经是「当前 exe + --autostart + 最高权限」：是就不重复写，避免每次启动都改计划任务
+function Test-PerfAutoStartTaskCurrent {
+    param([string]$Exe)
+    try {
+        $t = Get-ScheduledTask -TaskName $script:AutoStartTaskName -ErrorAction SilentlyContinue
+        if (-not $t) { return $false }
+        $a = @($t.Actions | Select-Object -First 1)
+        if (-not $a) { return $false }
+        $sameExe = ([string]$a.Execute -eq $Exe)
+        $sameArg = ([string]$a.Arguments).Trim() -eq '--autostart'
+        $highest = $false
+        try { $highest = ([string]$t.Principal.RunLevel -eq 'Highest') } catch { }
+        return ($sameExe -and $sameArg -and $highest)
+    } catch { return $false }
+}
+
 function Set-PerfAutoStart {
     param([bool]$Enabled)
-    $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+    if (-not $Enabled) {
+        Remove-PerfAutoStartTask
+        Remove-PerfAutoStartRunValue
+        Write-AppLog '开机自启已关闭（计划任务与登录项均已清理）'
+        return
+    }
+    $exe = Get-PerfAutoStartExe
+    if (-not $exe) {
+        Write-AppLog '开机自启：未找到 PerfCapture.exe（开发态），未写入计划任务' 'WARN'
+        return
+    }
+    if (Test-PerfAutoStartTaskCurrent $exe) {
+        # 已经是正确任务：顺手清掉 2.2.4 及更早写下的 Run 值，避免登录时启动两份
+        Remove-PerfAutoStartRunValue
+        return
+    }
     try {
-        if ($Enabled) {
-            $cmd = Get-PerfAutoStartCommand
-            if (-not $cmd) {
-                Write-AppLog '开机自启：未找到 PerfCapture.exe（开发态），未写入注册表' 'WARN'
-                return
-            }
-            if (-not (Test-Path -LiteralPath $runKey)) { New-Item -Path $runKey -Force | Out-Null }
-            Set-ItemProperty -Path $runKey -Name 'PerfCapture' -Value $cmd -Type String
-            Write-AppLog ('开机自启已开启: ' + $cmd)
-        } else {
-            if (Test-Path -LiteralPath $runKey) {
-                Remove-ItemProperty -Path $runKey -Name 'PerfCapture' -ErrorAction SilentlyContinue
-            }
-            Write-AppLog '开机自启已关闭'
-        }
+        if (-not (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue)) { throw 'ScheduledTasks 模块不可用' }
+        $userId = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+        $action = New-ScheduledTaskAction -Execute $exe -Argument '--autostart'
+        $trigger = New-ScheduledTaskTrigger -AtLogOn -User $userId
+        $principal = New-ScheduledTaskPrincipal -UserId $userId -LogonType Interactive -RunLevel Highest
+        $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+            -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero)
+        Register-ScheduledTask -TaskName $script:AutoStartTaskName -Action $action -Trigger $trigger `
+            -Principal $principal -Settings $settings -Force -ErrorAction Stop | Out-Null
+        Remove-PerfAutoStartRunValue
+        Write-AppLog ('开机自启已开启（计划任务 · 最高权限 · 登录时）: ' + $exe + ' --autostart')
     } catch {
-        Write-AppLog ('开机自启设置失败: ' + $_.Exception.Message) 'WARN'
+        # 兜底：写回 HKCU Run。这条路径登录时会弹 UAC，但总比完全不启动好。
+        try {
+            if (-not (Test-Path -LiteralPath $script:AutoStartRunKey)) { New-Item -Path $script:AutoStartRunKey -Force | Out-Null }
+            $cmd = '"' + $exe + '" --autostart'
+            Set-ItemProperty -Path $script:AutoStartRunKey -Name 'PerfCapture' -Value $cmd -Type String
+            Write-AppLog ('计划任务创建失败，已退回登录项（登录时会弹 UAC）: ' + $_.Exception.Message) 'WARN'
+        } catch {
+            Write-AppLog ('开机自启设置失败: ' + $_.Exception.Message) 'WARN'
+        }
     }
 }
 
 function Sync-PerfAutoStart {
-    Set-PerfAutoStart ([bool]$script:Cfg.autoStart)
+    if ([bool]$script:Cfg.autoStart) {
+        Set-PerfAutoStart $true
+    } else {
+        # 关闭态只清理、不创建；每次启动都执行也不会产生写入
+        Remove-PerfAutoStartTask
+        Remove-PerfAutoStartRunValue
+    }
 }
 
 # ---------- 载入 ----------

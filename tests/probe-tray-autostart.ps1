@@ -3,7 +3,7 @@
 # 只验证纯配置行为与源码守卫，不写真实注册表、不建窗口：
 #   - closeToTray / autoStart 默认关闭，且只接受布尔值
 #   - 开启 autoStart 时必须调用 Set-PerfAutoStart（桩函数记录调用）
-#   - 20-Settings.ps1 的自启实现只写 HKCU 的 Run 键、值名 PerfCapture、带 --autostart
+#   - 20-Settings.ps1 的自启实现用计划任务（RunLevel Highest + AtLogOn），并保留 HKCU Run 兜底
 #
 # 用法：powershell -NoProfile -ExecutionPolicy Bypass -File tests\probe-tray-autostart.ps1
 
@@ -50,12 +50,16 @@ Assert (@($script:AutoCalls).Count -eq 1 -and $script:AutoCalls[0] -eq $true) '�
 Set-ConfigValue 'autoStart' 'yes'
 Assert ($script:Cfg.autoStart -eq $true -and @($script:AutoCalls).Count -eq 1) 'autoStart 不接受字符串（不重复写注册表）' ('调用次数 ' + @($script:AutoCalls).Count)
 
-Write-Host '== 3. 注册表实现守卫 ==' -ForegroundColor Cyan
+Write-Host '== 3. 自启实现守卫 ==' -ForegroundColor Cyan
 $src = Get-Content (Join-Path $root 'src\app\20-Settings.ps1') -Raw -Encoding UTF8
-Assert ($src -match 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run') '只写 HKCU 的 Run 键（无需管理员）'
-Assert ($src -match "'PerfCapture'") '启动项值名为 PerfCapture'
-Assert ($src -match '--autostart') '启动命令行带 --autostart'
-Assert ($src -notmatch 'HKLM:|New-Service|schtasks') '不使用 HKLM / 服务 / 计划任务'
+Assert ($src -match 'Register-ScheduledTask') '自启使用计划任务（可最高权限启动，不弹 UAC）'
+Assert ($src -match 'RunLevel Highest') '计划任务运行级别为最高权限'
+Assert ($src -match 'AtLogOn') '计划任务在登录时触发'
+Assert ($src -match 'PerfCapture-Autostart') '任务名固定为 PerfCapture-Autostart'
+Assert ($src -match "'PerfCapture'") '兜底登录项值名为 PerfCapture'
+Assert ($src -match '--autostart') '启动参数带 --autostart'
+Assert ($src -match 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run') '保留 HKCU Run 作为兜底路径'
+Assert ($src -notmatch 'HKLM:|New-Service') '不使用 HKLM / 服务'
 Assert ($src -match 'function Sync-PerfAutoStart') '存在 Sync-PerfAutoStart（启动时按配置校正）'
 
 Write-Host ''

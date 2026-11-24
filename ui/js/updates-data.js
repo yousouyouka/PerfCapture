@@ -19,6 +19,13 @@ window.PerfUpdateAreas = ['capture', 'realtime', 'other'];
 
 window.PerfUpdates = [
   {
+    date: '2026-11-24', version: '2.2.5',
+    title: '修复开机自启不生效',
+    items: [
+      ['fix', '开机自启改为登录时触发的计划任务（最高权限）：原来写 HKCU Run 只能普通权限拉起，登录时会被提权 UAC 拦住，表现为「开了但没启动」。新方式由 Windows 直接以管理员启动，不弹 UAC；关闭开关会同时清理计划任务与旧登录项。', 'other']
+    ]
+  },
+  {
     date: '2026-11-23', version: '2.2.4',
     title: '托盘收起后任务栏不再残留',
     items: [

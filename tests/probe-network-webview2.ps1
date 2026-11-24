@@ -223,6 +223,60 @@ $r7 = Exec "(function(){ var t=document.getElementById('netToday').getBoundingCl
 Assert ([double]$r7.tl -lt [double]$r7.ml) "今日在本月左侧（今日左 $($r7.tl) / 本月左 $($r7.ml)）"
 Assert ([math]::Abs([double]$r7.tt - [double]$r7.mt) -lt 1) "今日与本月同一排（top $($r7.tt) / $($r7.mt)）"
 
+# ---- 7. 批次 A（2.2.6）：连接视图过滤与搜索 + 四层口径表 ----
+$null = Exec @'
+(function(){
+  PerfNetwork.handle({ type: 'netSample', caps: { running: true }, sample: { at: 'f1', ifs: [], conns: [
+    { p: 10, n: 'alpha', pr: 'TCP', la: '192.168.1.5', lp: 5000, ra: '203.0.113.9', rp: 443, st: 'ESTABLISHED', sv: 'HTTPS', hn: 'cdn.example.com' },
+    { p: 20, n: 'beta', pr: 'UDP', la: '0.0.0.0', lp: 5353, ra: '*', rp: 0, st: '', sv: 'mDNS', hn: '' }
+  ] } });
+  return true;
+})()
+'@
+Pump 200
+$r8 = Exec @"
+(function(){
+  PerfNetwork.applyConnFilters('alpha','','');
+  var q1 = document.querySelectorAll('#netConnBody tr').length;
+  PerfNetwork.applyConnFilters('','UDP','');
+  var q2 = document.querySelectorAll('#netConnBody tr').length;
+  PerfNetwork.applyConnFilters('','','mDNS');
+  var q3 = document.querySelectorAll('#netConnBody tr').length;
+  PerfNetwork.applyConnFilters('zzz','','');
+  var q4 = document.querySelectorAll('#netConnBody tr').length;
+  var noMatch = document.getElementById('netConnNoMatch').hidden;
+  var hint = document.getElementById('netConnHint').textContent;
+  PerfNetwork.applyConnFilters('','','');
+  var q5 = document.querySelectorAll('#netConnBody tr').length;
+  var d = document.getElementById('netCaliber');
+  d.open = true;
+  var rows = d.querySelectorAll('tbody tr').length;
+  var badges = d.querySelectorAll('.nt-src').length;
+  var totalBadges = document.querySelectorAll('.net-total-cell .nt-src').length;
+  var ph = document.getElementById('netConnSearch').placeholder;
+  return JSON.stringify({
+    q1: q1, q2: q2, q3: q3, q4: q4, q5: q5,
+    noMatch: noMatch, hint: hint,
+    rows: rows, badges: badges, totalBadges: totalBadges,
+    ph: ph,
+    openH: d.getBoundingClientRect().height
+  });
+})()
+"@
+Assert ($r8.q1 -eq 1) '搜索进程名只保留 1 行（实际 ' + $r8.q1 + '）'
+Assert ($r8.q2 -eq 1) 'UDP 筛选只保留 1 行（实际 ' + $r8.q2 + '）'
+Assert ($r8.q3 -eq 1) '服务标签筛选只保留 1 行（实际 ' + $r8.q3 + '）'
+Assert ($r8.q4 -eq 0 -and $r8.noMatch -eq $false) '无匹配时清空表格并显示空状态'
+Assert ($r8.hint -match '0\s*/\s*(共\s*)?2') "筛选计数显示 0 / 2（实际 '$($r8.hint)'）"
+Assert ($r8.q5 -eq 2) '清空筛选恢复全部 2 行'
+Assert ($r8.rows -eq 4) '口径表 L1–L4 共 4 行（实际 ' + $r8.rows + '）'
+Assert ($r8.badges -ge 4) '口径表每层都有来源角标'
+Assert ($r8.totalBadges -eq 5) '汇总五个数字旁都有 L1 角标（实际 ' + $r8.totalBadges + '）'
+Assert ($r8.ph -ne '' -and $r8.ph -notmatch 'net\.') '搜索框占位文案已渲染（不是 key）'
+Assert ([double]$r8.openH -gt 80) '展开后口径表有实际高度（实际 ' + $r8.openH + '）'
+$r9 = Exec "(function(){ var zh=t('net.calL1'); setLanguage('en-US'); var en=t('net.calL1'); setLanguage('ja-JP'); var ja=t('net.calL1'); setLanguage('zh-CN'); return JSON.stringify({ zh: zh, en: en, ja: ja }); })()"
+Assert ($r9.zh -ne '' -and $r9.en -ne '' -and $r9.ja -ne '' -and $r9.zh -ne $r9.en -and $r9.en -ne $r9.ja) '口径表三语文案齐全（zh/en/ja 各不相同）'
+
 if ($fail -eq 0) { Ok '网络页真 WebView2 自证全部通过' } else { Write-Host "失败 $fail 项" -ForegroundColor Red }
 try { $form.Dispose() } catch { }
 if ($fail -gt 0) { exit 1 } else { exit 0 }

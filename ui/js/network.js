@@ -10,6 +10,11 @@
     lastSample: null,
     history: new Map(),            // ifIndex -> { recv: [], sent: [] }
     rows: new Map(),               // ifIndex -> { card, recvV, sentV, totV, pathR, pathS, statusEl }
+    /* 2.2.6 连接视图：筛选条件与最近一次快照都留在页面状态里（1 Hz 刷新不重置） */
+    conns: [],
+    connTruncated: false,
+    filters: { q: '', proto: '', svc: '' },
+    svcSig: ''
   };
 
   function $(id) { return document.getElementById(id); }
@@ -63,6 +68,7 @@
     head.appendChild(status);
     const link = el('span', 'nt-link', ifi.linkSpeed || '');
     head.appendChild(link);
+    head.appendChild(el('em', 'nt-src', 'L1'));
     card.appendChild(head);
 
     const rates = el('div', 'nt-rates');
@@ -255,27 +261,85 @@
     observer.observe(page, { attributes: true, attributeFilter: ['hidden'] });
   }
 
-  /* ---- 连接/会话视图（L3 口径：只列「现在谁连着谁」，不计字节）---- */
+  /* ---- 连接/会话视图（L3 口径：只列「现在谁连着谁」，不计字节）----
+     2.2.6 过滤与搜索：只过滤渲染层（state.conns → render），
+     不碰 1 Hz 采样与宿主协议；条件保存在 state.filters，刷新不会把输入清掉。 */
   let lastConnKey = '';
   const CONN_MAX = 60;
+
+  function connMatches(c) {
+    const f = state.filters;
+    if (f.proto && String(c.pr || '').toUpperCase() !== f.proto) return false;
+    if (f.svc && String(c.sv || '') !== f.svc) return false;
+    if (!f.q) return true;
+    const hay = [
+      c.n, c.pr, c.sv, c.hn, c.la, c.ra,
+      (c.la != null ? String(c.la) + ':' + String(c.lp == null ? '' : c.lp) : ''),
+      (c.ra != null ? String(c.ra) + ':' + String(c.rp == null ? '' : c.rp) : ''),
+      String(c.lp == null ? '' : c.lp), String(c.rp == null ? '' : c.rp),
+      'pid ' + String(c.p == null ? '' : c.p)
+    ].join(' ').toLowerCase();
+    return hay.indexOf(f.q) >= 0;
+  }
+
+  /* 服务下拉：按当前快照里真实出现过的标签生成；重建时保留用户选择 */
+  function updateConnServices(list) {
+    const sel = $('netConnSvc');
+    if (!sel) return;
+    const set = new Set();
+    for (const c of list) { if (c.sv) set.add(String(c.sv)); }
+    const arr = Array.from(set).sort();
+    const sig = arr.join('\u0001');
+    if (sig === state.svcSig) return;
+    state.svcSig = sig;
+    const keep = state.filters.svc;
+    while (sel.firstChild) sel.removeChild(sel.firstChild);
+    const all = document.createElement('option');
+    all.value = '';
+    all.textContent = t('net.connSvcAll', '全部服务');
+    sel.appendChild(all);
+    for (const s of arr) {
+      const o = document.createElement('option');
+      o.value = s;
+      o.textContent = s;
+      sel.appendChild(o);
+    }
+    if (keep && arr.indexOf(keep) >= 0) {
+      sel.value = keep;
+    } else if (keep) {
+      state.filters.svc = '';
+      sel.value = '';
+      lastConnKey = '';
+    }
+  }
+
   function renderConns(conns, truncated) {
     const body = $('netConnBody'), empty = $('netConnEmpty'), hint = $('netConnHint');
+    const noMatch = $('netConnNoMatch');
     if (!body) return;
     const list = Array.isArray(conns) ? conns : [];
+    state.conns = list;
+    state.connTruncated = !!truncated;
+    updateConnServices(list);
     if (!list.length) {
       while (body.firstChild) body.removeChild(body.firstChild);
       if (empty) empty.hidden = false;
+      if (noMatch) noMatch.hidden = true;
       if (hint) hint.textContent = '';
       lastConnKey = '';
       return;
     }
     if (empty) empty.hidden = true;
+    const active = !!(state.filters.q || state.filters.proto || state.filters.svc);
+    const filtered = active ? list.filter(connMatches) : list;
     /* 稳定排序：TCP 在前，按远程端口分组无意义，保持采样顺序即可 */
-    const key = list.map((c) => [c.pr, c.p, c.lp, c.ra, c.rp, c.st, c.hn || ''].join('|')).join('\n');
+    const key = [state.filters.q, state.filters.proto, state.filters.svc,
+      list.map((c) => [c.pr, c.p, c.lp, c.ra, c.rp, c.st, c.hn || '', c.n || '', c.sv || ''].join('|')).join('\n')
+    ].join('\u0001');
     if (key === lastConnKey) return;
     lastConnKey = key;
     while (body.firstChild) body.removeChild(body.firstChild);
-    const shown = list.slice(0, CONN_MAX);
+    const shown = filtered.slice(0, CONN_MAX);
     for (const c of shown) {
       const tr = el('tr', 'nt-conn-row');
       const name = String(c.n || '') || ('PID ' + c.p);
@@ -287,13 +351,52 @@
       tr.appendChild(el('td', 'nt-conn-svc', String(c.sv || '')));
       body.appendChild(tr);
     }
-    const extra = list.length - shown.length;
+    if (noMatch) noMatch.hidden = filtered.length > 0;
     if (hint) {
-      hint.textContent = (truncated || extra > 0)
-        ? t('net.connTrunc', '快照最多 100 条，这里显示前 ' + shown.length + ' 条')
-        : t('net.connCount', '{n} 条').replace('{n}', String(list.length));
+      if (active) {
+        hint.textContent = t('net.connFiltered', '筛选后 {n} / 共 {m} 条')
+          .replace('{n}', String(filtered.length)).replace('{m}', String(list.length));
+      } else {
+        const extra = list.length - shown.length;
+        hint.textContent = (truncated || extra > 0)
+          ? t('net.connTrunc', '快照最多 100 条，这里显示前 ' + shown.length + ' 条')
+          : t('net.connCount', '{n} 条').replace('{n}', String(list.length));
+      }
     }
   }
+
+  /* 供输入框 / 分段按钮 / 服务下拉与探针调用 */
+  function applyConnFilters(q, proto, svc) {
+    state.filters.q = String(q == null ? '' : q).trim().toLowerCase();
+    state.filters.proto = String(proto == null ? '' : proto).toUpperCase();
+    state.filters.svc = String(svc == null ? '' : svc);
+    lastConnKey = '';
+    if (state.conns.length) renderConns(state.conns, state.connTruncated);
+  }
+
+  function initConnTools() {
+    const q = $('netConnSearch'), pb = $('netConnProto'), sv = $('netConnSvc');
+    if (q && q.addEventListener) {
+      q.addEventListener('input', () => applyConnFilters(q.value, state.filters.proto, state.filters.svc));
+    }
+    if (pb && pb.addEventListener) {
+      pb.addEventListener('click', (ev) => {
+        const b = (ev.target && ev.target.closest) ? ev.target.closest('[data-proto]') : null;
+        if (!b) return;
+        const proto = b.getAttribute('data-proto') || '';
+        if (pb.querySelectorAll) {
+          Array.prototype.forEach.call(pb.querySelectorAll('[data-proto]'), (x) => {
+            if (x.classList) x.classList.toggle('is-on', x === b);
+          });
+        }
+        applyConnFilters(state.filters.q, proto, state.filters.svc);
+      });
+    }
+    if (sv && sv.addEventListener) {
+      sv.addEventListener('change', () => applyConnFilters(state.filters.q, state.filters.proto, sv.value));
+    }
+  }
+  initConnTools();
 
   /* 语言切换后重画 JS 生成的文案 */
   function refresh() {
@@ -302,5 +405,5 @@
     if (lastTotals) renderTotals(lastTotals);
   }
 
-  window.PerfNetwork = { handle: handle, refresh: refresh, state: state };
+  window.PerfNetwork = { handle: handle, refresh: refresh, state: state, applyConnFilters: applyConnFilters };
 })();

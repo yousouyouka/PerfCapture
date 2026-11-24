@@ -15,9 +15,17 @@ window.PerfUpdateCategories = [
 ];
 
 /* 板块顺序 = 筛选条顺序；other 兜底（安装分发、文档、启动器等） */
-window.PerfUpdateAreas = ['capture', 'realtime', 'other'];
+window.PerfUpdateAreas = ['capture', 'realtime', 'network', 'other'];
 
 window.PerfUpdates = [
+  {
+    date: '2026-11-24', version: '2.2.6',
+    title: '连接视图过滤与搜索、四层口径表',
+    items: [
+      ['feature', '网络页「当前连接」新增搜索与筛选：按进程名 / 地址 / 端口搜索，可按 TCP/UDP 与服务标签过滤；只作用于渲染层，1 秒刷新不会重置条件。', 'network'],
+      ['feature', '新增可展开的 L1–L4 四层口径表：L1 接口总量、L2 进程归因、L3 连接快照、L4 外部深挖；下行/上行/累计/今日/本月与连接视图旁都有来源角标。', 'network']
+    ]
+  },
   {
     date: '2026-11-24', version: '2.2.5',
     title: '修复开机自启不生效',

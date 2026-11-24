@@ -466,10 +466,10 @@ if (($catKeys.Count -eq 9) -and -not $badKeys) { Ok "条目分类都是改动方
 if ($dataJs -notmatch 'window\.PerfUpdateAreas') { Bad 'updates-data.js 缺 PerfUpdateAreas（板块表）' }
 $areaList = [regex]::Match($dataJs, '(?s)window\.PerfUpdateAreas = \[(.*?)\]').Groups[1].Value
 $areaKeys = [regex]::Matches($areaList, "'([a-z]+)'") | ForEach-Object { $_.Groups[1].Value }
-if (($areaKeys -join ',') -ne 'capture,realtime,other') { Bad "板块表不对：$($areaKeys -join ',')" }
+if (($areaKeys -join ',') -ne 'capture,realtime,network,other') { Bad "板块表不对：$($areaKeys -join ',')" }
 $badAreas = [regex]::Matches($dataJs, ",\s*'([a-z]+)'\]") | ForEach-Object { $_.Groups[1].Value } | Where-Object { $areaKeys -notcontains $_ } | Select-Object -Unique
 if ($badAreas) { Bad "条目用了板块表外的键：$($badAreas -join ',')" }
-$areaTagged = ([regex]::Matches($dataJs, "(?m)^\s*\['[a-z]+',.+'(capture|realtime|other)'\],?\s*$")).Count
+$areaTagged = ([regex]::Matches($dataJs, "(?m)^\s*\['[a-z]+',.+'(capture|realtime|network|other)'\],?\s*$")).Count
 if ($areaTagged -ne $itemKeys.Count) { Bad "条目板块标注数量不对：$areaTagged / $($itemKeys.Count)（每条都要标）" }
 else { Ok "每条改动都标了板块（$areaTagged / $($itemKeys.Count)）" }
 # 关于页的版本号必须跟着 VERSION 走

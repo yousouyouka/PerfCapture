@@ -172,8 +172,75 @@
 .nt-conn-proto { color: var(--accent); }
 .nt-conn-svc { color: var(--muted); }
 
-/* 口径说明 */
-.net-caliber { font-size: 0.66rem; color: var(--faint); margin: 0; line-height: 1.6; }
+/* 2.2.6：连接视图过滤工具行（只作用于渲染层，不改采样协议） */
+.nt-conn-tools {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 0.45rem;
+}
+.nt-conn-search {
+  flex: 1 1 12rem; min-width: 9rem; height: 1.9rem;
+  font-size: 0.72rem; padding: 0 0.6rem;
+}
+.nt-seg {
+  display: inline-flex; align-items: center; gap: 2px;
+  background: var(--tile); border: 1px solid var(--line);
+  border-radius: 8px; padding: 2px;
+}
+.nt-seg-btn {
+  border: 0; background: transparent; color: var(--muted);
+  font: inherit; font-size: 0.66rem; line-height: 1.4;
+  padding: 0.2rem 0.55rem; border-radius: 6px; cursor: pointer;
+}
+.nt-seg-btn:hover { color: var(--text); }
+.nt-seg-btn.is-on { background: var(--accent-soft); color: var(--accent); }
+.nt-conn-svcsel { height: 1.9rem; max-width: 11rem; font-size: 0.7rem; padding: 0 0.4rem; }
+
+/* 口径来源角标：L1/L2/L3/L4 */
+.nt-src {
+  font-style: normal; font-size: 0.56rem; line-height: 1;
+  color: var(--accent); background: var(--accent-soft);
+  border-radius: 4px; padding: 0.14rem 0.3rem;
+  margin-left: 0.28rem; vertical-align: middle;
+  letter-spacing: 0.02em;
+}
+
+/* 口径说明：可展开的四层表（§1.9） */
+.net-caliber {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  padding: 0 0.9rem;
+  font-size: 0.66rem; color: var(--muted);
+}
+.net-caliber > summary {
+  list-style: none; cursor: pointer;
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.65rem 0; font-size: 0.72rem; color: var(--text);
+}
+.net-caliber > summary::-webkit-details-marker { display: none; }
+.net-caliber > summary::before {
+  content: ''; width: 0.4rem; height: 0.4rem; flex: none;
+  border-right: 1.5px solid var(--faint); border-bottom: 1.5px solid var(--faint);
+  transform: rotate(-45deg); transition: transform 0.15s;
+}
+.net-caliber[open] > summary::before { transform: rotate(45deg); }
+.net-caliber[open] > summary { border-bottom: 1px solid var(--line); }
+.nt-caliber-lead {
+  margin: 0.55rem 0 0.35rem;
+  font-size: 0.66rem; color: var(--faint); line-height: 1.6;
+}
+.nt-cal-table { width: 100%; border-collapse: separate; border-spacing: 0; margin-bottom: 0.7rem; }
+.nt-cal-table th {
+  text-align: left; font-weight: 400; font-size: 0.62rem; color: var(--faint);
+  padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--line);
+}
+.nt-cal-table td {
+  padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--line);
+  font-size: 0.66rem; color: var(--muted); line-height: 1.55; vertical-align: top;
+}
+.nt-cal-table tr:last-child td { border-bottom: 0; }
+.nt-cal-table td:first-child { white-space: nowrap; }
+.nt-cal-table td:first-child .nt-src { margin-left: 0; margin-right: 0.28rem; }
 
 /* 网络页内的流量告警卡（2.2.1 从设置页移入；纵向排布避免文字遮挡） */
 .net-alertcard {

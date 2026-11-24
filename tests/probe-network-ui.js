@@ -20,6 +20,8 @@ class FakeEl {
     this.hidden = false; this.parentNode = null; this.style = {};
   }
   appendChild(c) { c.parentNode = this; this.children.push(c); return c; }
+  addEventListener() { }
+  querySelectorAll() { return []; }
   get textContent() { return this._text; }
   set textContent(v) { this._text = String(v); }
   setAttribute(k, v) { this.attrs[k] = String(v); }
@@ -49,7 +51,7 @@ class FakeEl {
 const ids = {};
 ['netState', 'netStateText', 'netTotalRecv', 'netTotalSent', 'netTotalAcc', 'netTotalScope', 'netIfs', 'netEmpty',
  'netToday', 'netMonth', 'netBarsDays', 'netBarsMonths', 'netHistEmpty',
- 'netConnBody', 'netConnEmpty', 'netConnHint'].forEach((id) => { ids[id] = new FakeEl('div'); });
+ 'netConnBody', 'netConnEmpty', 'netConnHint', 'netConnSearch', 'netConnProto', 'netConnSvc', 'netConnNoMatch'].forEach((id) => { ids[id] = new FakeEl('div'); });
 const pageEl = new FakeEl('section');
 pageEl.hidden = true;
 
@@ -215,6 +217,31 @@ ok(ids.netConnBody.children[0] === before, '连接未变化时不重建 DOM');
 P.handle({ type: 'netSample', sample: { at: 'z', ifs: s1.sample.ifs, conns: [], connTruncated: false } });
 ok(ids.netConnEmpty.hidden === false && ids.netConnBody.children.length === 0, '无连接时显示空状态');
 P.handle({ type: 'netSample', sample: { at: 'w', ifs: s1.sample.ifs, conns: conns, connTruncated: false } });
+
+/* ---- 2.2.6 过滤与搜索（只作用于渲染层） ---- */
+P.applyConnFilters('game', '', '');
+ok(ids.netConnBody.children.length === 1 && ids.netConnBody.children[0].children[0].textContent === 'game', '按进程名搜索');
+P.applyConnFilters('443', '', '');
+ok(ids.netConnBody.children.length === 1 && ids.netConnBody.children[0].children[4].textContent === 'HTTPS', '按远程端口搜索');
+P.applyConnFilters('203.0.113', '', '');
+ok(ids.netConnBody.children.length === 1, '按远程地址搜索');
+P.applyConnFilters('', 'UDP', '');
+ok(ids.netConnBody.children.length === 1 && ids.netConnBody.children[0].children[0].textContent === 'svchost', 'TCP/UDP 筛选');
+P.applyConnFilters('', 'TCP', '');
+ok(ids.netConnBody.children.length === 1 && ids.netConnBody.children[0].children[0].textContent === 'game', 'TCP 筛选');
+P.applyConnFilters('', '', 'HTTPS');
+ok(ids.netConnBody.children.length === 1 && ids.netConnBody.children[0].children[0].textContent === 'game', '服务标签筛选');
+P.applyConnFilters('nothing-matches', '', '');
+ok(ids.netConnBody.children.length === 0 && ids.netConnNoMatch.hidden === false, '无匹配时显示空状态');
+ok(ids.netConnHint.textContent.indexOf('0 / 共 2') >= 0, '筛选后显示「筛选后 0 / 共 2 条」', '实际 ' + ids.netConnHint.textContent);
+P.applyConnFilters('', '', '');
+ok(ids.netConnBody.children.length === 2 && ids.netConnNoMatch.hidden === true, '清空筛选恢复全部');
+ok(ids.netConnSearch.value === undefined || ids.netConnSearch.value === '', '筛选状态不写回输入框（刷新不重置）');
+/* 1 Hz 刷新期间筛选条件保持 */
+P.applyConnFilters('game', '', '');
+P.handle({ type: 'netSample', sample: { at: 'v', ifs: s1.sample.ifs, conns: conns, connTruncated: false } });
+ok(ids.netConnBody.children.length === 1, '1 Hz 刷新不重置筛选条件');
+P.applyConnFilters('', '', '');
 
 /* ---- 语言切换刷新不崩且重画 ---- */
 P.handle({ type: 'netSample', sample: s1.sample });

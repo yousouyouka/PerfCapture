@@ -19,6 +19,14 @@ window.PerfUpdateAreas = ['capture', 'realtime', 'network', 'other'];
 
 window.PerfUpdates = [
   {
+    date: '2026-11-25', version: '2.2.8',
+    title: '网络历史导出 CSV / JSON',
+    items: [
+      ['feature', '网络页「历史用量」新增导出：CSV 含日期、接口、收字节、发字节四列；JSON 与本地 days.json 同构，可直接给外部脚本用。', 'network'],
+      ['feature', '导出覆盖近 30 天、按日 × 接口的明细；没有历史数据时给出明确提示，不产出空文件。', 'network']
+    ]
+  },
+  {
     date: '2026-11-24', version: '2.2.7',
     title: '批次 A 自检修正与启动兜底',
     items: [

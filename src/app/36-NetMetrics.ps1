@@ -448,6 +448,34 @@ function Get-NetTotalsSnapshot {
         }
         [void]$monthsArr.Add(@{ m = $m; recv = [math]::Round($mr2, 0); sent = [math]::Round($ms2, 0) })
     }
+    # 按接口日明细（近 30 天，含今天未落盘增量）：历史导出用（2.2.8 批次 B）。
+    # 结构 date -> ifIndex -> {r,s}，与 days.json 的日节点同构；只输出有数据的日期，体积恒小。
+    $ifDays = [ordered]@{}
+    for ($i = 29; $i -ge 0; $i--) {
+        $dk = (Get-Date).Date.AddDays(-$i).ToString('yyyy-MM-dd')
+        $node = [ordered]@{}
+        if ($script:NetDays.ContainsKey($dk)) {
+            foreach ($idx in $script:NetDays[$dk].Keys) {
+                $node[[string]$idx] = @{
+                    r = [math]::Round([double]$script:NetDays[$dk][$idx].r, 0)
+                    s = [math]::Round([double]$script:NetDays[$dk][$idx].s, 0)
+                }
+            }
+        }
+        if ($dk -eq $script:NetDayKey -and $script:NetDayAcc.Count -gt 0) {
+            foreach ($idx in $script:NetDayAcc.Keys) {
+                $k2 = [string]$idx
+                $accR = [math]::Round([double]$script:NetDayAcc[$idx].r, 0)
+                $accS = [math]::Round([double]$script:NetDayAcc[$idx].s, 0)
+                if ($node.Contains($k2)) {
+                    $node[$k2] = @{ r = [double]$node[$k2].r + $accR; s = [double]$node[$k2].s + $accS }
+                } else {
+                    $node[$k2] = @{ r = $accR; s = $accS }
+                }
+            }
+        }
+        if ($node.Count -gt 0) { $ifDays[$dk] = $node }
+    }
     $metaOut = [ordered]@{}
     foreach ($idx in $script:NetMeta.Keys) {
         $metaOut[[string]$idx] = @{ name = $script:NetMeta[$idx].name; kind = $script:NetMeta[$idx].kind }
@@ -457,6 +485,7 @@ function Get-NetTotalsSnapshot {
         month = $month
         days  = $daysArr
         months= $monthsArr
+        ifDays= $ifDays
         meta  = $metaOut
     }
 }

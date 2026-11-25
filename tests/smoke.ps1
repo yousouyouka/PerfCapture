@@ -983,6 +983,7 @@ else {
     if ($netPs -notmatch 'ReceivedBytes' -or $netPs -notmatch 'SentBytes') { Bad '网络采样器缺收/发字节字段' }
     if ($netPs -notmatch 'type = ''netSample''') { Bad '网络采样器没有向界面推送 netSample' }
     if ($netPs -notmatch 'type = ''netTotals''') { Bad '网络采样器没有向界面推送 netTotals（今日/本月/历史）' }
+    if ($netPs -notmatch 'ifDays') { Bad '网络汇总快照缺 ifDays（历史导出会没有数据）' }
     foreach ($fn in 'Start-NetWorker', 'Stop-NetWorker', 'Set-NetConsumer', 'Invoke-NetCommand', 'Initialize-NetPersistence', 'Flush-NetStats', 'Save-NetDays') {
         if ($netPs -notmatch ('function ' + $fn)) { Bad "36-NetMetrics.ps1 缺函数 $fn" }
     }
@@ -1023,17 +1024,18 @@ if ($bridgeJs -notmatch 'case ''netSample''') { Bad 'bridge.js 缺 netSample 分
 # 2.2.1 根因回归：bridge 曾只转发 netSample/netCaps，netTotals 到不了界面 → 今日/本月/历史恒为「—」
 if ($bridgeJs -notmatch "case 'netTotals'") { Bad 'bridge.js 缺 netTotals 分发（今日/本月/历史会一直是「—」）' }
 $netJs = Get-Content (Join-Path $root 'ui\js\network.js') -Raw -Encoding UTF8
-foreach ($need in 'PerfNetwork', 'netStart', 'netStop', 'fmtRate', 'netSample') {
+foreach ($need in 'PerfNetwork', 'netStart', 'netStop', 'fmtRate', 'netSample', 'netExportCsv', 'ifDays') {
     if ($netJs -notmatch [regex]::Escape($need)) { Bad "network.js 缺 $need" }
 }
 if ($netJs -match 'setInterval\s*\(') { Bad 'network.js 不得用 setInterval（刷新由宿主 1 Hz 推送驱动）' }
 if ($netJs -match 'XMLHttpRequest|fetch\(') { Bad 'network.js 不得发起任何网络请求（数据全本地）' }
 if ($idx -notmatch 'css/network\.css') { Bad 'index.html 未加载 network.css' }
 if ($idx -notmatch 'js/network\.js') { Bad 'index.html 未加载 network.js' }
+if ($idx -notmatch 'netExportCsv' -or $idx -notmatch 'netExportJson') { Bad 'index.html 缺历史导出按钮（CSV/JSON）' }
 $iNet = $idx.IndexOf('js/network.js')
 $iMain = $idx.IndexOf('js/main.js')
 if ($iNet -lt 0 -or $iMain -lt 0 -or $iNet -gt $iMain) { Bad 'network.js 必须在 main.js 之前加载' }
-foreach ($nk in 'nav.network', 'net.title', 'net.desc', 'net.stateOn', 'net.stateOff', 'net.totalRecv', 'net.totalSent', 'net.totals', 'net.kind.wifi', 'net.kind.virtual', 'net.status.Up', 'net.caliber', 'net.alertHint', 'net.today', 'net.month', 'net.histTitle', 'net.histDays', 'net.histMonths', 'net.histEmpty', 'settings.net', 'settings.netAlert', 'settings.netAlertHint', 'settings.netDay', 'settings.netMonth', 'settings.hotkeysHint2', 'net.connTitle', 'net.colProc', 'net.colRemote', 'net.colSvc', 'net.connEmpty', 'settings.netDns', 'settings.netDnsHint', 'capture.item.nettraffic', 'report.net.title', 'report.net.unable') {
+foreach ($nk in 'nav.network', 'net.title', 'net.desc', 'net.stateOn', 'net.stateOff', 'net.totalRecv', 'net.totalSent', 'net.totals', 'net.kind.wifi', 'net.kind.virtual', 'net.status.Up', 'net.caliber', 'net.alertHint', 'net.today', 'net.month', 'net.histTitle', 'net.histDays', 'net.histMonths', 'net.histEmpty', 'settings.net', 'settings.netAlert', 'settings.netAlertHint', 'settings.netDay', 'settings.netMonth', 'settings.hotkeysHint2', 'net.connTitle', 'net.colProc', 'net.colRemote', 'net.colSvc', 'net.connEmpty', 'settings.netDns', 'settings.netDnsHint', 'net.exportCsv', 'net.exportJson', 'net.exportNoteEmpty', 'net.exportNoteDone', 'net.exportNoteFail', 'capture.item.nettraffic', 'report.net.title', 'report.net.unable') {
     $n2 = ([regex]::Matches($i18nText, [regex]::Escape("'" + $nk + "':"))).Count
     if ($n2 -lt 3) { Bad "i18n 缺 $nk（三语都要有，现仅 $n2 处）" }
 }

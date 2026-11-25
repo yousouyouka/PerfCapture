@@ -73,12 +73,17 @@ if ($sumT -gt 0) { Ok ('今日汇总有值: ' + $sumT) } else { Bad '今日汇�
 if ($sumM -ge $sumT) { Ok ('本月汇总 ≥ 今日: ' + $sumM) } else { Bad '本月汇总比今日还小' }
 if ($totals.days.Count -eq 30) { Ok '近 30 天序列完整' } else { Bad ('近 30 天序列异常: ' + $totals.days.Count) }
 if ($totals.months.Count -eq 12) { Ok '近 12 个月序列完整' } else { Bad ('近 12 个月序列异常: ' + $totals.months.Count) }
+# 2.2.8 批次 B：按接口日明细（历史导出数据源）
+if ($totals.ifDays -and $totals.ifDays.Keys.Count -ge 1) { Ok ('ifDays 按接口日明细含 ' + $totals.ifDays.Keys.Count + ' 天') } else { Bad 'ifDays 为空（历史导出会没有数据）' }
+$ifNode = if ($totals.ifDays -and $totals.ifDays.Contains($dayKey)) { $totals.ifDays[$dayKey] } else { $null }
+$ifRecv = if ($ifNode -and $ifNode.Contains('5')) { [double]$ifNode['5'].r } else { 0 }
+if ($ifRecv -ge 1000000) { Ok "ifDays 今日 WLAN 明细与落盘一致（recv=$ifRecv）" } else { Bad "ifDays 今日明细缺失或不对: recv=$ifRecv" }
 # 序列化自证：Send-ToUi 走 ConvertTo-Json，嵌套 List[object] 必须能原样出 JSON。
 # 注意 @($totals.days) 对 List[object] 会抛 Argument types do not match（断言会被静默跳过），
 # 取数量用 .Count，不要用 @() 包一层。
 $totalsJson = @{ type = 'netTotals'; totals = $totals } | ConvertTo-Json -Depth 6 -Compress
 $dayJsonCount = ([regex]::Matches($totalsJson, '"d":')).Count
-if ($totalsJson -match '"today"' -and $dayJsonCount -eq 30) { Ok "netTotals 可序列化为 JSON（30 天齐全，长度 $($totalsJson.Length)）" } else { Bad "netTotals JSON 序列化异常（Send-ToUi 会静默丢包）：days=$dayJsonCount" }
+if ($totalsJson -match '"today"' -and $totalsJson -match '"ifDays"' -and $dayJsonCount -eq 30) { Ok "netTotals 可序列化为 JSON（30 天齐全，长度 $($totalsJson.Length)）" } else { Bad "netTotals JSON 序列化异常（Send-ToUi 会静默丢包）：days=$dayJsonCount" }
 
 # ---- 7. netTotals / netCaps 推送时机：打开页面应立即收到一次 ----
 Set-NetConsumer 'page' $true
@@ -96,6 +101,11 @@ $uiNetSample = @($script:UiPushed | Where-Object { $_.type -eq 'netSample' })
 if ($uiNetSample.Count -ge 1) { Ok 'netSample 已推给 UI（页面打开状态）' } else { Bad 'netSample 未推给 UI（页面打开也看不到数字）' }
 $p0 = if ($uiNetSample.Count) { $uiNetSample[0] } else { $null }
 if ($p0 -and $p0.sample -and @($p0.sample.ifs).Count -ge 1 -and $p0.sample.ifs[0].recvBps -eq 3000) { Ok '推送样本的 ifs 字段完整（速率可渲染）' } else { Bad '推送样本 ifs 字段缺失或速率丢失' }
+# ifDays 必须把「今天还没落盘的增量」也算进去（导出不能少今天这一段）
+$totals2 = Get-NetTotalsSnapshot
+$ifNode2 = if ($totals2.ifDays -and $totals2.ifDays.Contains($dayKey)) { $totals2.ifDays[$dayKey] } else { $null }
+$ifRecv2 = if ($ifNode2 -and $ifNode2.Contains('5')) { [double]$ifNode2['5'].r } else { 0 }
+if ($ifRecv2 -gt $ifRecv) { Ok "ifDays 含今日未落盘增量（$ifRecv → $ifRecv2）" } else { Bad "ifDays 没算进今日增量: $ifRecv → $ifRecv2" }
 
 # ---- 9. 真实采样器（runspace）端到端：JSON 入队 → 宿主解析 ----
 # 说明：无头环境没有 WinForms 程序集，计时器起不来（真实应用里存在）——

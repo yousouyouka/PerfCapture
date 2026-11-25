@@ -8,15 +8,15 @@
 <link rel="stylesheet" href="css/layout.css">
 <link rel="stylesheet" href="css/components.css">
 <link rel="stylesheet" href="css/terminal.css">
-<link rel="stylesheet" href="css/report.css?v=2.2.7">
+<link rel="stylesheet" href="css/report.css?v=2.2.8">
 <link rel="stylesheet" href="css/popup.css">
 <link rel="stylesheet" href="css/updates.css">
 <link rel="stylesheet" href="css/survey.css">
 <!-- 2.1.8：扩展中心相关资源带版本查询，绕开 WebView2 持久 UDF 的旧缓存；后续改这些文件需同步递增查询串。 -->
-<link rel="stylesheet" href="css/extensions.css?v=2.2.7">
-<link rel="stylesheet" href="css/reports.css?v=2.2.7">
+<link rel="stylesheet" href="css/extensions.css?v=2.2.8">
+<link rel="stylesheet" href="css/reports.css?v=2.2.8">
 <link rel="stylesheet" href="css/realtime.css">
-<link rel="stylesheet" href="css/network.css?v=2.2.7">
+<link rel="stylesheet" href="css/network.css?v=2.2.8">
 </head>
 <body>
 <div class="app" id="app">
@@ -92,7 +92,7 @@
           </svg>
           <span class="nav-label" data-i18n="nav.settings">设置</span>
         </button>
-        <div class="sidebar-version" id="sidebarVersion">v2.2.7</div>
+        <div class="sidebar-version" id="sidebarVersion">v2.2.8</div>
       </div>
     </nav>
   </aside>
@@ -312,7 +312,7 @@
           <div class="setting-block">
             <div class="setting-label">
               <strong>PerfCapture</strong>
-              <small>v2.2.7 · PresentMon ETW · 默认零注入</small>
+              <small>v2.2.8 · PresentMon ETW · 默认零注入</small>
             </div>
           </div>
 
@@ -566,6 +566,11 @@
             <h2 data-i18n="net.histTitle">历史用量</h2>
             <em class="nt-src">L1</em>
             <span class="nt-hint" data-i18n="net.histHint">物理接口合计 · 本地在写完一天后保留 400 天</span>
+            <div class="nt-hist-actions" data-i18n-title="net.exportScope" title="近 30 天 · 按日 × 接口明细">
+              <button type="button" class="nt-export-btn" id="netExportCsv" data-i18n="net.exportCsv">导出 CSV</button>
+              <button type="button" class="nt-export-btn" id="netExportJson" data-i18n="net.exportJson">导出 JSON</button>
+              <span class="nt-export-note" id="netExportNote" role="status" aria-live="polite"></span>
+            </div>
           </div>
           <div class="nt-hist-block">
             <span class="nt-hist-cap" data-i18n="net.histDays">近 30 天</span>
@@ -812,24 +817,24 @@
 
 <script src="js/util.js"></script>
 <!-- 与 css/extensions.css 同一缓存版本；宿主 Navigate 也带同一查询串。 -->
-<script src="js/i18n.js?v=2.2.7"></script>
+<script src="js/i18n.js?v=2.2.8"></script>
 <script src="js/capture-options.js"></script>
-<script src="js/bridge.js?v=2.2.7"></script>
+<script src="js/bridge.js?v=2.2.8"></script>
 <script src="js/theme.js"></script>
 <script src="js/popup.js"></script>
 <script src="js/capture-help.js"></script>
 <script src="js/terminal.js"></script>
 <script src="js/ui-state.js"></script>
-<script src="js/report.js?v=2.2.7"></script>
+<script src="js/report.js?v=2.2.8"></script>
 <script src="js/updates-data.js"></script>
 <script src="js/updates.js"></script>
 <script src="js/survey-data.js"></script>
 <script src="js/survey.js"></script>
-<script src="js/extensions-data.js?v=2.2.7"></script>
-<script src="js/extensions.js?v=2.2.7"></script>
-<script src="js/realtime.js?v=2.2.7"></script>
-<script src="js/network.js?v=2.2.7"></script>
-<script src="js/reports.js?v=2.2.7"></script>
+<script src="js/extensions-data.js?v=2.2.8"></script>
+<script src="js/extensions.js?v=2.2.8"></script>
+<script src="js/realtime.js?v=2.2.8"></script>
+<script src="js/network.js?v=2.2.8"></script>
+<script src="js/reports.js?v=2.2.8"></script>
 <script src="js/update.js"></script>
 <script src="js/collapse.js"></script>
 <script src="js/split.js"></script>

@@ -265,9 +265,21 @@
   padding: 0.7rem 0.9rem 0.9rem;
   display: flex; flex-direction: column; gap: 0.6rem;
 }
-.nt-hist-head { display: flex; align-items: baseline; gap: 0.6rem; }
+.nt-hist-head { display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap; }
 .nt-hist-head h2 { font-size: 0.86rem; margin: 0; color: var(--text-strong); }
 .nt-hint { font-size: 0.62rem; color: var(--faint); }
+
+/* 历史导出（2.2.8）：贴着标题行右侧，按钮与状态提示同一行 */
+.nt-hist-actions { margin-left: auto; display: flex; align-items: center; gap: 0.4rem; }
+.nt-export-btn {
+  border: 1px solid var(--line); background: var(--tile); color: var(--muted);
+  font: inherit; font-size: 0.64rem; line-height: 1.4;
+  padding: 0.16rem 0.5rem; border-radius: 8px; cursor: pointer;
+}
+.nt-export-btn:hover { color: var(--text); border-color: var(--line-strong); }
+.nt-export-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.nt-export-note { font-size: 0.62rem; color: var(--faint); }
+.nt-export-note:empty { display: none; }
 .nt-hist-block { display: flex; flex-direction: column; gap: 0.3rem; }
 .nt-hist-cap { font-size: 0.66rem; color: var(--muted); }
 

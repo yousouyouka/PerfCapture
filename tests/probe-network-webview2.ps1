@@ -120,7 +120,10 @@ $null = Exec @'
   /* 走真实 bridge 分发（不是直接调 PerfNetwork.handle）：2.2.1 的根因就是 bridge 漏转发 netTotals */
   handleMessage({ type: 'netTotals', totals: {
     today: { recv: 102400, sent: 10240 }, month: { recv: 3145728, sent: 524288 },
-    days: days, months: months, meta: {} } });
+    days: days, months: months,
+    ifDays: { '2026-11-22': { '5': { r: 1024, s: 100 } },
+              '2026-11-23': { '5': { r: 4096, s: 400 }, '20': { r: 2048, s: 200 } } },
+    meta: { '5': { name: 'WLAN', kind: 'wifi' }, '20': { name: 'Ethernet', kind: 'ethernet' } } } });
   return true;
 })()
 '@
@@ -277,6 +280,50 @@ Assert ([double]$r8.openH -gt 80) '展开后口径表有实际高度（实际 ' 
 $r9 = Exec "(function(){ var zh=t('net.calL1'); setLanguage('en-US'); var en=t('net.calL1'); var allOpt=document.querySelector('#netConnSvc option').textContent; setLanguage('ja-JP'); var ja=t('net.calL1'); setLanguage('zh-CN'); return JSON.stringify({ zh: zh, en: en, ja: ja, allOpt: allOpt }); })()"
 Assert ($r9.zh -ne '' -and $r9.en -ne '' -and $r9.ja -ne '' -and $r9.zh -ne $r9.en -and $r9.en -ne $r9.ja) '口径表三语文案齐全（zh/en/ja 各不相同）'
 Assert ($r9.allOpt -match 'All services') "语言切换后服务下拉首项也翻译（实际 '$($r9.allOpt)'）"
+
+# ---- 8. 批次 B（2.2.8）：历史导出 CSV / JSON ----
+$r10 = Exec @"
+(function(){
+  function rect(e){ if(!e) return null; var r=e.getBoundingClientRect(); return { l:r.left, r:r.right, w:r.width, h:r.height }; }
+  var c = document.getElementById('netExportCsv'), j = document.getElementById('netExportJson');
+  var n = document.getElementById('netExportNote'), card = document.querySelector('.net-hist');
+  window.__exp = {};
+  var okCsv = PerfNetwork.doExport('csv', function(name, text){ window.__exp.csv = { name: name, text: text }; return true; });
+  var okJson = PerfNetwork.doExport('json', function(name, text){ window.__exp.json = { name: name, text: text }; return true; });
+  var jo = window.__exp.json ? JSON.parse(window.__exp.json.text) : null;
+  return JSON.stringify({
+    csvLabel: c ? c.textContent.trim() : '', jsonLabel: j ? j.textContent.trim() : '',
+    insideCard: !!(card && c && card.contains(c) && card.contains(n)),
+    cb: rect(c), jb: rect(j), card: rect(card),
+    note: n ? n.textContent : '',
+    okCsv: okCsv, okJson: okJson,
+    csvName: window.__exp.csv ? window.__exp.csv.name : '',
+    csvBom: window.__exp.csv ? (window.__exp.csv.text.charCodeAt(0) === 0xFEFF) : false,
+    csvHead: window.__exp.csv ? window.__exp.csv.text.split('\r\n')[0].slice(1) : '',
+    csvRows: window.__exp.csv ? window.__exp.csv.text.split('\r\n').length : 0,
+    jsonMetaName: jo ? jo.__meta['5'].name : '',
+    jsonRecv: jo ? jo['2026-11-23']['5'].r : -1,
+    jsonDates: jo ? Object.keys(jo).filter(function(k){ return k !== '__meta'; }).join(',') : ''
+  });
+})()
+"@
+Assert ($r10.csvLabel -eq '导出 CSV') '导出 CSV 按钮文案已渲染（实际 ' + $r10.csvLabel + '）'
+Assert ($r10.jsonLabel -eq '导出 JSON') '导出 JSON 按钮文案已渲染（实际 ' + $r10.jsonLabel + '）'
+Assert ($r10.insideCard -eq $true) '导出按钮与状态提示都在历史用量卡内'
+Assert ([double]$r10.cb.w -gt 0 -and [double]$r10.jb.w -gt 0) '两个导出按钮都有实际尺寸'
+Assert ([double]$r10.cb.r -le ([double]$r10.card.r + 1)) '导出按钮不溢出历史卡右边界'
+Assert ($r10.okCsv -eq $true -and $r10.okJson -eq $true) 'CSV / JSON 导出路径都成功返回'
+Assert ($r10.csvName -match '^PerfCapture-net-\d{4}-\d{2}-\d{2}\.csv$') "CSV 文件名带日期（实际 '$($r10.csvName)'）"
+Assert ($r10.csvBom -eq $true) 'CSV 带 UTF-8 BOM（Excel 不乱码）'
+Assert ($r10.csvHead -eq 'date,interface,recv_bytes,sent_bytes') "CSV 表头为四列固定字段（实际 '$($r10.csvHead)'）"
+Assert ($r10.csvRows -ge 4) "CSV 含表头与 3 行明细（实际行数 $($r10.csvRows)）"
+Assert ($r10.jsonMetaName -eq 'WLAN') 'JSON __meta 使用接口名'
+Assert ([double]$r10.jsonRecv -eq 4096) 'JSON 日期节点 r 值与输入一致'
+Assert ($r10.jsonDates -eq '2026-11-22,2026-11-23') 'JSON 日期键升序且与 days.json 同构'
+Assert ($r10.note -match '2\s*天' -and $r10.note -match '2\s*个') "导出后状态提示含天数与接口数（实际 '$($r10.note)'）"
+$r11 = Exec "(function(){ setLanguage('ja-JP'); var a=document.getElementById('netExportCsv').textContent.trim(); setLanguage('zh-CN'); var b=document.getElementById('netExportCsv').textContent.trim(); return JSON.stringify({ ja: a, zh: b }); })()"
+Assert ($r11.ja -eq 'CSV 出力') "导出按钮跟随语言切换（实际 '$($r11.ja)'）"
+Assert ($r11.zh -eq '导出 CSV') '切回中文后导出按钮恢复中文'
 
 if ($fail -eq 0) { Ok '网络页真 WebView2 自证全部通过' } else { Write-Host "失败 $fail 项" -ForegroundColor Red }
 try { $form.Dispose() } catch { }

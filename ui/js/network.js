@@ -250,6 +250,103 @@
     }
   }
 
+  /* ---- 历史导出（2.2.8 · 批次 B）：近 30 天按日 × 接口明细 ----
+     数据来自宿主 netTotals.ifDays（date → ifIndex → {r,s}，与 days.json 日节点同构）+ meta（接口名/种类）。
+     CSV 固定四列：日期、接口、收字节、发字节；JSON 与 days.json 同构，外部脚本可直接吃。
+     导出走 Blob + <a download>，不经过宿主、不产生任何网络请求。 */
+  function exportRows() {
+    const t0 = lastTotals;
+    if (!t0 || !t0.ifDays) return [];
+    const meta = t0.meta || {};
+    const rows = [];
+    const dates = Object.keys(t0.ifDays).sort();
+    for (const d of dates) {
+      const node = t0.ifDays[d] || {};
+      const idxArr = Object.keys(node).sort((a, b) => (Number(a) || 0) - (Number(b) || 0));
+      for (const idx of idxArr) {
+        const cell = node[idx] || {};
+        const mi = meta[idx] || {};
+        rows.push({
+          d: d, idx: idx,
+          name: String(mi.name || ('if' + idx)),
+          recv: Number(cell.r || 0),
+          sent: Number(cell.s || 0)
+        });
+      }
+    }
+    return rows;
+  }
+
+  function csvCell(v) {
+    const s = String(v == null ? '' : v);
+    return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+  function buildCsv(rows) {
+    const lines = ['date,interface,recv_bytes,sent_bytes'];
+    for (const r of rows) lines.push([csvCell(r.d), csvCell(r.name), r.recv, r.sent].join(','));
+    return lines.join('\r\n') + '\r\n';
+  }
+  function buildJson(rows) {
+    const doc = { __meta: {} };
+    const meta = (lastTotals && lastTotals.meta) || {};
+    for (const idx of Object.keys(meta).sort((a, b) => (Number(a) || 0) - (Number(b) || 0))) {
+      doc.__meta[idx] = { name: String(meta[idx].name || ''), kind: String(meta[idx].kind || 'other') };
+    }
+    for (const r of rows) {
+      if (!doc[r.d]) doc[r.d] = {};
+      doc[r.d][r.idx] = { r: r.recv, s: r.sent };
+    }
+    return JSON.stringify(doc, null, 2) + '\n';
+  }
+
+  function stamp() {
+    const d = new Date();
+    const p = (n) => (n < 10 ? '0' + n : String(n));
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+  }
+  function download(name, text, mime) {
+    try {
+      const blob = new Blob([text], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = name; a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      /* 立即 revoke 会让部分引擎下载中断，留 2 秒再收尾 */
+      setTimeout(() => { try { a.remove(); URL.revokeObjectURL(url); } catch (e) { } }, 2000);
+      return true;
+    } catch (e) { return false; }
+  }
+  function setExportNote(txt) {
+    const n = $('netExportNote');
+    if (n) n.textContent = txt || '';
+  }
+  /* sink 仅供探针注入（默认真下载），真实点击路径不受影响 */
+  function doExport(kind, sink) {
+    const rows = exportRows();
+    if (!rows.length) { setExportNote(t('net.exportNoteEmpty', '暂无可导出的历史数据')); return false; }
+    const days = new Set(rows.map((r) => r.d)).size;
+    const ifs = new Set(rows.map((r) => r.idx)).size;
+    const write = (typeof sink === 'function') ? sink : download;
+    let ok;
+    if (kind === 'json') {
+      ok = write('PerfCapture-net-' + stamp() + '.json', buildJson(rows), 'application/json;charset=utf-8');
+    } else {
+      /* UTF-8 BOM：Excel 打开中文 / 日文接口名不乱码 */
+      ok = write('PerfCapture-net-' + stamp() + '.csv', '\ufeff' + buildCsv(rows), 'text/csv;charset=utf-8');
+    }
+    if (!ok) { setExportNote(t('net.exportNoteFail', '导出失败，请重试')); return false; }
+    setExportNote(t('net.exportNoteDone', '已导出 {n} 天 · {m} 个接口')
+      .replace('{n}', String(days)).replace('{m}', String(ifs)));
+    return true;
+  }
+  function initExportTools() {
+    const c = $('netExportCsv'), j = $('netExportJson');
+    if (c && c.addEventListener) c.addEventListener('click', () => doExport('csv'));
+    if (j && j.addEventListener) j.addEventListener('click', () => doExport('json'));
+  }
+  initExportTools();
+
   /* 进出页面自动启停（与 realtime.js 同款 MutationObserver） */
   const page = document.querySelector('.page[data-page="network"]');
   function startSampling() { if (typeof send === 'function') send({ cmd: 'netStart' }); }
@@ -408,7 +505,11 @@
     updateConnServices(state.conns || []);
     try { if (state.lastSample) renderSample(state.lastSample); } catch (e) { }
     if (lastTotals) { try { renderTotals(lastTotals); } catch (e2) { } }
+    setExportNote('');
   }
 
-  window.PerfNetwork = { handle: handle, refresh: refresh, state: state, applyConnFilters: applyConnFilters };
+  window.PerfNetwork = {
+    handle: handle, refresh: refresh, state: state, applyConnFilters: applyConnFilters,
+    exportRows: exportRows, buildCsv: buildCsv, buildJson: buildJson, doExport: doExport
+  };
 })();

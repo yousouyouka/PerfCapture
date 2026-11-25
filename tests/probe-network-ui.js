@@ -51,6 +51,7 @@ class FakeEl {
 const ids = {};
 ['netState', 'netStateText', 'netTotalRecv', 'netTotalSent', 'netTotalAcc', 'netTotalScope', 'netIfs', 'netEmpty',
  'netToday', 'netMonth', 'netBarsDays', 'netBarsMonths', 'netHistEmpty',
+ 'netExportCsv', 'netExportJson', 'netExportNote',
  'netConnBody', 'netConnEmpty', 'netConnHint', 'netConnSearch', 'netConnProto', 'netConnSvc', 'netConnNoMatch'].forEach((id) => { ids[id] = new FakeEl('div'); });
 const pageEl = new FakeEl('section');
 pageEl.hidden = true;
@@ -161,7 +162,12 @@ const totals1 = {
   today: { recv: 1024 * 100, sent: 1024 * 10 },
   month: { recv: 1024 * 1024 * 3, sent: 1024 * 1024 * 0.5 },
   days: Array.from({ length: 30 }, (_, i) => mkDay('2026-11-' + String(23 - i).padStart(2, '0'), i === 0 ? 1024 * 200 : 1024 * 50, 1024 * 5)),
-  months: Array.from({ length: 12 }, (_, i) => ({ m: '2026-' + String(12 - i).padStart(2, '0'), recv: 1024 * 1024 * 30, sent: 1024 * 1024 * 3 }))
+  months: Array.from({ length: 12 }, (_, i) => ({ m: '2026-' + String(12 - i).padStart(2, '0'), recv: 1024 * 1024 * 30, sent: 1024 * 1024 * 3 })),
+  ifDays: {
+    '2026-11-22': { '5': { r: 1024, s: 100 }, '20': { r: 2048, s: 200 } },
+    '2026-11-23': { '5': { r: 4096, s: 400 } }
+  },
+  meta: { '5': { name: 'WLAN', kind: 'wifi' }, '20': { name: '以太网', kind: 'ethernet' } }
 };
 P.handle({ type: 'netTotals', totals: totals1 });
 ok(ids.netToday.textContent === '110.0 KB', '今日 = 收+发合计（100K+10K → 110.0 KB）', '实际 ' + ids.netToday.textContent);
@@ -173,12 +179,42 @@ const firstBar = firstCol.children[0];
 ok(!!firstBar.querySelector('.nt-bar-r') && !!firstBar.querySelector('.nt-bar-s'), '柱内含收（accent）与发（good）两段');
 ok(firstCol.querySelector('.nt-bar-label').textContent.length === 5, '日柱标签为 MM-dd');
 ok(ids.netHistEmpty.hidden === true, '有数据时历史空状态隐藏');
+
+/* ---- 2.2.8 批次 B：历史导出（CSV / JSON） ---- */
+const rows1 = P.exportRows();
+ok(rows1.length === 3, '导出明细 3 行（2 天 × 接口）', '实际 ' + rows1.length);
+ok(rows1[0].d === '2026-11-22' && rows1[0].name === 'WLAN' && rows1[0].recv === 1024, '明细按日期升序、接口名取自 meta');
+const csv1 = P.buildCsv(rows1);
+ok(csv1.split('\r\n')[0] === 'date,interface,recv_bytes,sent_bytes', 'CSV 表头固定四列');
+ok(csv1.indexOf('2026-11-22,WLAN,1024,100\r\n') >= 0, 'CSV 数据行：日期,接口,收,发', csv1);
+const csvEsc = P.buildCsv([{ d: '2026-11-24', name: 'a,"b"', recv: 1, sent: 2 }]);
+ok(csvEsc.indexOf('"a,""b"""') >= 0, 'CSV 接口名含逗号/引号时按标准转义', csvEsc);
+const json1 = JSON.parse(P.buildJson(rows1));
+ok(json1.__meta['5'].name === 'WLAN' && json1.__meta['20'].kind === 'ethernet', 'JSON 带 __meta（名称/种类）');
+ok(json1['2026-11-23']['5'].r === 4096 && json1['2026-11-23']['5'].s === 400, 'JSON 日期节点与 days.json 同构（r/s）');
+ok(Object.keys(json1).filter((k) => k !== '__meta').join(',') === '2026-11-22,2026-11-23', 'JSON 日期键升序');
+let cap1 = null;
+const wrote1 = P.doExport('csv', (name, text) => { cap1 = { name: name, text: text }; return true; });
+ok(wrote1 === true && !!cap1 && /^PerfCapture-net-\d{4}-\d{2}-\d{2}\.csv$/.test(cap1.name), 'CSV 文件名带日期', cap1 && cap1.name);
+ok(!!cap1 && cap1.text.charCodeAt(0) === 0xFEFF && cap1.text.indexOf('date,interface') === 1, 'CSV 带 UTF-8 BOM（Excel 不乱码）');
+ok(ids.netExportNote.textContent === '已导出 2 天 · 2 个接口',
+  '导出后提示天数与接口数', ids.netExportNote.textContent);
+let cap2 = null;
+P.doExport('json', (name, text) => { cap2 = { name: name, text: text }; return true; });
+ok(!!cap2 && /\.json$/.test(cap2.name) && !!JSON.parse(cap2.text).__meta, 'JSON 导出内容可解析');
+const failWrote = P.doExport('csv', () => false);
+ok(failWrote === false && ids.netExportNote.textContent.indexOf('导出失败') >= 0, '写入失败时给出失败提示');
+
 /* 全零历史 → 空状态出现 */
 const zeroTotals = { today: { recv: 0, sent: 0 }, month: { recv: 0, sent: 0 },
   days: Array.from({ length: 30 }, () => mkDay('x', 0, 0)),
   months: Array.from({ length: 12 }, () => ({ m: 'y', recv: 0, sent: 0 })) };
 P.handle({ type: 'netTotals', totals: zeroTotals });
 ok(ids.netHistEmpty.hidden === false, '全零历史显示空状态');
+let capEmpty = null;
+const emptyWrote = P.doExport('csv', () => { capEmpty = true; return true; });
+ok(emptyWrote === false && capEmpty === null && ids.netExportNote.textContent.indexOf('暂无') >= 0,
+  '无历史数据时不产出文件并提示', ids.netExportNote.textContent);
 P.handle({ type: 'netTotals', totals: totals1 });
 
 /* ---- 消息链回归（2.2.1 根因）：bridge 必须把 netTotals 转发给 PerfNetwork ----

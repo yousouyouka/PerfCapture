@@ -774,6 +774,10 @@ function Show-NetAlert([string]$Text) {
         }
     } catch { }
     try { if (Get-Command Flash-PerfTaskbar -ErrorAction SilentlyContinue) { Flash-PerfTaskbar } } catch { }
+    # webhook（2.2.11）：只在开启且勾选「流量告警」时真正发请求
+    if (Get-Command Send-PerfWebhook -ErrorAction SilentlyContinue) {
+        try { Send-PerfWebhook 'netAlert' $Text } catch { }
+    }
 }
 
 function Invoke-NetAlertCheck {

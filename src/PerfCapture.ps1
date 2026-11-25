@@ -23,6 +23,7 @@ foreach ($f in @(
     '50-Host.ps1',
     '52-Hotkeys.ps1',
     '55-Overlay.ps1',
+    '58-Webhook.ps1',
     '60-Capture.ps1',
     '62-Reports.ps1',
     '68-UpdateWrapper.ps1',

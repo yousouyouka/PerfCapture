@@ -125,6 +125,8 @@ $form.Add_FormClosing({
     try { if (Get-Command Unregister-PerfHotkeys -ErrorAction SilentlyContinue) { Unregister-PerfHotkeys } } catch { }
     # 网络统计退出落盘：不落盘会丢掉最后一次落盘之后的全部增量
     try { if (Get-Command Flush-NetStatsOnExit -ErrorAction SilentlyContinue) { Flush-NetStatsOnExit } } catch { }
+    # webhook（2.2.11）：停计时器、结束未完成的后台发送，避免进程被后台 runspace 拖住
+    try { if (Get-Command Stop-PerfWebhookJobs -ErrorAction SilentlyContinue) { Stop-PerfWebhookJobs } } catch { }
     try {
         $script:Cfg.windowW = [int]($form.ClientSize.Width / $script:DpiScale)
         $script:Cfg.windowH = [int]($form.ClientSize.Height / $script:DpiScale)

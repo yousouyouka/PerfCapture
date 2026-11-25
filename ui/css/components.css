@@ -46,6 +46,12 @@
 }
 .unit { font-size: 0.82rem; color: var(--muted); }
 
+/* webhook 设置（2.2.11）：URL 输入占满一行；状态提示与按钮同行 */
+.webhook-url { width: 100%; font-size: 0.78rem; }
+.webhook-note { font-size: 0.66rem; color: var(--faint); }
+.webhook-note.is-ok { color: var(--accent); }
+.webhook-note.is-bad { color: var(--warn, var(--muted)); }
+
 /* 复选框：自绘，不用系统方块 */
 .check {
   display: inline-flex;

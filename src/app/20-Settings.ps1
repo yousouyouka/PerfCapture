@@ -22,6 +22,8 @@ function New-DefaultConfig {
         netKeepDays = 400
         # 反向 DNS（2.2.1）：连接视图里把远程 IP 解析成主机名；默认关（隐私优先）
         netReverseDns = $false
+        # webhook 通知（2.2.11）：默认关闭；只向白名单内的 HTTPS 地址发送文本摘要
+        webhook = @{ enabled = $false; url = ''; capture = $true; netAlert = $true }
         # 浮窗：items 是 16 项逐项勾选（老配置的 metrics 四族会一次性迁移过来，见 55-Overlay.ps1）
         overlay     = @{ visible = $false; x = -1; y = -1; opacity = 0; collapsed = $false; anchor = 'tr'; px = 100; py = 0; fontSize = 'normal'; fontColor = 'white'; layout = 'linear'; items = @('fps', 'gpuutil', 'gputemp', 'gpupower', 'ram'); hotkey = @{ ctrl = $true; alt = $true; shift = $false; key = 'M' } }
         # 扩展中心：id -> 状态对象（status/reason/installedAt/updatedAt）。老配置没有就空表。
@@ -133,6 +135,23 @@ function Set-ConfigValue {
             $script:Cfg.netAlertIfMB = $h
         }
         'netReverseDns' { if ($Value -is [bool]) { $script:Cfg.netReverseDns = $Value; if (Get-Command Set-NetReverseDns -ErrorAction SilentlyContinue) { Set-NetReverseDns $Value } } }
+        'webhook' {
+            # 整块字段级覆盖（2.2.11）：开关 / URL / 事件勾选；URL 必须过白名单（模块未加载时先原样保存，
+            # 发送前还有一次 Test-WebhookUrl 兜底，非法地址永远不会被请求）
+            if ($Value -isnot [pscustomobject] -and $Value -isnot [hashtable]) { return }
+            $wh = $script:Cfg.webhook
+            if ($null -ne $Value.enabled) { $wh.enabled = [bool]$Value.enabled }
+            if ($null -ne $Value.capture) { $wh.capture = [bool]$Value.capture }
+            if ($null -ne $Value.netAlert) { $wh.netAlert = [bool]$Value.netAlert }
+            if ($null -ne $Value.url) {
+                $u = ([string]$Value.url).Trim()
+                if ($u.Length -gt 512) { $u = $u.Substring(0, 512) }
+                $okUrl = $true
+                if (Get-Command Test-WebhookUrl -ErrorAction SilentlyContinue) { $okUrl = Test-WebhookUrl $u }
+                if ($u -eq '' -or $okUrl) { $wh.url = $u }
+                else { Write-AppLog ('webhook 地址被拒绝（仅支持内置白名单内的 HTTPS 地址）: ' + $u) 'WARN' }
+            }
+        }
         'hotkeys' {
             # 整块校验（2.2.1：采集设置里的热键编辑随 saveSettings 走）；
             # 键名只认 F1–F12，非法保留原值并记日志；改完即时重注册
@@ -272,7 +291,7 @@ if (Test-Path $script:CfgPath) {
         # 以前只写不读，重启后又被默认值覆盖（用户选的档位与预热时长静默丢失）。
         foreach ($k in 'theme', 'language', 'seconds', 'minimize', 'sound', 'skip',
                        'preset', 'customBase', 'warmup', 'lastPid', 'windowW', 'windowH',
-                       'netAlertDayMB', 'netAlertMonthMB', 'netAlertIfMB', 'netKeepDays', 'netReverseDns',
+                       'netAlertDayMB', 'netAlertMonthMB', 'netAlertIfMB', 'netKeepDays', 'netReverseDns', 'webhook',
                        'closeToTray', 'autoStart') {
             if ($null -ne $j.$k) { Set-ConfigValue $k $j.$k }
         }

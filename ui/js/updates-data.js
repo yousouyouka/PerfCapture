@@ -19,6 +19,14 @@ window.PerfUpdateAreas = ['capture', 'realtime', 'network', 'other'];
 
 window.PerfUpdates = [
   {
+    date: '2026-11-25', version: '2.2.11',
+    title: '通知推送（webhook）',
+    items: [
+      ['feature', '设置页新增 webhook 通知：采集完成 / 流量告警时把一段文本摘要推到飞书、企业微信、钉钉、Slack 或 Discord。', 'other'],
+      ['feature', '默认关闭；强制 HTTPS + 内置白名单，只发文本摘要不上传报告；带「发送测试」与送达状态。', 'other']
+    ]
+  },
+  {
     date: '2026-11-25', version: '2.2.10',
     title: '连接视图：本地接口归因',
     items: [

@@ -398,6 +398,39 @@ $r15 = Exec @"
 Assert ($r15.empty -eq $true) "无物理网卡时按接口阈值区显示空状态（实际 '$($r15.emptyText)'）"
 Assert ($r15.emptyText -match '物理网卡') '空状态文案已渲染（不是 key 原文）'
 
+# ---- 10. 批次 E（2.2.11）：webhook 设置卡 ----
+$null = Exec "document.querySelector('button.nav-item[data-page=""settings""]').click(); true"
+Pump 300
+$r16 = Exec @"
+(function(){
+  function rect(e){ if(!e) return null; var r=e.getBoundingClientRect(); return { l:r.left, r:r.right, w:r.width, h:r.height }; }
+  var card = document.getElementById('cardWebhook');
+  var url = document.getElementById('webhookUrl');
+  var btn = document.getElementById('btnWebhookTest');
+  var on = document.getElementById('chkWebhook');
+  var cap = document.getElementById('chkWebhookCapture');
+  var net = document.getElementById('chkWebhookNet');
+  var hint = card ? card.querySelector('[data-i18n="settings.webhookHint"]') : null;
+  return JSON.stringify({
+    inSettings: !!(card && document.querySelector('.page[data-page="settings"]').contains(card)),
+    urlW: url ? rect(url).w : 0, cardW: card ? rect(card).w : 0,
+    hasOn: !!on, onChecked: on ? on.checked : null,
+    hasEvents: !!(cap && net), capChecked: cap ? cap.checked : null,
+    btnText: btn ? btn.textContent.trim() : '',
+    hint: hint ? hint.textContent : ''
+  });
+})()
+"@
+Assert ($r16.inSettings -eq $true) 'webhook 设置卡在设置页内'
+Assert ([double]$r16.urlW -gt 200 -and [double]$r16.urlW -le ([double]$r16.cardW + 1)) "URL 输入框占满一行且不溢出（$($r16.urlW) / $($r16.cardW)）"
+Assert ($r16.hasOn -eq $true -and $r16.onChecked -eq $false) 'webhook 开关存在且默认关闭'
+Assert ($r16.hasEvents -eq $true -and $r16.capChecked -eq $true) '两个事件勾选存在且默认为开'
+Assert ($r16.btnText -eq '发送测试') "测试按钮文案已渲染（实际 '$($r16.btnText)'）"
+Assert ($r16.hint -match '白名单') '说明文案已渲染（不是 key 原文）'
+$r17 = Exec "(function(){ setLanguage('ja-JP'); var t1=document.querySelector('[data-i18n=""settings.webhook""]').textContent.trim(); setLanguage('zh-CN'); return JSON.stringify({ ja: t1 }); })()"
+Assert ($r17.ja -eq '通知（webhook）') "webhook 卡标题跟随语言切换（实际 '$($r17.ja)'）"
+$null = Exec "document.querySelector('button.nav-item[data-page=""network""]').click(); true"
+
 if ($fail -eq 0) { Ok '网络页真 WebView2 自证全部通过' } else { Write-Host "失败 $fail 项" -ForegroundColor Red }
 try { $form.Dispose() } catch { }
 if ($fail -gt 0) { exit 1 } else { exit 0 }

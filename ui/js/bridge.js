@@ -34,6 +34,16 @@ function handleMessage(msg) {
       if (monEl) monEl.value = (Number.isFinite(nm) && nm >= 0) ? nm : 0;
       const dnsEl = document.getElementById('chkNetDns');
       if (dnsEl) dnsEl.checked = s.netReverseDns === true;
+      /* 2.2.11：webhook 通知（默认关闭；只发文本摘要） */
+      const wh = s.webhook || {};
+      const whOn = document.getElementById('chkWebhook');
+      if (whOn) whOn.checked = wh.enabled === true;
+      const whCap = document.getElementById('chkWebhookCapture');
+      if (whCap) whCap.checked = wh.capture !== false;
+      const whNet = document.getElementById('chkWebhookNet');
+      if (whNet) whNet.checked = wh.netAlert !== false;
+      const whUrl = document.getElementById('webhookUrl');
+      if (whUrl) whUrl.value = (typeof wh.url === 'string') ? wh.url : '';
       /* 2.2.9：历史保留天数与按接口每日阈值（接口名 → MB） */
       const keepEl = document.getElementById('netKeepDays');
       const kd = Number(s.netKeepDays);
@@ -99,6 +109,16 @@ function handleMessage(msg) {
     case 'metricSample': if (window.PerfRealtime) window.PerfRealtime.handle(msg); break;
     case 'metricsCaps': if (window.PerfRealtime) window.PerfRealtime.handle(msg); break;
     case 'overlayState': if (window.PerfRealtime) window.PerfRealtime.handle(msg); break;
+    // 2.2.11 webhook：测试 / 事件发送结果（设置卡状态提示）
+    case 'webhook': {
+      const wn = document.getElementById('webhookNote');
+      if (wn) {
+        const ok = msg.ok === true;
+        wn.textContent = ok ? t('settings.webhookOk', '已送达') : t('settings.webhookFail', '发送失败（详见日志）');
+        wn.className = 'webhook-note ' + (ok ? 'is-ok' : 'is-bad');
+      }
+      break;
+    }
     // 2.1.18 网络页：L1 接口总量口径的实时速率
     case 'netSample': if (window.PerfNetwork) window.PerfNetwork.handle(msg); break;
     case 'netCaps': if (window.PerfNetwork) window.PerfNetwork.handle(msg); break;

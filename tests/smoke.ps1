@@ -1039,7 +1039,7 @@ foreach ($nid in 'netKeepDays', 'netAlertIfRows', 'netAlertReset', 'net.alertRes
 $iNet = $idx.IndexOf('js/network.js')
 $iMain = $idx.IndexOf('js/main.js')
 if ($iNet -lt 0 -or $iMain -lt 0 -or $iNet -gt $iMain) { Bad 'network.js 必须在 main.js 之前加载' }
-foreach ($nk in 'nav.network', 'net.title', 'net.desc', 'net.stateOn', 'net.stateOff', 'net.totalRecv', 'net.totalSent', 'net.totals', 'net.kind.wifi', 'net.kind.virtual', 'net.status.Up', 'net.caliber', 'net.alertHint', 'net.today', 'net.month', 'net.histTitle', 'net.histDays', 'net.histMonths', 'net.histEmpty', 'settings.net', 'settings.netAlert', 'settings.netAlertHint', 'settings.netDay', 'settings.netMonth', 'settings.hotkeysHint2', 'net.connTitle', 'net.colProc', 'net.colRemote', 'net.colSvc', 'net.connEmpty', 'settings.netDns', 'settings.netDnsHint', 'net.exportCsv', 'net.exportJson', 'net.exportNoteEmpty', 'net.exportNoteDone', 'net.exportNoteFail', 'net.keepDays', 'net.alertIfTitle', 'net.alertIfHint', 'net.alertIfEmpty', 'net.alertReset', 'net.alertResetNote', 'net.alertResetHint', 'net.colIf', 'net.connIfUnknown', 'capture.item.nettraffic', 'report.net.title', 'report.net.unable') {
+foreach ($nk in 'nav.network', 'net.title', 'net.desc', 'net.stateOn', 'net.stateOff', 'net.totalRecv', 'net.totalSent', 'net.totals', 'net.kind.wifi', 'net.kind.virtual', 'net.status.Up', 'net.caliber', 'net.alertHint', 'net.today', 'net.month', 'net.histTitle', 'net.histDays', 'net.histMonths', 'net.histEmpty', 'settings.net', 'settings.netAlert', 'settings.netAlertHint', 'settings.netDay', 'settings.netMonth', 'settings.hotkeysHint2', 'net.connTitle', 'net.colProc', 'net.colRemote', 'net.colSvc', 'net.connEmpty', 'settings.netDns', 'settings.netDnsHint', 'net.exportCsv', 'net.exportJson', 'net.exportNoteEmpty', 'net.exportNoteDone', 'net.exportNoteFail', 'net.keepDays', 'net.alertIfTitle', 'net.alertIfHint', 'net.alertIfEmpty', 'net.alertReset', 'net.alertResetNote', 'net.alertResetHint', 'net.colIf', 'net.connIfUnknown', 'settings.webhook', 'settings.webhookHint', 'settings.webhookCapture', 'settings.webhookNet', 'settings.webhookOk', 'settings.webhookFail', 'capture.item.nettraffic', 'report.net.title', 'report.net.unable') {
     $n2 = ([regex]::Matches($i18nText, [regex]::Escape("'" + $nk + "':"))).Count
     if ($n2 -lt 3) { Bad "i18n 缺 $nk（三语都要有，现仅 $n2 处）" }
 }
@@ -1258,6 +1258,27 @@ foreach ($ck in 'netKeepDays', 'netAlertIfMB') {
     if ($capPs -notmatch [regex]::Escape("'" + $ck + "'")) { Bad "saveSettings 白名单缺 $ck（改了不落盘）" }
 }
 if ($capPs -notmatch [regex]::Escape("'resetNetAlerts'")) { Bad '命令白名单缺 resetNetAlerts' }
+# 2.2.11 批次 E：webhook（默认关 + HTTPS 白名单 + 异步发送 + 退出收尾）
+$entryPsW = Get-Content (Join-Path $root 'src\PerfCapture.ps1') -Raw -Encoding UTF8
+if ($entryPsW -notmatch [regex]::Escape('58-Webhook.ps1')) { Bad '入口未加载 58-Webhook.ps1' }
+$whPs = Get-Content (Join-Path $root 'src\app\58-Webhook.ps1') -Raw -Encoding UTF8
+foreach ($need in 'Test-WebhookUrl', 'Get-WebhookPayload', 'Send-PerfWebhook', 'Test-PerfWebhook', 'Stop-PerfWebhookJobs', 'open.feishu.cn', 'qyapi.weixin.qq.com', 'oapi.dingtalk.com', 'hooks.slack.com', 'discord.com') {
+    if ($whPs -notmatch [regex]::Escape($need)) { Bad "58-Webhook.ps1 缺 $need" }
+}
+if ($whPs -match 'http://') { Bad 'webhook 模块出现 http://（只允许 HTTPS）' }
+if ($setPsDef -notmatch 'webhook\s*=\s*@\{') { Bad '配置默认值缺 webhook（默认关闭）' }
+if ($setPsDef -notmatch 'webhook\s*=\s*@\{\s*enabled\s*=\s*\$false') { Bad 'webhook 默认必须是关闭' }
+foreach ($wk in '''webhook''', '''testWebhook''') {
+    if ($capPs -notmatch [regex]::Escape($wk)) { Bad "60-Capture.ps1 缺 $wk（保存/命令白名单）" }
+}
+if ($capPs -notmatch 'Send-PerfWebhook') { Bad '采集完成没有接 webhook' }
+if ((Get-Content (Join-Path $root 'src\app\36-NetMetrics.ps1') -Raw -Encoding UTF8) -notmatch 'Send-PerfWebhook') { Bad '流量告警没有接 webhook' }
+if ((Get-Content (Join-Path $root 'src\app\90-Main.ps1') -Raw -Encoding UTF8) -notmatch 'Stop-PerfWebhookJobs') { Bad '退出时没有收尾 webhook 后台发送' }
+if ($idx -notmatch 'chkWebhook' -or $idx -notmatch 'btnWebhookTest' -or $idx -notmatch 'webhookUrl') { Bad '设置页缺 webhook 控件（开关 / 地址 / 测试）' }
+$mainJsW = Get-Content (Join-Path $root 'ui\js\main.js') -Raw -Encoding UTF8
+if ($mainJsW -notmatch 'testWebhook' -or $mainJsW -notmatch 'chkWebhook') { Bad 'main.js 没有提交 webhook 设置 / 测试命令' }
+$bridgeJsW = Get-Content (Join-Path $root 'ui\js\bridge.js') -Raw -Encoding UTF8
+if ($bridgeJsW -notmatch "case 'webhook'" -or $bridgeJsW -notmatch 'chkWebhook') { Bad 'bridge.js 没有回填/回执 webhook 状态' }
 if ($setPsDef -notmatch 'CurrentVersion\\Run') { Bad '开机自启兜底缺 HKCU Run 写入' }
 if ($setPsDef -notmatch '--autostart') { Bad '开机自启命令行缺 --autostart' }
 if ($setPsDef -notmatch 'Register-ScheduledTask') { Bad '开机自启必须用计划任务（Run 只能普通权限，登录会被 UAC 拦住）' }

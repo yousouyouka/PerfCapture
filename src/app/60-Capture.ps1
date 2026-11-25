@@ -15,7 +15,9 @@ $script:KnownCommands = @('ready', 'refreshProcs', 'saveSettings', 'openReports'
     # 2.1.16：全局热键设置
     'setHotkeys', 'getHotkeys',
     # 2.2.9：清除流量提醒记录（达到阈值会重新提醒）
-    'resetNetAlerts')
+    'resetNetAlerts',
+    # 2.2.11：webhook 测试消息
+    'testWebhook')
 
 function Handle-UiMessage($msg) {
     if ($null -eq $msg -or -not $msg.cmd) { return }
@@ -119,7 +121,7 @@ function Handle-UiMessage($msg) {
                 if ($msg.settings) {
                     # 2.2.1 修正：netAlert / netReverseDns / hotkeys 之前漏在循环里，用户改了不落盘
                     foreach ($k in 'theme', 'language', 'seconds', 'minimize', 'sound', 'skip', 'preset', 'customBase', 'warmup',
-                                   'netAlertDayMB', 'netAlertMonthMB', 'netAlertIfMB', 'netKeepDays', 'netReverseDns', 'hotkeys',
+                                   'netAlertDayMB', 'netAlertMonthMB', 'netAlertIfMB', 'netKeepDays', 'netReverseDns', 'webhook', 'hotkeys',
                                    'closeToTray', 'autoStart') {
                         Set-ConfigValue $k $msg.settings.$k
                     }
@@ -133,6 +135,9 @@ function Handle-UiMessage($msg) {
                     Reset-NetAlertState
                     Write-AppLog '流量提醒记录已清除'
                 }
+            }
+            'testWebhook' {
+                if (Get-Command Test-PerfWebhook -ErrorAction SilentlyContinue) { Test-PerfWebhook }
             }
             # 导出类动作不能在回调内部直接跑：SaveFileDialog 会卡住 WebView2 的消息泵，
             # 而 CDP（CallDevToolsProtocolMethodAsync）在回调里根本不会完成（实测必超时 → 界面卡在导出视图）。
@@ -386,6 +391,14 @@ $script:Timer.Add_Tick({
                 if ($null -ne $data.display_latency_avg_ms) { Send-Log ('  上屏延迟  ' + $data.display_latency_avg_ms + ' ms') }
                 if ($null -ne $data.pc_latency_avg_ms) { Send-Log ('  PC 延迟   ' + $data.pc_latency_avg_ms + ' ms') }
                 Send-Log '  报告已显示在右侧，需要文件请点「导出报告」' 'ln-accent'
+                # webhook（2.2.11）：只发一段摘要；开关关闭 / 事件未勾选时 Send-PerfWebhook 内部直接返回
+                if (Get-Command Send-PerfWebhook -ErrorAction SilentlyContinue) {
+                    try {
+                        $wName = ([string]$data.run).Trim()
+                        if (-not $wName) { $wName = '本次采集' }
+                        Send-PerfWebhook 'capture' ('采集完成 · ' + $wName + ' · 平均 ' + [string]$data.avg_fps + ' FPS')
+                    } catch { }
+                }
             }
         }
         Send-ToUi @{ type = 'busy'; value = $false }

@@ -257,6 +257,8 @@ $script:NetAlertedDay = ''       # 本日已告警标记（每日最多提醒一
 $script:NetAlertedMonth = ''     # 本月已告警标记
 $script:NetAlertedIf = @{}       # 'yyyy-MM-dd|接口名' -> $true（按接口每日阈值，每天一次）
 $script:NetAlertStatePath = $null  # 告警状态文件：重启后不重复轰炸（2.2.9）
+$script:NetIpOwner = @{}         # 本地 IP -> @{ idx; name }（连接级接口归因，2.2.10）
+$script:NetIpOwnerAt = $null     # 上面这张表的刷新时间（10 秒节流）
 
 function Convert-NetDayNode($node) {
     $h = @{}
@@ -340,6 +342,57 @@ function Get-NetIfDaySum([string]$IfName, [string]$DayKey) {
         $s += [double]$script:NetDayAcc[$idx].s
     }
     return @{ recv = [math]::Round($r, 0); sent = [math]::Round($s, 0) }
+}
+
+# ---------- 连接级接口归因（2.2.10 · 批次 D） ----------
+# 只做「本地地址 → 网卡」映射：每条连接标注走的是哪块接口（物理 / 虚拟），不折算字节。
+# UDP 绑定 0.0.0.0 / :: 等通配地址时无法归因，如实留空（界面显示「—」），不猜。
+function Update-NetIpOwner {
+    # 地址变更很慢：10 秒刷新一次，避免 1 Hz 定时器里反复走 CIM
+    if ($script:NetIpOwnerAt -and ((Get-Date) - $script:NetIpOwnerAt).TotalSeconds -lt 10) { return }
+    $script:NetIpOwnerAt = Get-Date
+    $h = @{}
+    try {
+        foreach ($a in @(Get-NetIPAddress -ErrorAction SilentlyContinue)) {
+            try {
+                $idx = [int]$a.InterfaceIndex
+                if ($idx -le 1) { continue }
+                $ip = ([string]$a.IPAddress) -replace '%.*$', ''
+                if (-not $ip) { continue }
+                $h[$ip] = @{ idx = $idx; name = [string]$a.InterfaceAlias }
+            } catch { }
+        }
+    } catch { }
+    # 整轮失败时保留旧表：宁可短暂显示旧归属，也不要把整列打成「—」
+    if ($h.Count -gt 0 -or $script:NetIpOwner.Count -eq 0) { $script:NetIpOwner = $h }
+}
+
+function Get-NetConnIfOwner([string]$Addr) {
+    $a = ([string]$Addr) -replace '%.*$', ''
+    if (-not $a -or $a -eq '0.0.0.0' -or $a -eq '::' -or $a -eq '*') { return $null }
+    if ($script:NetIpOwner.ContainsKey($a)) { return $script:NetIpOwner[$a] }
+    return $null
+}
+
+function Add-NetConnAttribution($sample) {
+    if (-not $sample -or -not $sample.conns) { return }
+    if (@($sample.conns).Count -eq 0) { return }
+    Update-NetIpOwner
+    foreach ($c in @($sample.conns)) {
+        $own = Get-NetConnIfOwner ([string]$c.la)
+        if (-not $own) { continue }
+        $nm = [string]$own.name
+        $kind = 'other'
+        if ($script:NetMeta.ContainsKey($own.idx)) {
+            $nm = [string]$script:NetMeta[$own.idx].name
+            $kind = [string]$script:NetMeta[$own.idx].kind
+        }
+        try {
+            $c | Add-Member -NotePropertyName li -NotePropertyValue ([int]$own.idx) -Force
+            $c | Add-Member -NotePropertyName ln -NotePropertyValue $nm -Force
+            $c | Add-Member -NotePropertyName lk -NotePropertyValue $kind -Force
+        } catch { }
+    }
 }
 
 function Initialize-NetPersistence {
@@ -849,6 +902,7 @@ function Invoke-NetTick {
             $sample = $null
             try { $sample = $raw | ConvertFrom-Json } catch { continue }
             Add-NetSampleToAccum $sample
+            Add-NetConnAttribution $sample
             Update-NetUiRatesFromSample $sample
             if (-not $script:NetTray) { Initialize-NetTray }
             [void]$script:NetSamples.Add($sample)

@@ -249,7 +249,7 @@ ok(ids.netMonth.textContent === '2.0 KB', 'bridge 转发 netTotals：本月不�
 
 /* ---- 连接/会话视图 ---- */
 const conns = [
-  { p: 1000, n: 'game', pr: 'TCP', la: '192.168.1.5', lp: 52300, ra: '203.0.113.9', rp: 443, st: 'ESTABLISHED', sv: 'HTTPS', hn: 'cdn.example.com' },
+  { p: 1000, n: 'game', pr: 'TCP', la: '192.168.1.5', lp: 52300, ra: '203.0.113.9', rp: 443, st: 'ESTABLISHED', sv: 'HTTPS', hn: 'cdn.example.com', li: 5, ln: 'WLAN', lk: 'wifi' },
   { p: 4004, n: 'svchost', pr: 'UDP', la: '0.0.0.0', lp: 5353, ra: '*', rp: 0, st: '', sv: 'mDNS', hn: '' }
 ];
 P.handle({ type: 'netSample', sample: { at: 'x', ifs: s1.sample.ifs, conns: conns, connTruncated: false } });
@@ -257,11 +257,13 @@ ok(ids.netConnBody.children.length === 2, '两条连接渲染两行', '实际 ' 
 ok(ids.netConnEmpty.hidden === true, '有连接时空状态隐藏');
 const row0 = ids.netConnBody.children[0];
 ok(row0.children[0].textContent === 'game', '连接行首列是进程名');
-ok(row0.children[3].textContent.indexOf('cdn.example.com') >= 0, '开了反查时远程列显示主机名');
-ok(row0.children[3].textContent.indexOf('203.0.113.9') >= 0, '远程列同时保留 IP');
+ok(row0.children[3].textContent === 'WLAN' && row0.children[3].dataset.kind === 'wifi', '本地接口列显示 WLAN（data-kind=wifi）', '实际 ' + row0.children[3].textContent);
+ok(row0.children[4].textContent.indexOf('cdn.example.com') >= 0, '开了反查时远程列显示主机名');
+ok(row0.children[4].textContent.indexOf('203.0.113.9') >= 0, '远程列同时保留 IP');
 const row1 = ids.netConnBody.children[1];
-ok(row1.children[3].textContent === '—', 'UDP 远程列显示 —（无对端概念）');
-ok(row1.children[4].textContent === 'mDNS', '服务推断列输出 mDNS');
+ok(row1.children[3].textContent === '—', '无法归因时本地接口列显示 —（UDP 通配地址）', '实际 ' + row1.children[3].textContent);
+ok(row1.children[4].textContent === '—', 'UDP 远程列显示 —（无对端概念）');
+ok(row1.children[5].textContent === 'mDNS', '服务推断列输出 mDNS');
 const before = ids.netConnBody.children[0];
 P.handle({ type: 'netSample', sample: { at: 'y', ifs: s1.sample.ifs, conns: conns, connTruncated: false } });
 ok(ids.netConnBody.children[0] === before, '连接未变化时不重建 DOM');
@@ -273,9 +275,11 @@ P.handle({ type: 'netSample', sample: { at: 'w', ifs: s1.sample.ifs, conns: conn
 P.applyConnFilters('game', '', '');
 ok(ids.netConnBody.children.length === 1 && ids.netConnBody.children[0].children[0].textContent === 'game', '按进程名搜索');
 P.applyConnFilters('443', '', '');
-ok(ids.netConnBody.children.length === 1 && ids.netConnBody.children[0].children[4].textContent === 'HTTPS', '按远程端口搜索');
+ok(ids.netConnBody.children.length === 1 && ids.netConnBody.children[0].children[5].textContent === 'HTTPS', '按远程端口搜索');
 P.applyConnFilters('203.0.113', '', '');
 ok(ids.netConnBody.children.length === 1, '按远程地址搜索');
+P.applyConnFilters('WLAN', '', '');
+ok(ids.netConnBody.children.length === 1 && ids.netConnBody.children[0].children[0].textContent === 'game', '按本地接口名搜索');
 P.applyConnFilters('', 'UDP', '');
 ok(ids.netConnBody.children.length === 1 && ids.netConnBody.children[0].children[0].textContent === 'svchost', 'TCP/UDP 筛选');
 P.applyConnFilters('', 'TCP', '');

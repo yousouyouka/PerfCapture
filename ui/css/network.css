@@ -144,7 +144,7 @@
 }
 .nt-conn-head { display: flex; align-items: baseline; gap: 0.6rem; }
 .nt-conn-head h2 { font-size: 0.86rem; margin: 0; color: var(--text-strong); }
-.nt-conn-scroll { max-height: 18rem; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--tile); }
+.nt-conn-scroll { max-height: 18rem; overflow: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--tile); }
 .net-conn table {
   width: 100%;
   /* sticky 表头必须配 separate：collapse 的边框层会在行文字之上重绘，遮住表头 */
@@ -171,6 +171,9 @@
 }
 .nt-conn-proto { color: var(--accent); }
 .nt-conn-svc { color: var(--muted); }
+/* 本地接口列（2.2.10）：物理接口用常规色，虚拟（VPN / 虚拟交换机）用强调色提示「这是虚拟层」 */
+.nt-conn-if { color: var(--muted); }
+.nt-conn-if[data-kind="virtual"] { color: var(--accent); }
 
 /* 2.2.6：连接视图过滤工具行（只作用于渲染层，不改采样协议） */
 .nt-conn-tools {

@@ -230,7 +230,7 @@ Assert ([math]::Abs([double]$r7.tt - [double]$r7.mt) -lt 1) "今日与本月同�
 $null = Exec @'
 (function(){
   PerfNetwork.handle({ type: 'netSample', caps: { running: true }, sample: { at: 'f1', ifs: [], conns: [
-    { p: 10, n: 'alpha', pr: 'TCP', la: '192.168.1.5', lp: 5000, ra: '203.0.113.9', rp: 443, st: 'ESTABLISHED', sv: 'HTTPS', hn: 'cdn.example.com' },
+    { p: 10, n: 'alpha', pr: 'TCP', la: '192.168.1.5', lp: 5000, ra: '203.0.113.9', rp: 443, st: 'ESTABLISHED', sv: 'HTTPS', hn: 'cdn.example.com', li: 5, ln: 'WLAN', lk: 'wifi' },
     { p: 20, n: 'beta', pr: 'UDP', la: '0.0.0.0', lp: 5353, ra: '*', rp: 0, st: '', sv: 'mDNS', hn: '' }
   ] } });
   return true;
@@ -257,11 +257,18 @@ $r8 = Exec @"
   var badges = d.querySelectorAll('.nt-src').length;
   var totalBadges = document.querySelectorAll('.net-total-cell .nt-src').length;
   var ph = document.getElementById('netConnSearch').placeholder;
+  var ths = Array.prototype.map.call(document.querySelectorAll('.net-conn th'), function(t){ return t.textContent.trim(); });
+  var rowsTr = document.querySelectorAll('#netConnBody tr');
+  var ifA = rowsTr.length ? rowsTr[0].children[3] : null;
+  var ifB = rowsTr.length > 1 ? rowsTr[1].children[3] : null;
   return JSON.stringify({
     q1: q1, q2: q2, q3: q3, q4: q4, q5: q5,
     noMatch: noMatch, hint: hint,
     rows: rows, badges: badges, totalBadges: totalBadges,
     ph: ph,
+    thCount: ths.length, thList: ths.join('|'),
+    ifA: ifA ? ifA.textContent : '', ifAKind: ifA ? (ifA.dataset.kind || '') : '',
+    ifB: ifB ? ifB.textContent : '',
     openH: d.getBoundingClientRect().height
   });
 })()
@@ -277,6 +284,9 @@ Assert ($r8.badges -ge 4) '口径表每层都有来源角标'
 Assert ($r8.totalBadges -eq 5) '汇总五个数字旁都有 L1 角标（实际 ' + $r8.totalBadges + '）'
 Assert ($r8.ph -ne '' -and $r8.ph -notmatch 'net\.') '搜索框占位文案已渲染（不是 key）'
 Assert ([double]$r8.openH -gt 80) '展开后口径表有实际高度（实际 ' + $r8.openH + '）'
+Assert ($r8.thCount -eq 6 -and $r8.thList -match '本地接口') "连接表新增「本地接口」列（实际 '$($r8.thList)'）"
+Assert ($r8.ifA -eq 'WLAN' -and $r8.ifAKind -eq 'wifi') "有归因的连接显示接口名与种类（实际 '$($r8.ifA)' / '$($r8.ifAKind)'）"
+Assert ($r8.ifB -eq '—') "无法归因的连接显示 —（实际 '$($r8.ifB)'）"
 $r9 = Exec "(function(){ var zh=t('net.calL1'); setLanguage('en-US'); var en=t('net.calL1'); var allOpt=document.querySelector('#netConnSvc option').textContent; setLanguage('ja-JP'); var ja=t('net.calL1'); setLanguage('zh-CN'); return JSON.stringify({ zh: zh, en: en, ja: ja, allOpt: allOpt }); })()"
 Assert ($r9.zh -ne '' -and $r9.en -ne '' -and $r9.ja -ne '' -and $r9.zh -ne $r9.en -and $r9.en -ne $r9.ja) '口径表三语文案齐全（zh/en/ja 各不相同）'
 Assert ($r9.allOpt -match 'All services') "语言切换后服务下拉首项也翻译（实际 '$($r9.allOpt)'）"

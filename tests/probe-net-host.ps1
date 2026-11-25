@@ -182,6 +182,37 @@ $st2 = $null
 try { $st2 = Get-Content -LiteralPath $script:NetAlertStatePath -Raw -Encoding UTF8 | ConvertFrom-Json } catch { }
 if ($script:NetAlertedIf.Count -eq 0 -and $st2 -and -not $st2.ifs.PSObject.Properties[$ack]) { Ok '清除提醒记录后内存与文件都复位' } else { Bad '清除提醒记录没有生效' }
 
+# ---- 11. 2.2.10 批次 D：连接级接口归因（本地地址 → 网卡） ----
+function Get-NetIPAddress {
+    param([string]$AddressFamily)
+    @(
+        [pscustomobject]@{ InterfaceIndex = 5; IPAddress = '192.168.1.5'; InterfaceAlias = 'WLAN' },
+        [pscustomobject]@{ InterfaceIndex = 9; IPAddress = '10.8.0.2'; InterfaceAlias = 'Radmin VPN' },
+        [pscustomobject]@{ InterfaceIndex = 1; IPAddress = '127.0.0.1'; InterfaceAlias = 'Loopback' }
+    )
+}
+$script:NetIpOwner = @{}
+$script:NetIpOwnerAt = $null
+$script:NetMeta[9] = @{ name = 'Radmin VPN'; kind = 'virtual' }
+$script:UiPushed.Clear() | Out-Null
+$connA = [ordered]@{ p = 100; n = 'alpha'; pr = 'TCP'; la = '192.168.1.5'; lp = 5000; ra = '203.0.113.9'; rp = 443; st = 'ESTABLISHED'; sv = 'HTTPS'; hn = '' }
+$connB = [ordered]@{ p = 200; n = 'beta'; pr = 'UDP'; la = '0.0.0.0'; lp = 5353; ra = '*'; rp = 0; st = ''; sv = 'mDNS'; hn = '' }
+$connC = [ordered]@{ p = 300; n = 'gamma'; pr = 'TCP'; la = '10.8.0.2'; lp = 5100; ra = '198.51.100.7'; rp = 443; st = 'ESTABLISHED'; sv = 'HTTPS'; hn = '' }
+Enqueue-JsonSample 't4' @() @($connA, $connB, $connC)
+Invoke-NetTick
+$hostConns = $null
+foreach ($p in @($script:UiPushed)) {
+    if ($p.type -eq 'netSample' -and $p.sample -and @($p.sample.conns).Count -ge 3) { $hostConns = $p.sample.conns; break }
+}
+if ($hostConns) { Ok '连接样本已推给 UI（含归因字段）' } else { Bad '连接样本没有推给 UI' }
+$mapConn = @{}
+foreach ($c in @($hostConns)) { $mapConn[[string]$c.n] = $c }
+if ($mapConn['alpha'] -and [string]$mapConn['alpha'].ln -eq 'WLAN' -and [string]$mapConn['alpha'].lk -eq 'wifi') { Ok '物理连接归因到 WLAN' } else { Bad ('物理连接归因失败: ' + ($mapConn['alpha'] | ConvertTo-Json -Compress)) }
+if ($mapConn['gamma'] -and [string]$mapConn['gamma'].ln -eq 'Radmin VPN' -and [string]$mapConn['gamma'].lk -eq 'virtual') { Ok '虚拟网卡连接归因到 VPN 接口（virtual）' } else { Bad ('虚拟网卡连接归因失败: ' + ($mapConn['gamma'] | ConvertTo-Json -Compress)) }
+if ($mapConn['beta'] -and -not $mapConn['beta'].PSObject.Properties['ln']) { Ok 'UDP 通配地址如实留空（无 ln 字段）' } else { Bad 'UDP 通配地址被错误归因' }
+$connJson = @{ sample = @{ conns = $hostConns } } | ConvertTo-Json -Depth 6 -Compress
+if ($connJson -match '"ln":"WLAN"' -and $connJson -match '"lk":"virtual"') { Ok '归因字段可序列化下发给界面' } else { Bad '归因字段序列化丢失' }
+
 # ---- 清理 ----
 Stop-NetSampler
 try { Remove-Item $work -Recurse -Force -ErrorAction SilentlyContinue } catch { }

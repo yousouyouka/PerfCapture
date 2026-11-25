@@ -19,6 +19,14 @@ window.PerfUpdateAreas = ['capture', 'realtime', 'network', 'other'];
 
 window.PerfUpdates = [
   {
+    date: '2026-11-25', version: '2.2.10',
+    title: '连接视图：本地接口归因',
+    items: [
+      ['feature', '连接表新增「本地接口」列：按本地地址映射到网卡，VPN / 虚拟网卡用强调色区分；UDP 通配地址无法归因时显示「—」。', 'network'],
+      ['feature', '「清除提醒记录」补充说明：只让提醒重新判断，不改阈值、不删除流量数据。', 'network']
+    ]
+  },
+  {
     date: '2026-11-25', version: '2.2.9',
     title: '网络设置：保留天数与按接口阈值',
     items: [

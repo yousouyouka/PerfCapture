@@ -457,7 +457,7 @@
     if (f.svc && String(c.sv || '') !== f.svc) return false;
     if (!f.q) return true;
     const hay = [
-      c.n, c.pr, c.sv, c.hn, c.la, c.ra,
+      c.n, c.pr, c.sv, c.hn, c.la, c.ra, c.ln, c.lk,
       (c.la != null ? String(c.la) + ':' + String(c.lp == null ? '' : c.lp) : ''),
       (c.ra != null ? String(c.ra) + ':' + String(c.rp == null ? '' : c.rp) : ''),
       String(c.lp == null ? '' : c.lp), String(c.rp == null ? '' : c.rp),
@@ -518,7 +518,7 @@
     const filtered = active ? list.filter(connMatches) : list;
     /* 稳定排序：TCP 在前，按远程端口分组无意义，保持采样顺序即可 */
     const key = [state.filters.q, state.filters.proto, state.filters.svc, truncated ? '1' : '0',
-      list.map((c) => [c.pr, c.p, c.lp, c.ra, c.rp, c.st, c.hn || '', c.n || '', c.sv || ''].join('|')).join('\n')
+      list.map((c) => [c.pr, c.p, c.lp, c.ra, c.rp, c.st, c.hn || '', c.n || '', c.sv || '', c.ln || '', c.lk || ''].join('|')).join('\n')
     ].join('\u0001');
     if (key === lastConnKey) return;
     lastConnKey = key;
@@ -530,6 +530,17 @@
       tr.appendChild(el('td', '', name));
       tr.appendChild(el('td', 'nt-conn-proto', String(c.pr || '')));
       tr.appendChild(el('td', '', `${String(c.la || '')}:${c.lp != null ? c.lp : ''}`));
+      /* 本地接口（2.2.10）：宿主按本地地址映射到网卡；UDP 通配地址等无法归因时如实显示「—」 */
+      const ifTd = el('td', 'nt-conn-if', '');
+      if (c.ln) {
+        ifTd.textContent = String(c.ln);
+        ifTd.dataset.kind = String(c.lk || 'other');
+        ifTd.title = t('net.kind.' + (c.lk || 'other'), String(c.lk || ''));
+      } else {
+        ifTd.textContent = '—';
+        ifTd.title = t('net.connIfUnknown', '无法归因（通配地址）');
+      }
+      tr.appendChild(ifTd);
       const remote = (c.pr === 'UDP') ? '—' : (c.hn ? `${String(c.ra)} (${String(c.hn)})` : String(c.ra || '—'));
       tr.appendChild(el('td', '', remote));
       tr.appendChild(el('td', 'nt-conn-svc', String(c.sv || '')));

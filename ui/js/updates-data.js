@@ -19,6 +19,14 @@ window.PerfUpdateAreas = ['capture', 'realtime', 'network', 'other'];
 
 window.PerfUpdates = [
   {
+    date: '2026-11-25', version: '2.2.12',
+    title: '批次 B–E 自检加固',
+    items: [
+      ['fix', 'webhook 发送不再跟随重定向；「发送测试」使用界面当前地址，改完未保存也不会误发旧地址。', 'other'],
+      ['fix', '语言切换后连接表的接口提示同步换语言；旧配置缺少 webhook 结构时自动补默认值。', 'network']
+    ]
+  },
+  {
     date: '2026-11-25', version: '2.2.11',
     title: '通知推送（webhook）',
     items: [

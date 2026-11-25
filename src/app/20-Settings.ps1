@@ -140,6 +140,10 @@ function Set-ConfigValue {
             # 发送前还有一次 Test-WebhookUrl 兜底，非法地址永远不会被请求）
             if ($Value -isnot [pscustomobject] -and $Value -isnot [hashtable]) { return }
             $wh = $script:Cfg.webhook
+            if ($null -eq $wh) {
+                $wh = @{ enabled = $false; url = ''; capture = $true; netAlert = $true }
+                $script:Cfg.webhook = $wh
+            }
             if ($null -ne $Value.enabled) { $wh.enabled = [bool]$Value.enabled }
             if ($null -ne $Value.capture) { $wh.capture = [bool]$Value.capture }
             if ($null -ne $Value.netAlert) { $wh.netAlert = [bool]$Value.netAlert }

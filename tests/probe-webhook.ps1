@@ -20,6 +20,7 @@ $script:Cfg = @{ webhook = @{ enabled = $false; url = ''; capture = $true; netAl
 # ---- dot-source 被测模块 ----
 . (Join-Path $root 'src\app\58-Webhook.ps1')
 Ok '58-Webhook.ps1 dot-source 成功'
+if ($script:WebhookSendScript -match 'MaximumRedirection\s+0') { Ok '发送脚本禁止跟随重定向（防 POST 体被 302 带走）' } else { Bad '发送脚本未禁用重定向' }
 
 # ---- 1. URL 白名单 ----
 $good = @(
@@ -35,6 +36,7 @@ $badUrls = @(
     'https://evil.example.com/hook',
     'https://open.feishu.cn.evil.com/hook',
     'https://user:pw@open.feishu.cn/hook',
+    'https://open.feishu.cn@evil.com/hook',
     'file:///C:/tmp/x',
     'ftp://open.feishu.cn/x',
     ''
@@ -69,6 +71,11 @@ foreach ($c in $cases) {
 }
 $empty = Get-WebhookPayload 'https://evil.example.com/x' 'x'
 if ($empty -eq '') { Ok '白名单外地址不生成载荷（直接拒发）' } else { Bad '白名单外地址仍生成了载荷' }
+# 超长文本截断：避免异常调用把请求体撑大
+$longPayload = Get-WebhookPayload 'https://hooks.slack.com/x' ('x' * 2000)
+$longObj = $longPayload | ConvertFrom-Json
+$longText = [string]$longObj.text
+if ($longText.Length -le 801 -and $longText.EndsWith('…')) { Ok ('超长文本截断到 800 字（实际 ' + $longText.Length + '）') } else { Bad ('超长文本未截断: ' + $longText.Length) }
 
 # ---- 3. 开关与事件门控（替换发送函数，确保零真实请求） ----
 $script:Sent = New-Object System.Collections.ArrayList
@@ -99,6 +106,15 @@ if ($script:Sent.Count -eq $before -and $last -and $last.type -eq 'webhook' -and
 $script:Cfg.webhook.url = $validUrl
 Test-PerfWebhook
 if ($script:Sent.Count -eq $before + 1 -and $script:Sent[$script:Sent.Count - 1] -eq 'test') { Ok '测试：合法地址按 test 标签发送（不受启用开关限制）' } else { Bad '测试：合法地址没有发送' }
+
+# 界面刚改完还没落盘：显式传入的地址优先于已保存值
+$script:Cfg.webhook.url = 'https://evil.example.com/x'
+$before2 = $script:Sent.Count
+Test-PerfWebhook $validUrl
+if ($script:Sent.Count -eq $before2 + 1) { Ok '测试：显式地址优先于已保存值' } else { Bad '测试：显式地址没有生效' }
+Test-PerfWebhook 'http://open.feishu.cn/x'
+if ($script:Sent.Count -eq $before2 + 1) { Ok '测试：显式非 HTTPS 地址被拒绝（不发请求）' } else { Bad '测试：显式非 HTTPS 地址仍被发送' }
+$script:Cfg.webhook.url = $validUrl
 
 # ---- 5. 收尾不抛异常 ----
 try { Stop-PerfWebhookJobs; Ok 'Stop-PerfWebhookJobs 空队列可安全收尾' } catch { Bad ('Stop-PerfWebhookJobs 抛异常: ' + $_.Exception.Message) }

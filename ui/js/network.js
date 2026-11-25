@@ -601,6 +601,8 @@
     /* JS 生成的服务下拉不依赖完整样本：先单独重建，避免某次重绘异常把它留在旧语言 */
     state.svcSig = '';
     updateConnServices(state.conns || []);
+    /* 连接表的标题属性（接口种类）也是 JS 写的；清掉缓存让它按新语言重建一次 */
+    lastConnKey = '';
     try { if (state.lastSample) renderSample(state.lastSample); } catch (e) { }
     if (lastTotals) { try { renderTotals(lastTotals); } catch (e2) { } }
     setExportNote('');

@@ -137,7 +137,7 @@ function Handle-UiMessage($msg) {
                 }
             }
             'testWebhook' {
-                if (Get-Command Test-PerfWebhook -ErrorAction SilentlyContinue) { Test-PerfWebhook }
+                if (Get-Command Test-PerfWebhook -ErrorAction SilentlyContinue) { Test-PerfWebhook ([string]$msg.url) }
             }
             # 导出类动作不能在回调内部直接跑：SaveFileDialog 会卡住 WebView2 的消息泵，
             # 而 CDP（CallDevToolsProtocolMethodAsync）在回调里根本不会完成（实测必超时 → 界面卡在导出视图）。

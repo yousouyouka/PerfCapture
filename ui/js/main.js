@@ -174,17 +174,22 @@ function saveSettings() {
 const netDnsEl = $('#chkNetDns');
 if (netDnsEl) netDnsEl.addEventListener('change', () => saveSettings());
 /* webhook（2.2.11）：开关 / URL / 事件勾选改动即保存；测试按钮走宿主命令 */
+function clearWebhookNote() {
+  const n = $('#webhookNote');
+  if (n) { n.textContent = ''; n.className = 'webhook-note'; }
+}
 ['#chkWebhook', '#chkWebhookCapture', '#chkWebhookNet'].forEach(sel => {
   const el = $(sel);
-  if (el) el.addEventListener('change', () => saveSettings());
+  if (el) el.addEventListener('change', () => { clearWebhookNote(); saveSettings(); });
 });
 const whUrlEl = $('#webhookUrl');
-if (whUrlEl) whUrlEl.addEventListener('change', () => saveSettings());
+if (whUrlEl) whUrlEl.addEventListener('change', () => { clearWebhookNote(); saveSettings(); });
 const whTestEl = $('#btnWebhookTest');
 if (whTestEl) whTestEl.addEventListener('click', () => {
   const n = $('#webhookNote');
   if (n) { n.textContent = t('settings.webhookSending', '正在发送…'); n.className = 'webhook-note'; }
-  send({ cmd: 'testWebhook' });
+  /* 带上界面当前地址：先改后点测试时不需要等落盘，也不会误发到旧地址 */
+  send({ cmd: 'testWebhook', url: ($('#webhookUrl').value || '').trim() });
 });
 /* 勾选框是运行时渲染的，用事件委托，避免渲染顺序影响绑定 */
 $('.collect-grid').addEventListener('change', () => { markPresetCustom(); saveSettings(); });

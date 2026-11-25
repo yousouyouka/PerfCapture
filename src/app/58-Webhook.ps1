@@ -44,10 +44,12 @@ function Test-WebhookUrl([string]$Url) {
     return ((Get-WebhookProvider $Url) -ne '')
 }
 
-# 按目标生成载荷；白名单外返回空串（调用方据此拒发）
+# 按目标生成载荷；白名单外返回空串（调用方据此拒发）。
+# 文本截断到 800 字：告警/采集摘要远小于此，截断只为避免异常调用把请求体撑大。
 function Get-WebhookPayload([string]$Url, [string]$Text) {
     $p = Get-WebhookProvider $Url
     $msg = [string]$Text
+    if ($msg.Length -gt 800) { $msg = $msg.Substring(0, 800) + '…' }
     switch ($p) {
         'feishu'   { return (@{ msg_type = 'text'; content = @{ text = $msg } } | ConvertTo-Json -Depth 4 -Compress) }
         'wecom'    { return (@{ msgtype = 'text'; text = @{ content = $msg } } | ConvertTo-Json -Depth 4 -Compress) }
@@ -59,11 +61,12 @@ function Get-WebhookPayload([string]$Url, [string]$Text) {
 }
 
 # 发送脚本（独立 runspace 执行；单引号 here-string，禁止变量展开）
+# -MaximumRedirection 0：白名单主机若返回 302，POST 体绝不跟着跳到白名单外（与更新通道同款纪律）
 $script:WebhookSendScript = @'
 param($Url, $Payload, $TimeoutSec)
 try {
     $bytes = [Text.Encoding]::UTF8.GetBytes([string]$Payload)
-    Invoke-RestMethod -Uri $Url -Method Post -ContentType 'application/json; charset=utf-8' -Body $bytes -TimeoutSec $TimeoutSec -ErrorAction Stop | Out-Null
+    Invoke-RestMethod -Uri $Url -Method Post -ContentType 'application/json; charset=utf-8' -Body $bytes -TimeoutSec $TimeoutSec -MaximumRedirection 0 -ErrorAction Stop | Out-Null
     return 'ok'
 } catch {
     return ('err: ' + $_.Exception.Message)
@@ -82,10 +85,10 @@ function Receive-WebhookJobs {
         [void]$script:WebhookJobs.Remove($j)
         if ($result.StartsWith('ok')) {
             Write-AppLog ('webhook 已送达（' + $j.label + '）')
-            Send-ToUi @{ type = 'webhook'; ok = $true; label = $j.label }
+            try { Send-ToUi @{ type = 'webhook'; ok = $true; label = $j.label } } catch { }
         } else {
             Write-AppLog ('webhook 发送失败（' + $j.label + '）: ' + $result) 'WARN'
-            Send-ToUi @{ type = 'webhook'; ok = $false; label = $j.label }
+            try { Send-ToUi @{ type = 'webhook'; ok = $false; label = $j.label } } catch { }
             if (Get-Command Send-Log -ErrorAction SilentlyContinue) { try { Send-Log ('webhook 发送失败：' + $result) 'ln-warn' } catch { } }
         }
     }
@@ -143,16 +146,19 @@ function Send-PerfWebhook([string]$Event, [string]$Text) {
     }
 }
 
-# 设置页「发送测试」：不受启用开关与事件勾选限制，但地址仍必须过白名单。
-function Test-PerfWebhook {
-    $url = ''
-    try { $url = [string]$script:Cfg.webhook.url } catch { }
-    if (-not (Test-WebhookUrl $url)) {
+# 设置页「发送测试」：优先用界面当前地址（用户可能刚改完还没落盘），其次用已保存地址；
+# 不受启用开关与事件勾选限制，但地址仍必须过白名单。
+function Test-PerfWebhook([string]$Url = '') {
+    $u = ([string]$Url).Trim()
+    if (-not $u) {
+        try { $u = [string]$script:Cfg.webhook.url } catch { }
+    }
+    if (-not (Test-WebhookUrl $u)) {
         Send-ToUi @{ type = 'webhook'; ok = $false; label = 'test' }
         return
     }
     $stamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
-    if (-not (Start-WebhookSend $url ('【PerfCapture】测试消息 · ' + $stamp) 'test')) {
+    if (-not (Start-WebhookSend $u ('【PerfCapture】测试消息 · ' + $stamp) 'test')) {
         Send-ToUi @{ type = 'webhook'; ok = $false; label = 'test' }
     }
 }

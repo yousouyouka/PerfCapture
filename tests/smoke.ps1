@@ -1262,7 +1262,7 @@ if ($capPs -notmatch [regex]::Escape("'resetNetAlerts'")) { Bad '命令白名单
 $entryPsW = Get-Content (Join-Path $root 'src\PerfCapture.ps1') -Raw -Encoding UTF8
 if ($entryPsW -notmatch [regex]::Escape('58-Webhook.ps1')) { Bad '入口未加载 58-Webhook.ps1' }
 $whPs = Get-Content (Join-Path $root 'src\app\58-Webhook.ps1') -Raw -Encoding UTF8
-foreach ($need in 'Test-WebhookUrl', 'Get-WebhookPayload', 'Send-PerfWebhook', 'Test-PerfWebhook', 'Stop-PerfWebhookJobs', 'open.feishu.cn', 'qyapi.weixin.qq.com', 'oapi.dingtalk.com', 'hooks.slack.com', 'discord.com') {
+foreach ($need in 'Test-WebhookUrl', 'Get-WebhookPayload', 'Send-PerfWebhook', 'Test-PerfWebhook', 'Stop-PerfWebhookJobs', 'MaximumRedirection', 'open.feishu.cn', 'qyapi.weixin.qq.com', 'oapi.dingtalk.com', 'hooks.slack.com', 'discord.com') {
     if ($whPs -notmatch [regex]::Escape($need)) { Bad "58-Webhook.ps1 缺 $need" }
 }
 if ($whPs -match 'http://') { Bad 'webhook 模块出现 http://（只允许 HTTPS）' }
@@ -1277,6 +1277,7 @@ if ((Get-Content (Join-Path $root 'src\app\90-Main.ps1') -Raw -Encoding UTF8) -n
 if ($idx -notmatch 'chkWebhook' -or $idx -notmatch 'btnWebhookTest' -or $idx -notmatch 'webhookUrl') { Bad '设置页缺 webhook 控件（开关 / 地址 / 测试）' }
 $mainJsW = Get-Content (Join-Path $root 'ui\js\main.js') -Raw -Encoding UTF8
 if ($mainJsW -notmatch 'testWebhook' -or $mainJsW -notmatch 'chkWebhook') { Bad 'main.js 没有提交 webhook 设置 / 测试命令' }
+if ($mainJsW -notmatch "testWebhook[^\r\n]*url") { Bad '测试命令没有携带界面当前 URL（改完未落盘会误发旧地址）' }
 $bridgeJsW = Get-Content (Join-Path $root 'ui\js\bridge.js') -Raw -Encoding UTF8
 if ($bridgeJsW -notmatch "case 'webhook'" -or $bridgeJsW -notmatch 'chkWebhook') { Bad 'bridge.js 没有回填/回执 webhook 状态' }
 if ($setPsDef -notmatch 'CurrentVersion\\Run') { Bad '开机自启兜底缺 HKCU Run 写入' }

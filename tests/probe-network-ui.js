@@ -52,6 +52,7 @@ const ids = {};
 ['netState', 'netStateText', 'netTotalRecv', 'netTotalSent', 'netTotalAcc', 'netTotalScope', 'netIfs', 'netEmpty',
  'netToday', 'netMonth', 'netBarsDays', 'netBarsMonths', 'netHistEmpty',
  'netExportCsv', 'netExportJson', 'netExportNote',
+ 'netAlertIfRows', 'netAlertReset', 'netAlertResetNote',
  'netConnBody', 'netConnEmpty', 'netConnHint', 'netConnSearch', 'netConnProto', 'netConnSvc', 'netConnNoMatch'].forEach((id) => { ids[id] = new FakeEl('div'); });
 const pageEl = new FakeEl('section');
 pageEl.hidden = true;
@@ -205,6 +206,17 @@ ok(!!cap2 && /\.json$/.test(cap2.name) && !!JSON.parse(cap2.text).__meta, 'JSON 
 const failWrote = P.doExport('csv', () => false);
 ok(failWrote === false && ids.netExportNote.textContent.indexOf('导出失败') >= 0, '写入失败时给出失败提示');
 
+/* ---- 2.2.9 批次 C：按接口每日阈值行 ---- */
+P.setAlertIf({ 'WLAN': 500 });
+const rowsBox = ids.netAlertIfRows;
+ok(rowsBox.children.length === 2, '按接口阈值按物理网卡生成两行', '实际 ' + rowsBox.children.length);
+const ifRow0 = rowsBox.children[0];
+ok(ifRow0.children[0].textContent === 'WLAN', '行首为接口名', ifRow0.children[0].textContent);
+ok(ifRow0.children[1].value === '500', '已配置值回填到输入框', ifRow0.children[1].value);
+ok(JSON.stringify(P.alertIfValue()) === '{"WLAN":500}', '读取配置值只含非零项', JSON.stringify(P.alertIfValue()));
+P.setAlertIf({ 'WLAN': 0 });
+ok(Object.keys(P.alertIfValue()).length === 0, '0 = 不单独提醒（不提交该接口）');
+
 /* 全零历史 → 空状态出现 */
 const zeroTotals = { today: { recv: 0, sent: 0 }, month: { recv: 0, sent: 0 },
   days: Array.from({ length: 30 }, () => mkDay('x', 0, 0)),
@@ -215,6 +227,9 @@ let capEmpty = null;
 const emptyWrote = P.doExport('csv', () => { capEmpty = true; return true; });
 ok(emptyWrote === false && capEmpty === null && ids.netExportNote.textContent.indexOf('暂无') >= 0,
   '无历史数据时不产出文件并提示', ids.netExportNote.textContent);
+P.setAlertIf({});
+ok(ids.netAlertIfRows.children.length === 1 && ids.netAlertIfRows.children[0].className === 'nt-if-empty',
+  '无物理网卡时按接口阈值区显示空状态');
 P.handle({ type: 'netTotals', totals: totals1 });
 
 /* ---- 消息链回归（2.2.1 根因）：bridge 必须把 netTotals 转发给 PerfNetwork ----

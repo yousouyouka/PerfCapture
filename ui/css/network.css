@@ -256,6 +256,22 @@
 .nt-field > span { flex: none; width: 7.5rem; font-size: 0.72rem; color: var(--muted); }
 .nt-dns-check { margin-top: 0.15rem; }
 
+/* 按接口每日阈值（2.2.9）：接口名一行一个，末尾 MB 单位 */
+.nt-if-block { display: flex; flex-direction: column; gap: 0.35rem; border-top: 1px solid var(--line); padding-top: 0.55rem; }
+.nt-if-head { display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; }
+.nt-if-head > span { font-size: 0.72rem; color: var(--muted); }
+.nt-if-head small { font-size: 0.62rem; color: var(--faint); }
+.nt-if-rows { display: flex; flex-direction: column; gap: 0.35rem; }
+.nt-if-row { display: flex; align-items: center; gap: 0.5rem; }
+.nt-if-name {
+  flex: 1 1 auto; min-width: 0; font-size: 0.7rem; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.nt-if-row .input-num { width: 6.5rem; }
+.nt-if-unit { font-size: 0.62rem; color: var(--faint); }
+.nt-if-empty { font-size: 0.62rem; color: var(--faint); }
+.nt-alert-reset { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+
 /* 历史用量 */
 .net-hist {
   background: var(--card);

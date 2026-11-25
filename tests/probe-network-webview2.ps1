@@ -325,6 +325,69 @@ $r11 = Exec "(function(){ setLanguage('ja-JP'); var a=document.getElementById('n
 Assert ($r11.ja -eq 'CSV 出力') "导出按钮跟随语言切换（实际 '$($r11.ja)'）"
 Assert ($r11.zh -eq '导出 CSV') '切回中文后导出按钮恢复中文'
 
+# ---- 9. 批次 C（2.2.9）：保留天数 / 按接口阈值 / 清除提醒记录 ----
+$r12 = Exec @"
+(function(){
+  function rect(e){ if(!e) return null; var r=e.getBoundingClientRect(); return { l:r.left, r:r.right, t:r.top, b:r.bottom, w:r.width, h:r.height }; }
+  var keep = document.getElementById('netKeepDays');
+  var box = document.getElementById('netAlertIfRows');
+  PerfNetwork.setAlertIf({ WLAN: 300 });
+  var rows = box ? Array.prototype.slice.call(box.children) : [];
+  var byName = {};
+  rows.forEach(function(r){ var nm = r.querySelector('.nt-if-name'); if (nm) byName[nm.textContent] = r; });
+  var wRow = byName['WLAN'];
+  var wName = wRow ? wRow.querySelector('.nt-if-name') : null;
+  var wInp = wRow ? wRow.querySelector('input') : null;
+  var unit = wRow ? wRow.querySelector('.nt-if-unit') : null;
+  var btn = document.getElementById('netAlertReset');
+  var card = document.querySelector('.net-alertcard');
+  return JSON.stringify({
+    keepExists: !!keep, keepValue: keep ? keep.value : '',
+    keepInCard: !!(card && keep && card.contains(keep)),
+    rows: rows.length, names: Object.keys(byName).join(','),
+    wVal: wInp ? wInp.value : '',
+    valMap: PerfNetwork.alertIfValue(),
+    nameR: rect(wName), inputR: rect(wInp), cardR: rect(card),
+    unit: unit ? unit.textContent : '',
+    btnText: btn ? btn.textContent.trim() : '',
+    btnInCard: !!(card && btn && card.contains(btn))
+  });
+})()
+"@
+Assert ($r12.keepExists -eq $true -and $r12.keepValue -eq '400') "历史保留输入框存在且默认 400（实际 '$($r12.keepValue)'）"
+Assert ($r12.keepInCard -eq $true) '保留天数输入框在网络设置卡内'
+Assert ($r12.rows -eq 2) "按接口阈值按物理网卡生成两行（实际 $($r12.rows)）"
+Assert ($r12.names -eq 'Ethernet,WLAN') "接口行按名称排序（实际 '$($r12.names)'）"
+Assert ($r12.wVal -eq '300') "已配置阈值回填到 WLAN 输入框（实际 '$($r12.wVal)'）"
+Assert ([double]$r12.valMap.WLAN -eq 300) 'alertIfValue 读回按接口阈值'
+Assert ($r12.unit -eq 'MB') "阈值单位渲染为 MB（实际 '$($r12.unit)'）"
+Assert ($r12.nameR.w -gt 0 -and $r12.inputR.w -gt 0 -and [double]$r12.inputR.l -ge ([double]$r12.nameR.r - 1)) "接口名不遮挡输入框（name 右 $($r12.nameR.r) ≤ input 左 $($r12.inputR.l)）"
+Assert ([double]$r12.inputR.r -le ([double]$r12.cardR.r + 1)) '阈值输入框不溢出卡片右边界'
+Assert ($r12.btnText -eq '清除提醒记录' -and $r12.btnInCard -eq $true) "清除提醒记录按钮在卡内（实际 '$($r12.btnText)'）"
+
+$r13 = Exec "(function(){ var b=document.getElementById('netAlertReset'); b.click(); return JSON.stringify({ note: document.getElementById('netAlertResetNote').textContent }); })()"
+Pump 200
+$resetSent = ($script:UiMsgs | Where-Object { $_ -match 'resetNetAlerts' }).Count -gt 0
+Assert $resetSent '点击清除按钮已发送 resetNetAlerts 命令'
+Assert ($r13.note -match '已清除') "点击后状态提示已更新（实际 '$($r13.note)'）"
+
+$r14 = Exec "(function(){ setLanguage('ja-JP'); var a=document.getElementById('netAlertReset').textContent.trim(); setLanguage('zh-CN'); var b=document.getElementById('netAlertReset').textContent.trim(); return JSON.stringify({ ja: a, zh: b }); })()"
+Assert ($r14.ja -eq '通知記録をクリア') "清除按钮跟随语言切换（实际 '$($r14.ja)'）"
+Assert ($r14.zh -eq '清除提醒记录') '切回中文后清除按钮恢复中文'
+
+$r15 = Exec @"
+(function(){
+  PerfNetwork.handle({ type: 'netTotals', totals: { today: { recv: 0, sent: 0 }, month: { recv: 0, sent: 0 },
+    days: [], months: [], ifDays: {}, meta: {} } });
+  PerfNetwork.setAlertIf({});
+  var box = document.getElementById('netAlertIfRows');
+  return JSON.stringify({ rows: box.children.length, empty: box.children.length === 1 && box.children[0].className === 'nt-if-empty',
+    emptyText: box.children.length ? box.children[0].textContent : '' });
+})()
+"@
+Assert ($r15.empty -eq $true) "无物理网卡时按接口阈值区显示空状态（实际 '$($r15.emptyText)'）"
+Assert ($r15.emptyText -match '物理网卡') '空状态文案已渲染（不是 key 原文）'
+
 if ($fail -eq 0) { Ok '网络页真 WebView2 自证全部通过' } else { Write-Host "失败 $fail 项" -ForegroundColor Red }
 try { $form.Dispose() } catch { }
 if ($fail -gt 0) { exit 1 } else { exit 0 }

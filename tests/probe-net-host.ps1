@@ -18,7 +18,7 @@ $script:Root = $root
 function Write-AppLog([string]$m, [string]$lvl = 'INFO') { $out.Add('  [log:' + $lvl + '] ' + $m) }
 $script:UiPushed = New-Object System.Collections.ArrayList
 function Send-ToUi($payload) { [void]$script:UiPushed.Add($payload) }
-$script:Cfg = @{ netAlertDayMB = 0; netAlertMonthMB = 0 }
+$script:Cfg = @{ netAlertDayMB = 0; netAlertMonthMB = 0; netAlertIfMB = @{}; netKeepDays = 400 }
 
 # ---- dot-source 被测模块 ----
 . (Join-Path $root 'src\app\36-NetMetrics.ps1')
@@ -131,6 +131,56 @@ if ($anyIfs) { Ok '真实样本带网卡列表（首帧 CIM 预热可能为空�
     if ($dump.Count) { $out.Add('  [dump] ' + ($dump[0].sample | ConvertTo-Json -Depth 4 -Compress)) }
     $out.Add('  [dump] pushed=' + $allReal.Count)
 }
+
+# ---- 10. 2.2.9 批次 C：保留天数 / 按接口告警 / 告警状态落盘 ----
+$script:Cfg.netKeepDays = 90
+if ((Get-NetKeepDays) -eq 90) { Ok '保留天数读取配置（90）' } else { Bad ('保留天数未读配置: ' + (Get-NetKeepDays)) }
+$script:Cfg.netKeepDays = 5
+if ((Get-NetKeepDays) -eq 400) { Ok '越界保留天数回落 400' } else { Bad ('越界未回落: ' + (Get-NetKeepDays)) }
+$script:Cfg.Remove('netKeepDays')
+if ((Get-NetKeepDays) -eq 400) { Ok '缺 netKeepDays 时回落 400（老配置）' } else { Bad '缺键没有回落 400' }
+$script:Cfg.netKeepDays = 400
+
+# 造一条 200 天前的旧数据：改小保留天数应立即裁掉并回写 days.json
+$oldKey = (Get-Date).AddDays(-200).ToString('yyyy-MM-dd')
+$script:NetDays[$oldKey] = @{ 5 = @{ r = 123; s = 45 } }
+Save-NetDays
+Set-NetRetention 90
+$doc2 = Get-Content -LiteralPath $script:NetDaysPath -Raw -Encoding UTF8 | ConvertFrom-Json
+if (-not $script:NetDays.ContainsKey($oldKey) -and -not $doc2.PSObject.Properties[$oldKey]) { Ok '改小保留天数立即裁剪并回写 days.json' } else { Bad '旧数据没有被裁剪 / 回写' }
+if ($script:NetDays.ContainsKey($dayKey)) { Ok '保留期内的今天数据不受裁剪影响' } else { Bad '裁剪误删了今天的数据' }
+
+# 按接口阈值：WLAN 今日已 ≥ 1 MB → 应提醒一次并写入状态文件
+$script:Cfg.netAlertIfMB = @{ 'WLAN' = 1; '不存在的网卡' = 1 }
+$script:NetAlertedIf = @{}
+Invoke-NetAlertCheck
+$ack = $dayKey + '|WLAN'
+if ($script:NetAlertedIf.ContainsKey($ack)) { Ok '按接口每日阈值触发提醒（WLAN 1 MB）' } else { Bad '按接口阈值没有触发提醒' }
+if (Test-Path -LiteralPath $script:NetAlertStatePath) { Ok '告警状态已落盘（alert-state.json）' } else { Bad '告警状态没有落盘' }
+$st = $null
+try { $st = Get-Content -LiteralPath $script:NetAlertStatePath -Raw -Encoding UTF8 | ConvertFrom-Json } catch { }
+if ($st -and $st.ifs.PSObject.Properties[$ack]) { Ok '落盘内容含今日接口记录' } else { Bad ('告警状态落盘内容不完整: ' + (Get-Content -LiteralPath $script:NetAlertStatePath -Raw -Encoding UTF8)) }
+# 全局每日阈值同样落盘 day 字段
+$script:Cfg.netAlertDayMB = 1
+Invoke-NetAlertCheck
+$stDay = $null
+try { $stDay = Get-Content -LiteralPath $script:NetAlertStatePath -Raw -Encoding UTF8 | ConvertFrom-Json } catch { }
+if ($stDay -and $stDay.day -eq $dayKey) { Ok '每日提醒记录一并落盘（day）' } else { Bad ('每日提醒记录没有落盘: ' + (Get-Content -LiteralPath $script:NetAlertStatePath -Raw -Encoding UTF8)) }
+$script:Cfg.netAlertDayMB = 0
+$before = $script:NetAlertedIf.Count
+Invoke-NetAlertCheck
+if ($script:NetAlertedIf.Count -eq $before) { Ok '同一天不重复提醒' } else { Bad '同一天重复提醒了' }
+# 模拟重启：清空内存后重新初始化，应从文件读回
+$script:NetAlertedIf = @{}
+$script:NetAlertedDay = ''
+$script:NetLoaded = $false
+Initialize-NetPersistence
+if ($script:NetAlertedIf.ContainsKey($ack) -and $script:NetAlertedDay -eq $dayKey) { Ok '重新初始化读回告警状态（重启不重复提醒）' } else { Bad '告警状态没有读回（重启会重复提醒）' }
+# 手动清除
+Reset-NetAlertState
+$st2 = $null
+try { $st2 = Get-Content -LiteralPath $script:NetAlertStatePath -Raw -Encoding UTF8 | ConvertFrom-Json } catch { }
+if ($script:NetAlertedIf.Count -eq 0 -and $st2 -and -not $st2.ifs.PSObject.Properties[$ack]) { Ok '清除提醒记录后内存与文件都复位' } else { Bad '清除提醒记录没有生效' }
 
 # ---- 清理 ----
 Stop-NetSampler

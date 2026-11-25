@@ -34,6 +34,13 @@ function handleMessage(msg) {
       if (monEl) monEl.value = (Number.isFinite(nm) && nm >= 0) ? nm : 0;
       const dnsEl = document.getElementById('chkNetDns');
       if (dnsEl) dnsEl.checked = s.netReverseDns === true;
+      /* 2.2.9：历史保留天数与按接口每日阈值（接口名 → MB） */
+      const keepEl = document.getElementById('netKeepDays');
+      const kd = Number(s.netKeepDays);
+      if (keepEl) keepEl.value = (Number.isFinite(kd) && kd >= 30 && kd <= 3650) ? kd : 400;
+      if (window.PerfNetwork && window.PerfNetwork.setAlertIf) {
+        window.PerfNetwork.setAlertIf(s.netAlertIfMB || {});
+      }
       /* 窗口与启动（2.2.2）：默认关闭，只有明确 true 才勾上 */
       const trayEl = document.getElementById('chkCloseToTray');
       if (trayEl) trayEl.checked = s.closeToTray === true;

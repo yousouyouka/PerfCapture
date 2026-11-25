@@ -14,7 +14,9 @@
     conns: [],
     connTruncated: false,
     filters: { q: '', proto: '', svc: '' },
-    svcSig: ''
+    svcSig: '',
+    /* 2.2.9 按接口每日阈值：接口名 -> MB（0 / 缺项 = 不单独提醒） */
+    alertIf: {}
   };
 
   function $(id) { return document.getElementById(id); }
@@ -223,6 +225,7 @@
     }
     renderBars($('netBarsDays'), t.days, true);
     renderBars($('netBarsMonths'), t.months, false);
+    renderAlertIfRows(false);
     const any = (t.days || []).some((x) => (x.recv || 0) + (x.sent || 0) > 0) ||
                 (t.months || []).some((x) => (x.recv || 0) + (x.sent || 0) > 0);
     const he = $('netHistEmpty');
@@ -346,6 +349,90 @@
     if (j && j.addEventListener) j.addEventListener('click', () => doExport('json'));
   }
   initExportTools();
+
+  /* ---- 按接口每日阈值（2.2.9 · 批次 C）----
+     配置来自 init.settings.netAlertIfMB（接口名 → MB）；候选接口 = 已配置的名字 ∪ 最近一次汇总里的物理网卡
+     （保留已下线接口，便于清掉旧值）。0 / 留空 = 不单独提醒，只受全局每日/每月阈值约束。 */
+  let alertIfSig = '';
+  function setAlertIf(obj) {
+    const h = {};
+    if (obj && typeof obj === 'object') {
+      for (const k of Object.keys(obj)) {
+        const n = parseInt(obj[k], 10);
+        if (k && Number.isFinite(n) && n > 0) h[k] = n;
+      }
+    }
+    state.alertIf = h;
+    renderAlertIfRows(true);
+  }
+  function alertIfValue() {
+    const out = {};
+    const src = state.alertIf || {};
+    for (const n of Object.keys(src)) {
+      const v = parseInt(src[n], 10);
+      if (Number.isFinite(v) && v > 0) out[n] = v;
+    }
+    return out;
+  }
+  function alertIfCandidates() {
+    const names = Object.keys(state.alertIf || {});
+    const meta = (lastTotals && lastTotals.meta) || {};
+    for (const idx of Object.keys(meta)) {
+      const mi = meta[idx] || {};
+      const nm = String(mi.name || '');
+      const kind = String(mi.kind || '');
+      if (!nm) continue;
+      if (kind !== 'wifi' && kind !== 'ethernet') continue;
+      if (names.indexOf(nm) < 0) names.push(nm);
+    }
+    names.sort();
+    return names;
+  }
+  function renderAlertIfRows(force) {
+    const box = $('netAlertIfRows');
+    if (!box) return;
+    const names = alertIfCandidates();
+    const sig = names.join('\u0001');
+    if (!force && sig === alertIfSig) return;
+    alertIfSig = sig;
+    while (box.firstChild) box.removeChild(box.firstChild);
+    if (!names.length) {
+      box.appendChild(el('div', 'nt-if-empty', t('net.alertIfEmpty', '暂无物理网卡，接入网络后出现')));
+      return;
+    }
+    for (const nm of names) {
+      const row = el('label', 'nt-if-row');
+      row.appendChild(el('span', 'nt-if-name', nm));
+      const inp = document.createElement('input');
+      inp.className = 'input input-num';
+      inp.type = 'number';
+      inp.min = '0'; inp.max = '1000000'; inp.step = '100';
+      inp.value = String((state.alertIf && state.alertIf[nm]) || 0);
+      inp.setAttribute('data-if', nm);
+      const sync = () => {
+        const v = parseInt(inp.value, 10);
+        if (!state.alertIf) state.alertIf = {};
+        if (Number.isFinite(v) && v > 0) state.alertIf[nm] = v;
+        else delete state.alertIf[nm];
+      };
+      inp.addEventListener('input', sync);
+      inp.addEventListener('change', sync);
+      row.appendChild(inp);
+      row.appendChild(el('span', 'nt-if-unit', t('net.alertIfUnit', 'MB')));
+      box.appendChild(row);
+    }
+  }
+  function initAlertTools() {
+    const b = $('netAlertReset');
+    if (b && b.addEventListener) {
+      b.addEventListener('click', () => {
+        if (typeof send === 'function') send({ cmd: 'resetNetAlerts' });
+        const n = $('netAlertResetNote');
+        if (n) n.textContent = t('net.alertResetNote', '已清除；达到阈值会重新提醒');
+      });
+    }
+  }
+  initAlertTools();
 
   /* 进出页面自动启停（与 realtime.js 同款 MutationObserver） */
   const page = document.querySelector('.page[data-page="network"]');
@@ -506,10 +593,12 @@
     try { if (state.lastSample) renderSample(state.lastSample); } catch (e) { }
     if (lastTotals) { try { renderTotals(lastTotals); } catch (e2) { } }
     setExportNote('');
+    renderAlertIfRows(true);
   }
 
   window.PerfNetwork = {
     handle: handle, refresh: refresh, state: state, applyConnFilters: applyConnFilters,
-    exportRows: exportRows, buildCsv: buildCsv, buildJson: buildJson, doExport: doExport
+    exportRows: exportRows, buildCsv: buildCsv, buildJson: buildJson, doExport: doExport,
+    setAlertIf: setAlertIf, alertIfValue: alertIfValue
   };
 })();

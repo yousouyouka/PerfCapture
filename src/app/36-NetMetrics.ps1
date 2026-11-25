@@ -20,7 +20,7 @@
 $script:NetIntervalMs = 1000
 $script:NetRingSize = 120        # 1 Hz × 120 点 ≈ 2 分钟窗口
 $script:NetFlushSec = 60
-$script:NetKeepDays = 400
+$script:NetKeepDays = 400       # 默认保留天数；实际以配置 netKeepDays 为准（见 Get-NetKeepDays）
 $script:NetSamples = New-Object System.Collections.ArrayList
 $script:NetWorker = $null
 $script:NetQueue = $null
@@ -255,6 +255,8 @@ $script:NetUiRates = $null       # @{ recv; sent; at } 物理接口合计速率�
 $script:NetTray = $null          # 托盘图标（tooltip 显示网速，balloon 弹告警）
 $script:NetAlertedDay = ''       # 本日已告警标记（每日最多提醒一次）
 $script:NetAlertedMonth = ''     # 本月已告警标记
+$script:NetAlertedIf = @{}       # 'yyyy-MM-dd|接口名' -> $true（按接口每日阈值，每天一次）
+$script:NetAlertStatePath = $null  # 告警状态文件：重启后不重复轰炸（2.2.9）
 
 function Convert-NetDayNode($node) {
     $h = @{}
@@ -269,11 +271,83 @@ function Convert-NetDayNode($node) {
     return $h
 }
 
+# 保留天数（2.2.9 · 批次 C）：配置 netKeepDays 是唯一来源；缺键 / 越界一律回落 400。
+function Get-NetKeepDays {
+    $n = 0
+    try { $n = [int]$script:Cfg.netKeepDays } catch { }
+    if ($n -lt 30 -or $n -gt 3650) { $n = 400 }
+    return $n
+}
+
+# 改小保留天数时立即裁剪并回写，不等下次启动（否则旧数据会继续留在盘上）。
+function Set-NetRetention([int]$Days) {
+    if ($Days -lt 30 -or $Days -gt 3650) { return }
+    $script:NetKeepDays = $Days
+    if (-not $script:NetLoaded -or -not $script:NetDaysPath) { return }
+    try {
+        $cutoff = (Get-Date).AddDays(-$Days).ToString('yyyy-MM-dd')
+        $removed = 0
+        foreach ($k in @($script:NetDays.Keys)) {
+            if ($k -lt $cutoff) { [void]$script:NetDays.Remove($k); $removed++ }
+        }
+        if ($removed -gt 0) { Save-NetDays }
+    } catch {
+        Write-AppLog ('网络历史裁剪失败: ' + $_.Exception.Message) 'WARN'
+    }
+}
+
+# 告警状态落盘（2.2.9）：重启后同一天 / 同一月不重复提醒；只保留今天的按接口记录。
+function Save-NetAlertState {
+    if (-not $script:NetAlertStatePath) { return }
+    try {
+        $todayKey = (Get-Date).ToString('yyyy-MM-dd')
+        $ifs = [ordered]@{}
+        foreach ($k in @($script:NetAlertedIf.Keys)) {
+            if ($k.StartsWith($todayKey + '|')) { $ifs[[string]$k] = $true }
+        }
+        $doc = [ordered]@{ day = $script:NetAlertedDay; month = $script:NetAlertedMonth; ifs = $ifs }
+        $json = $doc | ConvertTo-Json -Depth 3 -Compress
+        $tmp = $script:NetAlertStatePath + '.tmp'
+        [IO.File]::WriteAllText($tmp, $json, (New-Object Text.UTF8Encoding($false)))
+        Move-Item -LiteralPath $tmp -Destination $script:NetAlertStatePath -Force
+    } catch {
+        Write-AppLog ('告警状态落盘失败: ' + $_.Exception.Message) 'WARN'
+    }
+}
+
+# 手动清除提醒记录：达到阈值会重新提醒（不会改阈值本身）。
+function Reset-NetAlertState {
+    $script:NetAlertedDay = ''
+    $script:NetAlertedMonth = ''
+    $script:NetAlertedIf = @{}
+    Save-NetAlertState
+}
+
+# 某接口某天的累计（已落盘 + 今天未落盘的增量）；接口名对不上返回 $null。
+function Get-NetIfDaySum([string]$IfName, [string]$DayKey) {
+    $idx = -1
+    foreach ($k in $script:NetMeta.Keys) {
+        if ([string]$script:NetMeta[$k].name -eq $IfName) { $idx = [int]$k; break }
+    }
+    if ($idx -lt 0) { return $null }
+    $r = 0.0; $s = 0.0
+    if ($script:NetDays.ContainsKey($DayKey) -and $script:NetDays[$DayKey].ContainsKey($idx)) {
+        $r += [double]$script:NetDays[$DayKey][$idx].r
+        $s += [double]$script:NetDays[$DayKey][$idx].s
+    }
+    if ($DayKey -eq $script:NetDayKey -and $script:NetDayAcc.ContainsKey($idx)) {
+        $r += [double]$script:NetDayAcc[$idx].r
+        $s += [double]$script:NetDayAcc[$idx].s
+    }
+    return @{ recv = [math]::Round($r, 0); sent = [math]::Round($s, 0) }
+}
+
 function Initialize-NetPersistence {
     if ($script:NetLoaded) { return }
     $script:NetLoaded = $true
     $script:NetTrafficDir = Join-Path $script:DataDir 'traffic'
     $script:NetDaysPath = Join-Path $script:NetTrafficDir 'days.json'
+    $script:NetAlertStatePath = Join-Path $script:NetTrafficDir 'alert-state.json'
     try {
         if (-not (Test-Path -LiteralPath $script:NetTrafficDir)) {
             New-Item -ItemType Directory -Path $script:NetTrafficDir -Force | Out-Null
@@ -303,9 +377,26 @@ function Initialize-NetPersistence {
         $script:NetDays = @{}
     }
     $script:NetDayKey = (Get-Date).ToString('yyyy-MM-dd')
-    # 过期清理：只保留最近 KeepDays 天
+    # 告警状态（2.2.9）：坏文件当没提醒过——宁可多提醒一次，也不要永远不提醒
     try {
-        $cutoff = (Get-Date).AddDays(-$script:NetKeepDays).ToString('yyyy-MM-dd')
+        if ($script:NetAlertStatePath -and (Test-Path -LiteralPath $script:NetAlertStatePath)) {
+            $st = Get-Content -LiteralPath $script:NetAlertStatePath -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ($st.day) { $script:NetAlertedDay = [string]$st.day }
+            if ($st.month) { $script:NetAlertedMonth = [string]$st.month }
+            if ($st.ifs) {
+                foreach ($p in $st.ifs.PSObject.Properties) {
+                    if ([bool]$p.Value) { $script:NetAlertedIf[[string]$p.Name] = $true }
+                }
+            }
+        }
+    } catch {
+        Write-AppLog ('告警状态读取失败，按未提醒处理: ' + $_.Exception.Message) 'WARN'
+    }
+    # 过期清理：只保留配置的保留天数（默认 400）
+    try {
+        $keep = Get-NetKeepDays
+        $script:NetKeepDays = $keep
+        $cutoff = (Get-Date).AddDays(-$keep).ToString('yyyy-MM-dd')
         foreach ($k in @($script:NetDays.Keys)) {
             if ($k -lt $cutoff) { [void]$script:NetDays.Remove($k) }
         }
@@ -636,13 +727,18 @@ function Invoke-NetAlertCheck {
     $dayMB = 0; $monMB = 0
     try { $dayMB = [int]$script:Cfg.netAlertDayMB } catch { }
     try { $monMB = [int]$script:Cfg.netAlertMonthMB } catch { }
-    if ($dayMB -le 0 -and $monMB -le 0) { return }
+    $ifCfg = $null
+    try { $ifCfg = $script:Cfg.netAlertIfMB } catch { }
+    $hasIf = ($ifCfg -and $ifCfg.Keys -and @($ifCfg.Keys).Count -gt 0)
+    if ($dayMB -le 0 -and $monMB -le 0 -and -not $hasIf) { return }
     $dayKey = (Get-Date).ToString('yyyy-MM-dd')
     $monKey = (Get-Date).ToString('yyyy-MM')
+    $dirty = $false
     if ($dayMB -gt 0 -and $script:NetAlertedDay -ne $dayKey) {
         $today = Get-NetDaySum $script:NetDayKey
         if ([double]$today.recv + [double]$today.sent -ge ($dayMB * 1MB)) {
             $script:NetAlertedDay = $dayKey
+            $dirty = $true
             Show-NetAlert ('今日流量已达 ' + $dayMB + ' MB，注意用量')
         }
     }
@@ -655,9 +751,29 @@ function Invoke-NetAlertCheck {
         }
         if ([math]::Round($mr + $ms, 0) -ge ($monMB * 1MB)) {
             $script:NetAlertedMonth = $monKey
+            $dirty = $true
             Show-NetAlert ('本月流量已达 ' + $monMB + ' MB，注意用量')
         }
     }
+    # 按接口每日阈值（2.2.9）：接口名 → MB；0 / 未配置 = 不单独提醒；每接口每天最多一次
+    if ($hasIf) {
+        foreach ($ifName in @($ifCfg.Keys)) {
+            $mb = 0
+            try { $mb = [int]$ifCfg[$ifName] } catch { }
+            if ($mb -le 0) { continue }
+            $ack = $dayKey + '|' + [string]$ifName
+            if ($script:NetAlertedIf.ContainsKey($ack)) { continue }
+            $sum = Get-NetIfDaySum ([string]$ifName) $dayKey
+            if (-not $sum) { continue }
+            if (([double]$sum.recv + [double]$sum.sent) -ge ($mb * 1MB)) {
+                $script:NetAlertedIf[$ack] = $true
+                $dirty = $true
+                Show-NetAlert ('接口「' + $ifName + '」今日流量已达 ' + $mb + ' MB，注意用量')
+            }
+        }
+    }
+    # 提醒记录落盘：重启后不重复轰炸（手动清除 / 跨日跨月才复位）
+    if ($dirty) { Save-NetAlertState }
 }
 
 # ---------- 能力表与采样调度 ----------

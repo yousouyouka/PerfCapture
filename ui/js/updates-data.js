@@ -19,6 +19,14 @@ window.PerfUpdateAreas = ['capture', 'realtime', 'network', 'other'];
 
 window.PerfUpdates = [
   {
+    date: '2026-11-25', version: '2.2.9',
+    title: '网络设置：保留天数与按接口阈值',
+    items: [
+      ['feature', '网络设置新增「历史保留 (天)」：30–3650 天，默认 400；改小会立即清理超期数据。', 'network'],
+      ['feature', '新增「按接口每日阈值」与「清除提醒记录」；提醒记录会落盘，重启后同一天 / 同一月不重复提醒。', 'network']
+    ]
+  },
+  {
     date: '2026-11-25', version: '2.2.8',
     title: '网络历史导出 CSV / JSON',
     items: [

@@ -13,7 +13,9 @@ $script:KnownCommands = @('ready', 'refreshProcs', 'saveSettings', 'openReports'
     # 2.1.13：历史报告库（列表 / 详情 / 对比 / 打开伴随文件 / 删除）
     'reportsList', 'reportDetail', 'reportCompare', 'reportOpenFile', 'reportDelete',
     # 2.1.16：全局热键设置
-    'setHotkeys', 'getHotkeys')
+    'setHotkeys', 'getHotkeys',
+    # 2.2.9：清除流量提醒记录（达到阈值会重新提醒）
+    'resetNetAlerts')
 
 function Handle-UiMessage($msg) {
     if ($null -eq $msg -or -not $msg.cmd) { return }
@@ -117,7 +119,7 @@ function Handle-UiMessage($msg) {
                 if ($msg.settings) {
                     # 2.2.1 修正：netAlert / netReverseDns / hotkeys 之前漏在循环里，用户改了不落盘
                     foreach ($k in 'theme', 'language', 'seconds', 'minimize', 'sound', 'skip', 'preset', 'customBase', 'warmup',
-                                   'netAlertDayMB', 'netAlertMonthMB', 'netReverseDns', 'hotkeys',
+                                   'netAlertDayMB', 'netAlertMonthMB', 'netAlertIfMB', 'netKeepDays', 'netReverseDns', 'hotkeys',
                                    'closeToTray', 'autoStart') {
                         Set-ConfigValue $k $msg.settings.$k
                     }
@@ -126,6 +128,12 @@ function Handle-UiMessage($msg) {
                 }
             }
             'openReports' { Show-ReportsFolder }
+            'resetNetAlerts' {
+                if (Get-Command Reset-NetAlertState -ErrorAction SilentlyContinue) {
+                    Reset-NetAlertState
+                    Write-AppLog '流量提醒记录已清除'
+                }
+            }
             # 导出类动作不能在回调内部直接跑：SaveFileDialog 会卡住 WebView2 的消息泵，
             # 而 CDP（CallDevToolsProtocolMethodAsync）在回调里根本不会完成（实测必超时 → 界面卡在导出视图）。
             # 统一丢回消息循环执行，回调立刻返回。

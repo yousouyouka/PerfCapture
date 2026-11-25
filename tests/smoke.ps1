@@ -1024,7 +1024,7 @@ if ($bridgeJs -notmatch 'case ''netSample''') { Bad 'bridge.js 缺 netSample 分
 # 2.2.1 根因回归：bridge 曾只转发 netSample/netCaps，netTotals 到不了界面 → 今日/本月/历史恒为「—」
 if ($bridgeJs -notmatch "case 'netTotals'") { Bad 'bridge.js 缺 netTotals 分发（今日/本月/历史会一直是「—」）' }
 $netJs = Get-Content (Join-Path $root 'ui\js\network.js') -Raw -Encoding UTF8
-foreach ($need in 'PerfNetwork', 'netStart', 'netStop', 'fmtRate', 'netSample', 'netExportCsv', 'ifDays') {
+foreach ($need in 'PerfNetwork', 'netStart', 'netStop', 'fmtRate', 'netSample', 'netExportCsv', 'ifDays', 'netAlertIfRows', 'setAlertIf', 'alertIfValue') {
     if ($netJs -notmatch [regex]::Escape($need)) { Bad "network.js 缺 $need" }
 }
 if ($netJs -match 'setInterval\s*\(') { Bad 'network.js 不得用 setInterval（刷新由宿主 1 Hz 推送驱动）' }
@@ -1032,10 +1032,13 @@ if ($netJs -match 'XMLHttpRequest|fetch\(') { Bad 'network.js 不得发起任何
 if ($idx -notmatch 'css/network\.css') { Bad 'index.html 未加载 network.css' }
 if ($idx -notmatch 'js/network\.js') { Bad 'index.html 未加载 network.js' }
 if ($idx -notmatch 'netExportCsv' -or $idx -notmatch 'netExportJson') { Bad 'index.html 缺历史导出按钮（CSV/JSON）' }
+foreach ($nid in 'netKeepDays', 'netAlertIfRows', 'netAlertReset') {
+    if ($idx -notmatch ('id="' + $nid + '"')) { Bad "index.html 缺网络设置控件 $nid" }
+}
 $iNet = $idx.IndexOf('js/network.js')
 $iMain = $idx.IndexOf('js/main.js')
 if ($iNet -lt 0 -or $iMain -lt 0 -or $iNet -gt $iMain) { Bad 'network.js 必须在 main.js 之前加载' }
-foreach ($nk in 'nav.network', 'net.title', 'net.desc', 'net.stateOn', 'net.stateOff', 'net.totalRecv', 'net.totalSent', 'net.totals', 'net.kind.wifi', 'net.kind.virtual', 'net.status.Up', 'net.caliber', 'net.alertHint', 'net.today', 'net.month', 'net.histTitle', 'net.histDays', 'net.histMonths', 'net.histEmpty', 'settings.net', 'settings.netAlert', 'settings.netAlertHint', 'settings.netDay', 'settings.netMonth', 'settings.hotkeysHint2', 'net.connTitle', 'net.colProc', 'net.colRemote', 'net.colSvc', 'net.connEmpty', 'settings.netDns', 'settings.netDnsHint', 'net.exportCsv', 'net.exportJson', 'net.exportNoteEmpty', 'net.exportNoteDone', 'net.exportNoteFail', 'capture.item.nettraffic', 'report.net.title', 'report.net.unable') {
+foreach ($nk in 'nav.network', 'net.title', 'net.desc', 'net.stateOn', 'net.stateOff', 'net.totalRecv', 'net.totalSent', 'net.totals', 'net.kind.wifi', 'net.kind.virtual', 'net.status.Up', 'net.caliber', 'net.alertHint', 'net.today', 'net.month', 'net.histTitle', 'net.histDays', 'net.histMonths', 'net.histEmpty', 'settings.net', 'settings.netAlert', 'settings.netAlertHint', 'settings.netDay', 'settings.netMonth', 'settings.hotkeysHint2', 'net.connTitle', 'net.colProc', 'net.colRemote', 'net.colSvc', 'net.connEmpty', 'settings.netDns', 'settings.netDnsHint', 'net.exportCsv', 'net.exportJson', 'net.exportNoteEmpty', 'net.exportNoteDone', 'net.exportNoteFail', 'net.keepDays', 'net.alertIfTitle', 'net.alertIfHint', 'net.alertIfEmpty', 'net.alertReset', 'net.alertResetNote', 'capture.item.nettraffic', 'report.net.title', 'report.net.unable') {
     $n2 = ([regex]::Matches($i18nText, [regex]::Escape("'" + $nk + "':"))).Count
     if ($n2 -lt 3) { Bad "i18n 缺 $nk（三语都要有，现仅 $n2 处）" }
 }
@@ -1243,6 +1246,17 @@ if ($setPsDef -notmatch '(?s)hotkeys\s*=\s*@\{.*?enabled\s*=\s*\$false') { Bad '
 # 2.2.2：关闭到托盘 / 开机自启（默认关闭，宿主侧是唯一事实来源）
 if ($setPsDef -notmatch 'closeToTray\s*=\s*\$false') { Bad '配置默认值缺 closeToTray = $false' }
 if ($setPsDef -notmatch 'autoStart\s*=\s*\$false') { Bad '配置默认值缺 autoStart = $false' }
+# 2.2.9 批次 C：保留天数与按接口阈值必须走完整配置链（默认值 → 校验 → 白名单 → 载入）
+if ($setPsDef -notmatch 'netKeepDays\s*=\s*400') { Bad '配置默认值缺 netKeepDays = 400' }
+if ($setPsDef -notmatch 'netAlertIfMB\s*=\s*@\{\}') { Bad '配置默认值缺 netAlertIfMB = @{}' }
+foreach ($ck in '''netKeepDays''', '''netAlertIfMB''') {
+    $cnt = ([regex]::Matches($setPsDef, [regex]::Escape($ck))).Count
+    if ($cnt -lt 2) { Bad "20-Settings.ps1 里 $ck 需同时出现在校验与载入（现 $cnt 处）" }
+}
+foreach ($ck in 'netKeepDays', 'netAlertIfMB') {
+    if ($capPs -notmatch [regex]::Escape("'" + $ck + "'")) { Bad "saveSettings 白名单缺 $ck（改了不落盘）" }
+}
+if ($capPs -notmatch [regex]::Escape("'resetNetAlerts'")) { Bad '命令白名单缺 resetNetAlerts' }
 if ($setPsDef -notmatch 'CurrentVersion\\Run') { Bad '开机自启兜底缺 HKCU Run 写入' }
 if ($setPsDef -notmatch '--autostart') { Bad '开机自启命令行缺 --autostart' }
 if ($setPsDef -notmatch 'Register-ScheduledTask') { Bad '开机自启必须用计划任务（Run 只能普通权限，登录会被 UAC 拦住）' }

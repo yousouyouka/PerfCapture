@@ -143,6 +143,9 @@ function saveSettings() {
       language: state.language || LANG,
       netAlertDayMB: parseInt($('#netAlertDay').value, 10) || 0,
       netAlertMonthMB: parseInt($('#netAlertMonth').value, 10) || 0,
+      netKeepDays: parseInt($('#netKeepDays').value, 10) || 400,
+      netAlertIfMB: (window.PerfNetwork && window.PerfNetwork.alertIfValue)
+        ? window.PerfNetwork.alertIfValue() : {},
       netReverseDns: !!$('#chkNetDns').checked,
       closeToTray: !!$('#chkCloseToTray').checked,
       autoStart: !!$('#chkAutoStart').checked,
@@ -159,7 +162,7 @@ function saveSettings() {
 ['#seconds', '#chkMin', '#chkSound'].forEach(sel => {
   $(sel).addEventListener('change', () => { if (sel === '#seconds') markPresetCustom(); saveSettings(); });
 });
-['#netAlertDay', '#netAlertMonth'].forEach(sel => {
+['#netAlertDay', '#netAlertMonth', '#netKeepDays'].forEach(sel => {
   $(sel).addEventListener('change', () => saveSettings());
 });
 const netDnsEl = $('#chkNetDns');

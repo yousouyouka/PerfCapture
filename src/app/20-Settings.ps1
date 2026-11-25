@@ -16,6 +16,10 @@ function New-DefaultConfig {
         updateCheck = @{ auto = $true; lastCheckAt = ''; skippedVersion = '' }
         # 网络流量告警（2.2.0）：今日/本月累计（物理接口）超过阈值（MB）时提醒一次；0 = 关闭
         netAlertDayMB = 0; netAlertMonthMB = 0
+        # 按接口每日阈值（2.2.9）：接口名 → MB；0 / 未配置 = 不单独提醒
+        netAlertIfMB = @{}
+        # 历史保留天数（2.2.9）：30–3650，默认 400；改小立即裁剪
+        netKeepDays = 400
         # 反向 DNS（2.2.1）：连接视图里把远程 IP 解析成主机名；默认关（隐私优先）
         netReverseDns = $false
         # 浮窗：items 是 16 项逐项勾选（老配置的 metrics 四族会一次性迁移过来，见 55-Overlay.ps1）
@@ -99,6 +103,34 @@ function Set-ConfigValue {
                 if ($_ -eq 'netAlertDayMB') { $script:Cfg.netAlertDayMB = $n } else { $script:Cfg.netAlertMonthMB = $n }
             }
             else { Write-AppLog ("配置 $_=$Value 越界（0-1000000），已忽略") 'WARN' }
+        }
+        'netKeepDays' {
+            $n = ConvertTo-ConfigInt $Value
+            if ($null -ne $n -and $n -ge 30 -and $n -le 3650) {
+                $script:Cfg.netKeepDays = $n
+                if (Get-Command Set-NetRetention -ErrorAction SilentlyContinue) { Set-NetRetention $n }
+            }
+            else { Write-AppLog ("配置 netKeepDays=$Value 越界（30-3650），已忽略") 'WARN' }
+        }
+        'netAlertIfMB' {
+            # 整块替换（2.2.9）：接口名 → 每日阈值 MB；空对象 = 全部清除。
+            # 只收 1–1000000，最多 16 个接口；非法项跳过而不是整块丢弃。
+            $pairs = @()
+            if ($Value -is [hashtable]) {
+                foreach ($k in @($Value.Keys)) { $pairs += ,@([string]$k, $Value[$k]) }
+            } elseif ($Value -is [pscustomobject]) {
+                foreach ($p in $Value.PSObject.Properties) { $pairs += ,@([string]$p.Name, $p.Value) }
+            } else { return }
+            $h = @{}
+            foreach ($pair in $pairs) {
+                $nm = ([string]$pair[0]).Trim()
+                $n = ConvertTo-ConfigInt $pair[1]
+                if (-not $nm -or $nm.Length -gt 64) { continue }
+                if ($null -eq $n -or $n -le 0 -or $n -gt 1000000) { continue }
+                if ($h.Count -ge 16) { break }
+                $h[$nm] = $n
+            }
+            $script:Cfg.netAlertIfMB = $h
         }
         'netReverseDns' { if ($Value -is [bool]) { $script:Cfg.netReverseDns = $Value; if (Get-Command Set-NetReverseDns -ErrorAction SilentlyContinue) { Set-NetReverseDns $Value } } }
         'hotkeys' {
@@ -240,7 +272,7 @@ if (Test-Path $script:CfgPath) {
         # 以前只写不读，重启后又被默认值覆盖（用户选的档位与预热时长静默丢失）。
         foreach ($k in 'theme', 'language', 'seconds', 'minimize', 'sound', 'skip',
                        'preset', 'customBase', 'warmup', 'lastPid', 'windowW', 'windowH',
-                       'netAlertDayMB', 'netAlertMonthMB', 'netReverseDns',
+                       'netAlertDayMB', 'netAlertMonthMB', 'netAlertIfMB', 'netKeepDays', 'netReverseDns',
                        'closeToTray', 'autoStart') {
             if ($null -ne $j.$k) { Set-ConfigValue $k $j.$k }
         }

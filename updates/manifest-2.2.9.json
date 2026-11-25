@@ -1,0 +1,53 @@
+{
+    "schema":  1,
+    "app":  "PerfCapture",
+    "channel":  "stable",
+    "version":  "2.2.9",
+    "date":  "2026-11-25",
+    "serial":  115,
+    "notes":  {
+                  "zh":  "发布 2.2.9",
+                  "en":  "See the release notes in the app (What\u0027s new).",
+                  "ja":  "アプリ内の更新情報をご覧ください。"
+              },
+    "assets":  [
+                   {
+                       "kind":  "setup",
+                       "name":  "PerfCapture-Setup-2.2.9.exe",
+                       "size":  12388352,
+                       "sha256":  "adaeb31c86fb4fef84653731ca1c1d37d070c123e1f11845eb3749033ea1a4c2",
+                       "urls":  [
+                                    "https://raw.githubusercontent.com/yousouyouka/PerfCapture/updates/bin/PerfCapture-Setup-2.2.9.exe",
+                                    "https://ghproxy.net/https://github.com/yousouyouka/PerfCapture/releases/download/v2.2.9/PerfCapture-Setup-2.2.9.exe",
+                                    "https://github.com/yousouyouka/PerfCapture/releases/download/v2.2.9/PerfCapture-Setup-2.2.9.exe"
+                                ]
+                   },
+                   {
+                       "kind":  "wrapper",
+                       "name":  "PerfCapture-Update-2.2.9.zip",
+                       "size":  12365811,
+                       "sha256":  "a162eccd2cfb4721b668dcf0213c876c55788849c37fc51993370be60f02e1fb",
+                       "urls":  [
+                                    "https://cdn.jsdelivr.net/gh/yousouyouka/PerfCapture@updates/bin/PerfCapture-Update-2.2.9.zip",
+                                    "https://raw.githubusercontent.com/yousouyouka/PerfCapture/updates/bin/PerfCapture-Update-2.2.9.zip",
+                                    "https://ghproxy.net/https://github.com/yousouyouka/PerfCapture/releases/download/v2.2.9/PerfCapture-Update-2.2.9.zip",
+                                    "https://github.com/yousouyouka/PerfCapture/releases/download/v2.2.9/PerfCapture-Update-2.2.9.zip"
+                                ],
+                       "innerName":  "PerfCapture-Setup-2.2.9.exe",
+                       "innerSize":  12388352,
+                       "innerSha256":  "adaeb31c86fb4fef84653731ca1c1d37d070c123e1f11845eb3749033ea1a4c2"
+                   },
+                   {
+                       "kind":  "zip",
+                       "name":  "PerfCapture-2.2.9.zip",
+                       "size":  12233443,
+                       "sha256":  "4c0ef17ca81774d3719e999ae549fb0d9406090cc9d96508331f150d7fe2c5af",
+                       "urls":  [
+                                    "https://cdn.jsdelivr.net/gh/yousouyouka/PerfCapture@updates/bin/PerfCapture-2.2.9.zip",
+                                    "https://raw.githubusercontent.com/yousouyouka/PerfCapture/updates/bin/PerfCapture-2.2.9.zip",
+                                    "https://ghproxy.net/https://github.com/yousouyouka/PerfCapture/releases/download/v2.2.9/PerfCapture-2.2.9.zip",
+                                    "https://github.com/yousouyouka/PerfCapture/releases/download/v2.2.9/PerfCapture-2.2.9.zip"
+                                ]
+                   }
+               ]
+}
